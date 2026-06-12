@@ -1,3 +1,0 @@
-module GDN {
-    header "/Volumes/Projects/OpenNOW-Mac/GDN/.build/arm64-apple-macosx/debug/GDN.build/include/GDN-Swift.h"
-}

@@ -1,3 +1,0 @@
-module UDS {
-    header "/Volumes/Projects/OpenNOW-Mac/UDS/.build/arm64-apple-macosx/debug/UDS.build/include/UDS-Swift.h"
-}

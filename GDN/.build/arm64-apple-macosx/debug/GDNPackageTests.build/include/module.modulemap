@@ -1,3 +1,0 @@
-module GDNPackageTests {
-    header "/Volumes/Projects/OpenNOW-Mac/GDN/.build/arm64-apple-macosx/debug/GDNPackageTests.build/include/GDNPackageTests-Swift.h"
-}
