@@ -36,14 +36,28 @@ public enum OpenNOWNVIDIAFont {
         }
     }
 
+    // Cache stores Optional<CTFontDescriptor> so that nil (font not found) is also memoized.
+    private static let cacheLock = NSLock()
+    private static var descriptorCache: [String: CTFontDescriptor?] = [:]
+
     private static func loadDescriptor(named name: String) -> CTFontDescriptor? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        if descriptorCache.keys.contains(name) {
+            return descriptorCache[name] ?? nil
+        }
+
+        var result: CTFontDescriptor? = nil
         for subdirectory in ["NVIDIA", "Resources/NVIDIA", nil] as [String?] {
             guard let url = Bundle.main.url(forResource: name, withExtension: "woff2", subdirectory: subdirectory),
                   let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
                   let descriptor = descriptors.first else { continue }
-            return descriptor
+            result = descriptor
+            break
         }
-        return nil
+        descriptorCache[name] = result
+        return result
     }
 }
 
