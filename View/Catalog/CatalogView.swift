@@ -2113,7 +2113,9 @@ private struct CatalogHeroView: View {
                     .padding(.bottom, 34)
                 }
                 .onAppear { containerWidth = proxy.size.width }
-                .onChange(of: proxy.size.width) { _, width in containerWidth = width }
+                .onChange(of: proxy.size.width) { _, width in
+                    if abs(containerWidth - width) > 20 { containerWidth = width }
+                }
             }
             .frame(height: CatalogVendorLayout.heroHeight(for: containerWidth))
             .clipShape(Rectangle())
