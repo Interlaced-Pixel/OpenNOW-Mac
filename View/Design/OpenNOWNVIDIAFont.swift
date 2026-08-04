@@ -28,11 +28,15 @@ public enum OpenNOWNVIDIAFont {
         }
     }
 
+    private static let regularDescriptor: CTFontDescriptor? = loadDescriptor(named: "NVIDIASans_W_Rg")
+    private static let mediumDescriptor: CTFontDescriptor? = loadDescriptor(named: "NVIDIASans_W_Md")
+    private static let boldDescriptor: CTFontDescriptor? = loadDescriptor(named: "NVIDIASans_W_Bd")
+
     private static func descriptor(weight: Weight) -> CTFontDescriptor? {
         switch weight {
-        case .regular: return loadDescriptor(named: "NVIDIASans_W_Rg")
-        case .medium: return loadDescriptor(named: "NVIDIASans_W_Md")
-        case .bold: return loadDescriptor(named: "NVIDIASans_W_Bd")
+        case .regular: return regularDescriptor
+        case .medium: return mediumDescriptor
+        case .bold: return boldDescriptor
         }
     }
 
