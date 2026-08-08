@@ -36,13 +36,13 @@
         w = a(51635),
         z = a(3457),
         G = a(28139);
-      const H = (n, h, s) => ({
+      const j = (n, h, s) => ({
           "settings-view-on": n,
           "extend-bounds": h,
           "settings-view-off": s,
         }),
-        X = (n) => ({ shortcutKey: n });
-      function j(n, h) {
+        H = (n) => ({ shortcutKey: n });
+      function X(n, h) {
         (1 & n &&
           (e.j41(0, "span", 9), e.EFF(1), e.nI1(2, "translate"), e.k0s()),
           2 & n &&
@@ -72,7 +72,7 @@
             e.nI1(4, "translate"),
             e.k0s()(),
             e.j41(5, "div", 7),
-            e.DNE(6, j, 3, 3, "span", 8),
+            e.DNE(6, X, 3, 3, "span", 8),
             e.k0s(),
             e.DNE(7, Y, 3, 3, "ng-template", null, 0, e.C5r),
             e.k0s()),
@@ -143,7 +143,7 @@
               "ngClass",
               e.sMw(
                 6,
-                H,
+                j,
                 s.isSettingsView,
                 s.isSettingsView,
                 !s.isSettingsView,
@@ -190,7 +190,7 @@
                 3,
                 1,
                 s.otherLayoutDescription,
-                e.eq3(4, X, s.imeHotkeyCombo),
+                e.eq3(4, H, s.imeHotkeyCombo),
               ),
               e.npT,
             ));
