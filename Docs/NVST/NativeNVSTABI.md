@@ -68,6 +68,12 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `GFNQueryHandler::OnQueryNative` constructs `SessionParameters` at `sp + 0x4d0` and passes it to `GridApp::start` or `GridApp::resume`.
 - NVIDIA query fields seen in the start path include `serverAddress`, `tokenType`, `token`, `appId`, `streamingProfile`, `audioModeFormat`, and `session`.
 
+## Verified Native Session Payload Fields
+
+- OpenNOW preserves the raw CloudMatch session JSON for the native path so a future C++ shim can build `SessionControl::SessionParameters` without losing NVIDIA-specific fields.
+- The safe Swift payload parser records only start-field presence for telemetry and must not log token values.
+- Required native-start inputs currently tracked before any `GridApp::start` or `nvbStartSession` work are `serverAddress`, `tokenType`, `token`, `appId`, `session`, and `streamingProfile.streamingProfileGuid`.
+
 ## Integration Constraints
 
 - Do not call `nvbStartSession` directly from Swift.
