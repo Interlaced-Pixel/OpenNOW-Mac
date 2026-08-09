@@ -2,6 +2,10 @@ vendor/*
 !vendor/nvidia-gfn/
 !vendor/nvidia-gfn/Frameworks/
 !vendor/nvidia-gfn/Frameworks/libBifrost2.dylib
+!vendor/nvidia-gfn/Frameworks/libGeronimo.dylib
+!vendor/nvidia-gfn/Frameworks/libGsAudioWebRTC.dylib
+!vendor/nvidia-gfn/Frameworks/SDL2.framework/
+!vendor/nvidia-gfn/Frameworks/SDL2.framework/**
 third_party/sentry-native/
 .vscode/settings.json
 tools/vendor-js/node_modules/
@@ -53,6 +57,8 @@ DerivedData/
 *.so
 *.dylib
 !vendor/nvidia-gfn/Frameworks/libBifrost2.dylib
+!vendor/nvidia-gfn/Frameworks/libGeronimo.dylib
+!vendor/nvidia-gfn/Frameworks/libGsAudioWebRTC.dylib
 *.dll
 *.so.*
 
