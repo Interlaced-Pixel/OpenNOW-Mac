@@ -100,6 +100,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - NVIDIA query fields seen in the start path include `serverAddress`, `tokenType`, `token`, `appId`, `streamingProfile`, `audioModeFormat`, and `session`.
 - Geronimo expects `session.connectionInfo[].protocol` as a numeric transport enum. Disassembly verifies `2` maps to the UDP transfer path; emitting an empty string or `0` causes `getStreamStartParameters` to log `Unknown connection protocol detected in the SessionObject. Defaulting to UDP.` OpenNOW defaults missing protocol values to numeric `2` and keeps HTTP/HTTPS scheme selection in `appLevelProtocol`.
 - `GridApp::start(SessionParameters, NVbTracingContext_t)` calls `GridApp::setNVbSessionParams`, parses trace parent into `NVbSessionParams_t + 0x190`, initializes the agent plugin, then calls `SessionControllerImpl::startSession(NVbSessionParams_t)`.
+- `Nsk::convertToStreamingParams(StreamStartParameters, VideoDecoderInitParams, NVbStreamingParams_t)` and `Nsk::free(NVbStreamingParams_t&)` are private/non-external symbols in the current Geronimo build. OpenNOW resolves them from the `getStreamStartParameters` image base using verified arm64 text offsets `0x8a060` and `0x89a88`.
 - `0x00`: app id.
 - `0x08`: server address `std::string`.
 - `0x20`: server port copied into `NVbSessionParams_t + 0x10`.
