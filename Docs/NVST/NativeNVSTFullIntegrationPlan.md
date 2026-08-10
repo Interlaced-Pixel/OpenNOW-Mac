@@ -272,6 +272,7 @@ Tasks:
 - Completed: traced Geronimo render surface creation through `SDLWindowManager`, `SDLWindow::initWindow`, `VideoDecoderSet`, and the native SDL/Metal renderer path.
 - Completed: verified `SDLWindow::InitParams + 0x70` as the create-from-handle slot used by `SDL_CreateWindowFrom`.
 - Completed: exposed `OpenNOWNativeNVSTGeronimoSetVideoSurface` in the shim and embedded an AppKit host surface in `NativeNVSTMediaStreamSurface`.
+- Completed: fixed native session connection JSON to emit Geronimo's numeric UDP protocol value `2` instead of empty-string or zero values that only work by warning fallback.
 - In progress: live verification that SDL wraps the OpenNOW `NSWindow` and presents native NVST frames without stealing or replacing the SwiftUI stream surface.
 - If no render target injection exists, bridge decoded `CVPixelBuffer` or compressed frames to Swift and implement `NativeNVSTMetalVideoView`.
 - Carry color metadata, HDR, frame pacing, dynamic resolution, rotation/aspect, and black-frame/stall diagnostics.
