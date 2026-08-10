@@ -140,6 +140,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - OpenNOW preserves the raw CloudMatch session JSON for the native path so a future C++ shim can build `SessionControl::SessionParameters` without losing NVIDIA-specific fields.
 - The safe Swift payload parser records only start-field presence for telemetry and must not log token values.
 - Required native-start inputs tracked before Geronimo startup are `serverAddress`, `tokenType`, `token`, `appId`, `session`, and `streamingProfile.streamingProfileGuid`.
+- Geronimo's `getStreamStartParameters` parser expects the normalized session JSON to include a `streamingProfile` object. OpenNOW carries any NVIDIA-provided `streamingProfileGuid` from CloudMatch/session-info/settings; when none is present for OpenNOW's local custom profile, it persists a client-side UUID per app/profile signature and sends that as `streamingProfile.streamingProfileGuid`.
 
 ## Integration Constraints
 
