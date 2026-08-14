@@ -28,7 +28,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Geronimo's `GridApp::setAuthInfo(NVbAuthInfo_t&)` forwards a two-field auth struct directly to `SessionControllerImpl::setAuthInfo`; field 0 is the token C string pointer and field 1 is the pointer-sized auth type value.
 - Geronimo's initialized `GridApp` stores the Bifrost client pointer at `GridApp + 0x18` on arm64 before calling `nvbRegisterCallback`.
 - `GridApp::onNVbCallback(void *, NVbCallbackType_t, NVbCallbackData_t *)` is exported and is the original Geronimo callback target registered with Bifrost.
-- OpenNOW wraps that callback by re-registering on the same Bifrost client and forwarding every event to `GridApp::onNVbCallback` after recording sanitized callback identifiers.
+- OpenNOW leaves Geronimo's Bifrost callback registration intact. It clones the `GridApp` vtable per session and fills the null host `onPrepareResult` and `onStreamingBegin` slots, preserving Geronimo's own callback dispatch and client ownership.
 - `nvbStartSession` is not Swift-callable directly because it uses the arm64 C++ struct-return convention.
 - Verified arm64 register use at `_nvbStartSession`:
 - `x8`: result storage pointer for `NVbResult_t`.
@@ -101,7 +101,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Geronimo expects `session.connectionInfo[].protocol` as a numeric transport enum. Disassembly verifies `2` maps to the UDP transfer path; emitting an empty string or `0` causes `getStreamStartParameters` to log `Unknown connection protocol detected in the SessionObject. Defaulting to UDP.` OpenNOW defaults missing protocol values to numeric `2` and keeps HTTP/HTTPS scheme selection in `appLevelProtocol`.
 - Geronimo's mode-selection deserializer requires `selectedFeatures.prefilterParams.denoiseLevel` and `selectedFeatures.hudStreamingParams.scxQpDelta` to be floating-point JSON numbers. Swift `JSONSerialization` emits integral `Double` values as integers, and the Geronimo parser probe reproduces `0x80f10005` when these fields are `0` instead of `0.0`; OpenNOW post-processes generated mode JSON so integral values remain floating-point literals.
 - `GridApp::start(SessionParameters, NVbTracingContext_t)` calls `GridApp::setNVbSessionParams`, parses trace parent into `NVbSessionParams_t + 0x190`, initializes the agent plugin, then calls `SessionControllerImpl::startSession(NVbSessionParams_t)`.
-- `Nsk::convertToStreamingParams(StreamStartParameters, VideoDecoderInitParams, NVbStreamingParams_t)` and `Nsk::free(NVbStreamingParams_t&)` are private/non-external symbols in the current Geronimo build. OpenNOW resolves them from the `getStreamStartParameters` image base using verified arm64 text offsets `0x8a060` and `0x89a88`.
+- `Nsk::convertToStreamingParams(StreamStartParameters, VideoDecoderInitParams, NVbStreamingParams_t)` and `Nsk::free(NVbStreamingParams_t&)` are private/non-external symbols in the current Geronimo build. OpenNOW resolves them from the `getStreamStartParameters` image base using verified arm64 text offsets `0x8a060` and `0x89a88`, or x86_64 offsets `0x9d740` and `0x9d3a0`.
 - `VideoDecoderInitParams` must not be an all-zero block. `convertToStreamingParams` reads decoder-init fields at `+0x00` and `+0x04`, then dereferences the pointer at `+0x10` and reads `+0x60` from that capability object while choosing platform streaming settings. Passing a null pointer at `+0x10` crashes at address `0x60` before Geronimo can return a failure code.
 - `0x00`: app id.
 - `0x08`: server address `std::string`.
@@ -150,7 +150,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Do not call `nvbStartSession` directly from Swift.
 - Use a C++/Objective-C++ shim for any `nvb*` API returning or accepting non-trivial C++/large result structs.
 - The OpenNOW shim must not create a standalone Bifrost session client for streaming startup; Geronimo owns native client initialization, auth, stream conversion, session start, and stop handling.
-- The native startup sequence is `GridApp::prepare` -> `GridApp::setAuthInfo` -> `Nsk::convertToStreamingParams` -> `GridApp::start(SessionControl::SessionParameters, NVbTracingContext_t)` -> `Nsk::free(NVbStreamingParams_t)`.
+- OpenNOW requests `GridApp::prepare`, sets auth, converts and deep-copies streaming parameters, and frees the temporary `NVbStreamingParams_t`. Its main-thread pump then delivers prepare, initializes media, and calls `GridApp::start(SessionControl::SessionParameters, NVbTracingContext_t)`.
 
 ## Verified Media/Input Binding Facts
 
@@ -159,8 +159,9 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Geronimo references `_SDL_CreateWindowFrom`, and private `WindowNativeEventHandler::setCreateFromHandle(void *)` exists, but it is not externally exported and is not safely bindable with `dlsym`.
 - `SDLWindow::initWindow(SDLWindow::InitParams const&)` reads `SDLWindow::InitParams + 0x70` as the create-from handle. When non-null, Geronimo calls `WindowNativeEventHandler::setCreateFromHandle(handle)` and then `_SDL_CreateWindowFrom(handle)` instead of creating a standalone SDL window.
 - `SDLWindowManager::initialize(SDLWindow::InitParams const&)` copies the init params into manager storage starting at `SDLWindowManager + 0x20`, so the stored create-from handle lives at `SDLWindowManager + 0x90`.
-- `_ZTV16SDLWindowManager` is exported. OpenNOW patches the `initialize` and `createManagedWindow` virtual entries to inject the current native video surface handle before Geronimo creates managed SDL windows.
-- `OpenNOWNativeNVSTGeronimoSetVideoSurface(session, nativeHandle, ...)` stores the OpenNOW host `NSWindow` handle, installs the `SDLWindowManager` hook, and emits native phase `22` when the hook is ready.
+- OpenNOW does not mutate `_ZTV16SDLWindowManager` or any other process-global vendor vtable. After prepare succeeds, the per-session shim directly constructs `SDLGraphicsContext`, `SDLEventProcessor`, and one `SDLWindow`, passing the stored native handle at `SDLWindow::InitParams + 0x70`.
+- `SDLWindow::InitParams + 0x28` is the borrowed title C string, `+0x38` is the high-DPI flag, `+0x70` is the create-from handle, and `+0x78` enables async rendering. Zeroed `+0x48/+0x50` is a valid empty `std::shared_ptr`.
+- `OpenNOWNativeNVSTGeronimoSetVideoSurface(session, nativeHandle, ...)` stores the OpenNOW host `NSWindow` handle before window construction and emits native phase `22`.
 - Exported audio symbols include `platformCreateAudioCapturer`, `platformCreateAudioRenderer`, `IOInterface::registerAudioCallback`, `IOInterface::registerAudioCaptureCallback`, `GridApp::sendMicAudioFrame`, `SDLAudio::renderAudio`, and `WebRTCAudioCapturer::*`; OpenNOW has no exported `GridApp` API to retrieve the active `IOInterface *` required for callback registration.
 - `GridApp::sendNvstInputEvent(NvstInputEvent_t const&)` is exported and is the safest input-send entry point. `NvstInputEvent_t` is copied as exactly `0x48` bytes, with event type at offset `0x00`.
 - Existing Swift `NativeNVSTInputEncoder` emits OpenNOW/Geronimo-protocol bytes, not a verified native `NvstInputEvent_t`; it must not be sent as native input unless translated into the verified `0x48` native struct.
@@ -174,3 +175,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Session notification type `1` is `StreamerConnected`; `GridApp` initializes streaming properties, applies server HID capabilities, sets its streaming flag at `GridApp + 0x3c8`, and calls `GeronimoIOInterface::onStreamingBegin` on this notification.
 - OpenNOW treats `callbackType=2`, `clientEvent=14`, `notification=1` as the native readiness gate for `NativeNVSTBifrostTransport.connect`.
 - Session notification values in the `50...200` range enter Geronimo's streaming-end path and are treated by OpenNOW as terminal if observed before readiness.
+- `_ZTV7GridApp` spans `0x220` bytes through the next symbol. The object address point is `vtable + 0x10`; OpenNOW patches address-point slots `+0x90` and `+0x98` for prepare-result and streaming-begin delivery.
+- `GridApp::onPrepareResult` queues delivery under `GridApp + 0x430`; `GridApp::processEvents()` swaps and dispatches that queue on its caller. OpenNOW initializes the SDL/audio/video path after successful prepare delivery and before publishing native phase `30` or calling `GridApp::start`.
+- `OpenNOWNativeNVSTGeronimoPump` must run on the main thread for the lifetime of the session. Its integer argument is the `SDL_WaitEventTimeout` duration in milliseconds; `0` performs nonblocking `SDL_PumpEvents`/polling. A false `SDLEventProcessor::processEvents` result is terminal.
+- Swift keeps the pump alive through streaming and cancels and joins it before `GridApp::stop`, callback detachment, media destruction, `GridAppD2`, and platform shutdown.

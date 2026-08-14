@@ -138,6 +138,9 @@ Implemented:
 - Raw CloudMatch session JSON preservation.
 - Bifrost/Geronimo runtime loading probes.
 - Objective-C++ Geronimo shim with `GridApp::prepare`, `GridApp::setAuthInfo`, `Nsk::convertToStreamingParams`, `GridApp::start`, `Nsk::free`, `GridApp::stop`, and destroy.
+- Per-session SDL/Metal video, game-audio, and optional microphone object construction after prepare.
+- Main-thread SDL/GridApp pump with prepare-result and streamer-connected callback gating.
+- Native pause, result-bearing stop, callback quiescence, and ordered media/GridApp/platform teardown.
 - Swift `NativeNVSTStreamingPath` state machine for prepare, allocate, connect, stop.
 - Basic payload normalization and telemetry.
 - Native runtime embedding in current Xcode project.
@@ -149,9 +152,8 @@ Not complete:
 - No microphone capture/sending path.
 - No native input injection path.
 - No `GridApp::resume` path for paused or resumed sessions.
-- No pause API or native pause bridge.
 - No native stats callback or polling bridge.
-- No callback bridge for streamer connected, stream ended, failure, stats, decoder state, or remote termination.
+- Callback coverage is limited to prepare, streamer connected, local start/pause/stop, and terminal pump failures; stream-ended, stats, decoder state, and remote termination remain incomplete.
 - No complete native payload parity with the web client start payload.
 - No app-bundle/archive verification gate for all NVIDIA artifacts.
 - No native integration test that proves a real Geronimo start/stop lifecycle with callbacks.
@@ -272,8 +274,12 @@ Tasks:
 - Completed: traced Geronimo render surface creation through `SDLWindowManager`, `SDLWindow::initWindow`, `VideoDecoderSet`, and the native SDL/Metal renderer path.
 - Completed: verified `SDLWindow::InitParams + 0x70` as the create-from-handle slot used by `SDL_CreateWindowFrom`.
 - Completed: exposed `OpenNOWNativeNVSTGeronimoSetVideoSurface` in the shim and embedded an AppKit host surface in `NativeNVSTMediaStreamSurface`.
+- Completed: replaced the process-global `SDLWindowManager` vtable hook with per-session direct `SDLGraphicsContext`, `SDLEventProcessor`, and `SDLWindow` construction.
+- Completed: added a persistent main-actor `OpenNOWNativeNVSTGeronimoPump` that drives SDL and queued `GridApp` events until disconnect.
+- Completed: cloned the per-session `GridApp` vtable to receive prepare-result and streaming-begin callbacks without replacing Geronimo's Bifrost callback registration.
+- Completed: defer `GridApp::start` until successful prepare delivery and media initialization, and join the Swift pump before quiescent native teardown.
 - Completed: fixed native session connection JSON to emit Geronimo's numeric UDP protocol value `2` instead of empty-string or zero values that only work by warning fallback.
-- Completed: resolved private Geronimo `Nsk::convertToStreamingParams` and `Nsk::free(NVbStreamingParams_t&)` through verified text offsets so full native start is not blocked by non-exported helper symbols.
+- Completed: resolved private Geronimo `Nsk::convertToStreamingParams` and `Nsk::free(NVbStreamingParams_t&)` through verified arm64 and x86_64 text offsets so full native start is not blocked by non-exported helper symbols.
 - In progress: live verification that SDL wraps the OpenNOW `NSWindow` and presents native NVST frames without stealing or replacing the SwiftUI stream surface.
 - If no render target injection exists, bridge decoded `CVPixelBuffer` or compressed frames to Swift and implement `NativeNVSTMetalVideoView`.
 - Carry color metadata, HDR, frame pacing, dynamic resolution, rotation/aspect, and black-frame/stall diagnostics.
