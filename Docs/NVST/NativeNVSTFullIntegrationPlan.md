@@ -62,6 +62,7 @@ Verified query commands:
 
 Verified auth token values from web client constants:
 
+- `NVB_AUTH_JARVIS = 7`.
 - `NVB_AUTH_JWT = 8`.
 - `NVB_AUTH_JWT_GFN = 9`.
 
@@ -137,26 +138,24 @@ Implemented:
 - NVST-shaped CloudMatch session allocation and resume claim request shape.
 - Raw CloudMatch session JSON preservation.
 - Bifrost/Geronimo runtime loading probes.
-- Objective-C++ Geronimo shim with `GridApp::prepare`, `GridApp::setAuthInfo`, `Nsk::convertToStreamingParams`, `GridApp::start`, `Nsk::free`, `GridApp::stop`, and destroy.
+- Typed native prepare/start payload validation with fail-closed server/auth conversion and sanitized telemetry.
+- Objective-C++ Geronimo shim with `GridApp::setAuthInfo`, `GridApp::prepare`, `Nsk::convertToStreamingParams`, `GridApp::start`, full `GridApp::resume`, asynchronous pause/stop, and destructor-driven uninitialize.
 - Per-session SDL/Metal video, game-audio, and optional microphone object construction after prepare.
-- Main-thread SDL/GridApp pump with prepare-result and streamer-connected callback gating.
-- Native pause, result-bearing stop, callback quiescence, and ordered media/GridApp/platform teardown.
-- Swift `NativeNVSTStreamingPath` state machine for prepare, allocate, connect, stop.
-- Basic payload normalization and telemetry.
+- Main-thread SDL/GridApp pump with prepare, setup-success, streaming-begin, pause, stop, failure, and remote-termination callback handling.
+- Native pause, result-bearing stop, callback quiescence, in-flight startup cancellation, and ordered media/GridApp/platform teardown.
+- Production native input injection for keyboard, mouse, UTF-8 text, and gamepad using the verified `0x48`-byte `NvstInputEvent_t` ABI.
+- Swift `NativeNVSTStreamingPath` state machine for prepare, allocate, connect, input, pause, stop, cancellation, and remote termination.
+- AppKit modifier and auxiliary-mouse forwarding into the native stream surface.
+- Native callback-driven `.remoteEnded`/`.failed` reports and server-side session cleanup.
 - Native runtime embedding in current Xcode project.
 
 Not complete:
 
-- No production video display path.
-- No production audio playout path.
-- No microphone capture/sending path.
-- No native input injection path.
-- No `GridApp::resume` path for paused or resumed sessions.
 - No native stats callback or polling bridge.
-- Callback coverage is limited to prepare, streamer connected, local start/pause/stop, and terminal pump failures; stream-ended, stats, decoder state, and remote termination remain incomplete.
-- No complete native payload parity with the web client start payload.
-- No app-bundle/archive verification gate for all NVIDIA artifacts.
+- The bundle validation script is not yet wired into archive/CI, although it verifies all required NVIDIA artifacts, arm64 slices, signatures, and app-relative install names when run against an app bundle.
 - No native integration test that proves a real Geronimo start/stop lifecycle with callbacks.
+- No authenticated live verification yet for video presentation, game audio, microphone, input, pause/resume, cancellation, and terminal cleanup.
+- Stream-quality, decoder-state, and detailed native stats callbacks remain diagnostic follow-up work.
 
 ## Architecture Target
 
@@ -209,13 +208,11 @@ Goal: Geronimo owns the full lifecycle: prepare, start, resume, pause, stop, des
 
 Tasks:
 
-- Add C APIs for `OpenNOWNativeNVSTGeronimoResume`, `OpenNOWNativeNVSTGeronimoPause`, `OpenNOWNativeNVSTGeronimoStop`, state query, and callback registration.
-- Resolve and call `GridApp::resume(char const*, SessionParameters const&, NVbTracingContext_t const&)` when CloudMatch returns a paused or claimed session id.
-- Resolve and call `GridApp::resume(NVbTracingContext_t const&, std::string const&)` for lightweight native resume when applicable.
-- Resolve and call `GridApp::pause` or the underlying session pause path for user-initiated pause.
-- Convert `stop` into a result-bearing, awaited lifecycle operation rather than best-effort destroy.
-- Maintain native state: created, prepared, sessionStarting, sessionStarted, streaming, paused, stopping, stopped, failed, destroyed.
-- Guarantee CloudMatch session cleanup on native start failure after allocation.
+- Completed: added C APIs for callback registration, full resume, pause, result-bearing stop, and destroy.
+- Completed: call `GridApp::resume(char const*, SessionParameters const&, NVbTracingContext_t const&)` for resumed allocations.
+- Completed: await authoritative pause/stop callbacks while the main-thread pump remains active.
+- Completed: maintain explicit native and Swift lifecycle state and guarantee CloudMatch cleanup after allocation failures.
+- Completed: quiesce callbacks, destroy local paused-session resources without sending stop, run destructor-driven uninitialize, then release the process platform and dylib handles.
 
 Files:
 
@@ -238,9 +235,10 @@ Tasks:
 
 - Reverse and document `GridApp::handleNVbCallback` event IDs and relevant `NVbCallbackData_t` layouts.
 - Add a native callback sink from Objective-C++ to Swift using stable C function pointers and opaque context.
-- Emit events for session started, streamer connected, streaming begin, stream failed, stream terminated, audio/video format, stats, decoder state, HID capabilities, and remote end.
-- Mark Swift `NativeNVSTStreamingPath` as connected only after native streamer-connected or streaming-begin callback, not after `GridApp::start` returns.
-- Add callback-driven disconnect and remote-ended behavior.
+- Completed: emit events for prepare, setup progress/success/failure, streaming begin, pause, stop, and streaming termination.
+- Completed: mark Swift `NativeNVSTStreamingPath` connected only after setup-success and streaming-begin callback confirmation.
+- Completed: add callback-driven disconnect and remote-ended behavior through verified `GridApp::onStreamingTerminated` slot `+0xc8`.
+- Remaining: bridge stream-quality, detailed stats, decoder-state, and HID capability updates needed for diagnostics rather than core lifecycle correctness.
 
 Files:
 
@@ -330,12 +328,11 @@ Goal: Keyboard, mouse, text, gamepad, clipboard, and anti-AFK input reach the na
 
 Tasks:
 
-- Reverse and document `BifrostSDKExecutor::sendNvstInputEvent`, `GeronimoIOInterface::sendNvstInputEvent`, `GridApp::sendNvstInputEvent`, and gating flags `BifrostSDKExecutor + 0x8/+0x9`.
-- Add a native `OpenNOWNativeNVSTGeronimoSendInput` API that sends through Geronimo/Bifrost after streaming begin.
-- Replace `encodedInputEvents.append` in `NativeNVSTBifrostTransport.send` with actual native send.
-- Connect `NativeNVSTMediaStreamSurface` to keyboard, mouse, text, direct mouse lock, gamepad, clipboard, and anti-AFK sources.
-- Reuse or adapt `NativeNVSTInput.swift` only if its envelope exactly matches native Geronimo expectations.
-- Track dropped input, backpressure, focus loss, and unsupported HID types.
+- Completed: documented and implemented direct `GridApp::sendNvstInputEvent` delivery after streaming begin.
+- Completed: replaced the WebRTC envelope with exact `0x48`-byte keyboard, mouse, caps-lock, and gamepad events plus synchronous pointer-backed UTF-8 text events.
+- Completed: connected keyboard, modifiers, mouse movement/buttons/wheel, text, and gamepad sources to `NativeNVSTMediaStreamSurface`.
+- Completed: register gamepad sources through `GridApp::handleGamepadChanged` before their first input event.
+- Remaining: add operational telemetry for dropped input, focus loss, and unsupported HID capabilities observed in authenticated sessions.
 
 Files:
 
