@@ -190,6 +190,14 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Native Geronimo input does not use OpenNOW's WebRTC data-channel envelope or partially reliable transfer flags.
 - Direct `_nvbSendInputEvent` requires the underlying Bifrost client handle, session id, and `NVbResult_t` sret ABI and should not be called from Swift or from a shim that does not own those values.
 
+## Verified Mouse/Cursor Host Facts
+
+- OpenNOW exposes only relative mouse movement. The first mouse-button down captures the pointer and is not sent to the stream; its matching release is also suppressed. Subsequent button pairs, relative movement, and vertical wheel input are forwarded only while pointer lock is active.
+- Pointer lock stores the pre-capture global cursor position, dissociates physical mouse movement from the macOS cursor, hides the local cursor, and consumes AppKit movement, drag, and wheel events through one local monitor. Unlock reverses those steps and restores the saved cursor position.
+- Pointer unlock occurs when remote input or direct mouse input is disabled, the application or stream window loses focus, the interactive HUD opens, the stream view detaches, or stream teardown begins. Held mouse buttons are released before pointer lock is cleared so the release events pass the same lock gate as normal mouse input.
+- Native NVST mouse events use one ordered dispatcher. Movement, wheel, and button edges cannot overtake each other, and queued releases are drained before a locally initiated native session stop.
+- Geronimo owns its internal SDL cursor callbacks, but OpenNOW does not render a second local remote cursor. Relative-mode cursor display comes from streamed game content while the macOS cursor remains hidden until capture is released.
+
 ## Verified Performance Stats Facts
 
 - `IOInterface::getStatsInterface()` returns the session-owned `StatsInterface *`. `StatsInterface::getStats(...)` locks its internal state, copies a `0x450`-byte `GeronimoStats` value, and copies GPU, renderer, client-version, locale, region, and zone strings into caller-owned `std::string` values.
