@@ -139,6 +139,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `0x20`: device id `std::string`; must be non-empty.
 - `0x38`: `NVbCommunicationParams_t` block consumed by `GeronimoSettingsImpl::overrideCommunicationParams`.
 - `0x64`: synchronous initialization boolean copied into Bifrost init parameters.
+- OpenNOW sets synchronous initialization to `false`; the shim advances its state machine from the asynchronous `onPrepareResult` event delivered by `GridApp::processEvents()`.
 - `0x68`: converted server type integer copied into GridApp/Bifrost init state.
 - `0x70`: locale `std::string`.
 - `0x88`: optional SSL certificate `std::string`.
