@@ -188,6 +188,9 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 
 ## Verified Callback Facts
 
+- `nvbEnumToString(0, resultCode)` dispatches to Bifrost's `NVbResultCodeToString`; result `302` is `NVB_R_SESSION_LIMIT_REACHED`.
+- `SessionSetUpFailureInfo + 0x00` is the `NVbResultCode_t` delivered to Geronimo lifecycle callbacks. The object also owns strings at `+0x18`, `+0x30`, and `+0x60` and a vector at `+0x48`; OpenNOW does not inspect those opaque fields because their semantics and sensitivity are not verified.
+- OpenNOW resolves `nvbEnumToString` from its owned Bifrost handle and synchronously forwards only the static `NVB_R_*` name with callback telemetry. Swift copies the borrowed C string before callback return.
 - `GridApp::handleNVbCallback(NVbCallbackType_t, NVbCallbackData_t *)` treats callback type `2` as a Bifrost client event.
 - For callback type `2`, `NVbCallbackData_t + 0x00` is the `NVbClientEvent_t` integer used by `GridApp`'s event switch.
 - Client event `0x0e` is `SessionNotification`; `GridApp` reads `NVbCallbackData_t + 0x08` as the session notification type.
