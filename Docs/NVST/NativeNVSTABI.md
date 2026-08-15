@@ -192,11 +192,13 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 
 ## Verified Mouse/Cursor Host Facts
 
-- OpenNOW exposes only relative mouse movement. The first mouse-button down captures the pointer and is not sent to the stream; its matching release is also suppressed. Subsequent button pairs, relative movement, and vertical wheel input are forwarded only while pointer lock is active.
-- Pointer lock stores the pre-capture global cursor position, dissociates physical mouse movement from the macOS cursor, hides the local cursor, and consumes AppKit movement, drag, and wheel events through one local monitor. Unlock reverses those steps and restores the saved cursor position.
+- NVST has separate absolute client-cursor and relative locked modes. Absolute movement uses mouse subtype `1`, flag `0x0800` at `NvstMouseEvent_t + 0x0c`, signed 32-bit video coordinates at `+0x10/+0x14`, and the microsecond timestamp at `+0x28`. Relative movement uses the same subtype with flags `0` and signed deltas at `+0x10/+0x14`.
+- `GridApp::onCursorInfoUpdate(CursorInfo const&)` is the verified vtable slot at address-point offset `0x118`. OpenNOW calls NVIDIA's original handler before observing cursor state `1` as visible/client-side and state `2` as hidden/relative. Startup verifies the slot against the exact exported symbol and fails closed if the vendor ABI changes.
+- Visible server cursor state selects unlocked absolute input. AppKit positions are mapped through the aspect-fitted video rectangle into top-left-origin logical stream coordinates; letterbox and pillarbox regions do not generate remote movement. Geronimo remains responsible for applying server-provided system and bitmap cursor images to the local hardware cursor.
+- Hidden server cursor state selects relative input when Direct Mouse Input is enabled. Pointer lock stores the pre-capture global cursor position, dissociates physical mouse movement from the macOS cursor, hides the local cursor, and consumes AppKit movement, drag, and wheel events through one local monitor. Unlock reverses those steps and restores the saved cursor position.
+- WebRTC retains click-to-capture behavior. NVST starts unlocked and follows server cursor state, so desktop launchers do not lose their first click and games can transition into relative control without displaying a duplicate stationary cursor.
 - Pointer unlock occurs when remote input or direct mouse input is disabled, the application or stream window loses focus, the interactive HUD opens, the stream view detaches, or stream teardown begins. Held mouse buttons are released before pointer lock is cleared so the release events pass the same lock gate as normal mouse input.
-- Native NVST mouse events use one ordered dispatcher. Movement, wheel, and button edges cannot overtake each other, and queued releases are drained before a locally initiated native session stop.
-- Geronimo owns its internal SDL cursor callbacks, but OpenNOW does not render a second local remote cursor. Relative-mode cursor display comes from streamed game content while the macOS cursor remains hidden until capture is released.
+- Native NVST relative movement, absolute movement, wheel input, and button edges use one ordered dispatcher. Events cannot overtake each other, and queued releases are drained before a locally initiated native session stop.
 
 ## Verified Performance Stats Facts
 
