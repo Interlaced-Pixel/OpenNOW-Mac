@@ -190,6 +190,14 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Native Geronimo input does not use OpenNOW's WebRTC data-channel envelope or partially reliable transfer flags.
 - Direct `_nvbSendInputEvent` requires the underlying Bifrost client handle, session id, and `NVbResult_t` sret ABI and should not be called from Swift or from a shim that does not own those values.
 
+## Verified Performance Stats Facts
+
+- `IOInterface::getStatsInterface()` returns the session-owned `StatsInterface *`. `StatsInterface::getStats(...)` locks its internal state, copies a `0x450`-byte `GeronimoStats` value, and copies GPU, renderer, client-version, locale, region, and zone strings into caller-owned `std::string` values.
+- The copied stats store total frame loss at `+0x08`, jitter in microseconds at `+0x24`, bitrate in Kbps at `+0xa0`, bandwidth utilization at `+0xa4`, current packet loss at `+0xa8`, and round-trip delay in milliseconds at `+0xac`.
+- Codec is at `+0x3bc`; initial width, height, and FPS are at `+0x3e4/+0x3e6/+0x3e8`; current width and height are at `+0x3ea/+0x3ec`; current frame loss and total packet loss are at `+0x3f0/+0x3f4`; server game FPS is a `double` at `+0x410`.
+- `OpenNOWNativeNVSTGeronimoCopyPerformanceStats` reads this synchronized state while the session is streaming and returns only normalized scalar values plus the zone or region string. It does not expose the opaque native stats object to Swift.
+- `Cmd+M` toggles OpenNOW's SwiftUI GFN-style panel and never calls Geronimo's internal performance indicator, which is restricted for external users and may render nothing.
+
 ## Verified Callback Facts
 
 - `nvbEnumToString(0, resultCode)` dispatches to Bifrost's `NVbResultCodeToString`; result `302` is `NVB_R_SESSION_LIMIT_REACHED`.
