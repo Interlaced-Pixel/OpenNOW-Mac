@@ -304,7 +304,8 @@ Tasks:
 - Trace whether Geronimo owns game audio playout through `libGsAudioWebRTC` or emits audio frames to clients.
 - Expose native audio state and device errors to Swift.
 - Integrate game volume/mute preferences.
-- Integrate microphone mode, device, push-to-talk, and capture permission.
+- Completed: create the microphone capturer for every enabled microphone mode and expose in-stream mute/unmute through Geronimo's native pause/resume slots.
+- Integrate microphone device selection, push-to-talk edges, and capture permission diagnostics.
 - Validate `com.apple.security.device.audio-input` behavior in signed app builds.
 - Handle audio device change and stream restart/resume.
 
@@ -332,6 +333,7 @@ Tasks:
 - Completed: replaced the WebRTC envelope with exact `0x48`-byte keyboard, mouse, caps-lock, and gamepad events plus synchronous pointer-backed UTF-8 text events.
 - Completed: connected keyboard, modifiers, mouse movement/buttons/wheel, text, and gamepad sources to `NativeNVSTMediaStreamSurface`.
 - Completed: register gamepad sources through `GridApp::handleGamepadChanged` before their first input event.
+- Completed: share WebRTC's in-stream shortcut contract and Anti-AFK movement policy with native NVST.
 - Remaining: add operational telemetry for dropped input, focus loss, and unsupported HID capabilities observed in authenticated sessions.
 
 Files:
