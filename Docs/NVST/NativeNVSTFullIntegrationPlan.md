@@ -273,9 +273,9 @@ Tasks:
 - Completed: verified `SDLWindow::InitParams + 0x70` as the create-from-handle slot used by `SDL_CreateWindowFrom`.
 - Completed: exposed `OpenNOWNativeNVSTGeronimoSetVideoSurface` in the shim and embedded an AppKit host surface in `NativeNVSTMediaStreamSurface`.
 - Completed: replaced the process-global `SDLWindowManager` vtable hook with per-session direct `SDLGraphicsContext`, `SDLEventProcessor`, and `SDLWindow` construction.
-- Completed: added a persistent main-actor `OpenNOWNativeNVSTGeronimoPump` that drives SDL and queued `GridApp` events until disconnect.
+- Completed: added a persistent main-thread `OpenNOWNativeNVSTGeronimoPump` that dispatches queued `GridApp` events before SDL at vendor-parity 60 Hz cadence and yields during AppKit event tracking until disconnect.
 - Completed: cloned the per-session `GridApp` vtable to receive prepare-result and streaming-begin callbacks without replacing Geronimo's Bifrost callback registration.
-- Completed: defer `GridApp::start` until successful prepare delivery and media initialization, and join the Swift pump before quiescent native teardown.
+- Completed: defer `GridApp::start` until successful prepare delivery and media initialization, and invalidate the main-thread pump before quiescent native teardown.
 - Completed: fixed native session connection JSON to emit Geronimo's numeric UDP protocol value `2` instead of empty-string or zero values that only work by warning fallback.
 - Completed: resolved private Geronimo `Nsk::convertToStreamingParams` and `Nsk::free(NVbStreamingParams_t&)` through verified arm64 and x86_64 text offsets so full native start is not blocked by non-exported helper symbols.
 - In progress: live verification that SDL wraps the OpenNOW `NSWindow` and presents native NVST frames without stealing or replacing the SwiftUI stream surface.
