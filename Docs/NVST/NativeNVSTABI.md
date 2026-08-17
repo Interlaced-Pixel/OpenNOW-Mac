@@ -211,6 +211,20 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `ClientSession::sendQosPreferenceChange(UInt32, UInt32)` is an internal dynamic-streaming-mode command, not an application-owned arbitrary QoS setter.
 - Therefore L4S is the only verified application-owned ECN/QoS-related runtime control. Direct DSCP, traffic-class, ECN-codepoint, and QoS-traffic-type controls must remain unexposed until NVIDIA provides an owned acquisition API and an applied-state readback path.
 
+## Verified Resume and Endpoint Replacement Facts
+
+- `NVbConnectionInfo_t` has element stride `0x40c`. Geronimo converts each populated record into a 24-byte NVST endpoint value, preserving source order for up to 20 records; index `0` is the first endpoint returned by the internal getters.
+- Streamer initialization copies all 20 connection-info slots into streamer-owned configuration. The endpoint-prioritization callback is a post-connect notification: callback mutations and the callback return value do not alter the configured endpoint order.
+- `GridApp::resume(char const *, SessionParameters const&, NVbTracingContext_t const&)` eventually invokes public `BifrostClient::resumeSession`. Bifrost accepts this operation only when the existing client is in state `8` and requires the replacement `SessionController` to begin in state `0`.
+- Public resume removes the previous controller from the session map, constructs a new controller and streamer, copies the `0x208`-byte Bifrost session-parameter block, and submits `setUpSession` with action `2`. An accepted asynchronous submission moves the new controller to state `6`; successful seat provisioning moves it to state `9`.
+- Geronimo deep-copies `SessionParameters.connectionInfo` into owned storage before invoking Bifrost. Caller-owned session-parameter storage only needs to remain valid through that synchronous Geronimo copy.
+- Resume provisioning, not the caller's input connection array, supplies the authoritative replacement endpoints. On success, Geronimo rebuilds `NVbStreamingParams_t` from returned `SessionInfo.connectionInfo`, and streaming startup deep-copies those records into the new streamer.
+- Immediate resume rejection returns synchronously as `NVbResult_t`. Verified result codes include `1` (`NVB_R_UNINITIALIZED`), `101` (`NVB_R_INVALID_PARAM`), `102` (`NVB_R_INVALID_CLIENT_OBJECT`), `105` (`NVB_R_INVALID_VIDEO_DECODER`), `106` (`NVB_R_INVALID_AUDIO_RENDERER`), `108` (`NVB_R_INVALID_STREAM_SETTINGS`), and `114` (`NVB_R_INVALID_INPUT_DEVICE`).
+- An asynchronous action-2 provisioning failure emits Bifrost client event `9`. Geronimo queues that event, and `GridApp::processEvents()` dispatches `GridApp::onResumeFailure` through address-point slot `+0xb0`. The main-thread pump must remain active while resume is pending.
+- Controller removal is immediate, but old-controller destruction can be deferred. `clearSessionController(..., true)` submits a `SessionCleanUpTask` holding the removed controller; final `Streamer` destruction calls `Streamer::stop(false)` before releasing its connection and configuration resources. Old and new streamers can therefore coexist briefly, but only the new controller remains publicly addressable and their endpoint storage is separate.
+- Bifrost contains a private internal-event case that calls `SessionController::doResume()` and resubmits action `2` on the existing controller. Neither architecture has a proven producer for that internal event, Geronimo does not act on the corresponding server pause/resume session-notification values, and no exported API can safely inject it. This path must remain unsupported unless a live session proves it reachable.
+- No exported API performs in-place endpoint mutation or authoritative endpoint readback. None of the `0x00...0x1a` feature-control cases changes endpoint configuration, starts or stops a streamer, or triggers resume. Same-session public resume is the only verified endpoint-refresh mechanism, and endpoint selection remains controlled by returned `SessionInfo.connectionInfo`.
+
 ## Integration Constraints
 
 - Do not call `nvbStartSession` directly from Swift.

@@ -440,8 +440,8 @@ Known current blocker:
 ## Immediate Next Work
 
 1. Implement typed `NativeNVSTLaunchPayload` and parity tests against the extracted GeForce NOW start payload field set.
-2. Add native callback registration and state event bridging before UI readiness.
-3. Add `GridApp::resume` and pause APIs to the shim.
-4. Trace Geronimo render target ownership and decide native-owned render target vs OpenNOW-owned VideoToolbox/Metal rendering.
-5. Replace buffered input with real Geronimo/Bifrost native input send.
-6. Add native bundle validation script and run it against Debug and Release app bundles.
+2. Run authenticated start, pause, public resume, and stop sessions while tracing callback ordering, endpoint reconstruction, media continuity, and teardown.
+3. Trace whether a live server session ever produces Bifrost's private internal resume event; do not expose that path without runtime evidence.
+4. Wire the existing native bundle validation script into archive and CI, then validate Debug and archived Release app bundles.
+5. Add native integration coverage for real Geronimo lifecycle callbacks where credentials and resumable session data are available.
+6. Bridge the remaining stream-quality, decoder-state, HID-capability, and detailed stats diagnostics.
