@@ -151,6 +151,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `0x38`: `NVbCommunicationParams_t` block consumed by `GeronimoSettingsImpl::overrideCommunicationParams`.
 - `0x64`: synchronous initialization boolean copied into Bifrost init parameters.
 - OpenNOW sets synchronous initialization to `false`; the shim advances its state machine from the asynchronous `onPrepareResult` event delivered by `GridApp::processEvents()`.
+- The normalized session `port` is the prepare/start endpoint fallback when `serverAddress` does not embed a port. An embedded host port remains authoritative, including bracketed IPv6 authorities.
 - `0x68`: converted server type integer copied into GridApp/Bifrost init state.
 - `0x70`: locale `std::string`.
 - `0x88`: optional SSL certificate `std::string`.
@@ -210,6 +211,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 
 - None of the 27 feature-control cases accepts a DSCP value, IP traffic class, arbitrary ECN codepoint, QoS traffic type, or congestion-control policy.
 - `GridApp::setDynamicStreamingMode(UInt16, UInt32) -> bool` and `GridApp::setStreamingMaxBitrate(UInt16, UInt32) -> bool` use feature types `0x0f` and `0x10`. Both requests store the stream index at `+0x04` and the 32-bit value at `+0x08`; their executor state changes only after `nvbFeatureControl` succeeds.
+- Initial bitrate, dynamic-streaming mode, and L4S state belong to the negotiated mode selection passed into `GridApp::start` or `GridApp::resume`. Runtime feature-control calls are reserved for later changes; replaying startup values immediately after `StreamerConnected` can be rejected while server feature control is not accepting updates.
 - `IOInterface::getDynamicStreamingMode() -> UInt32` and `IOInterface::getMaxBitrateKbps() -> UInt32` are local accepted-state readbacks. Their no-executor defaults are `3` and `35000` Kbps.
 - `GridApp::setL4sState(UInt16, bool) -> bool`, `IOInterface::setL4sState(UInt16, bool) -> bool`, and `BifrostSDKExecutor::setL4sState(UInt16, bool) -> bool` are exported as `_ZN7GridApp11setL4sStateEtb`, `_ZN11IOInterface11setL4sStateEtb`, and `_ZN18BifrostSDKExecutor11setL4sStateEtb`.
 - The named L4S request uses feature type `0x13`, stream index at request `+0x04`, and Boolean state at `+0x06`. The executor changes its accepted-state byte at `+0x2c` only after `nvbFeatureControl` returns success.
