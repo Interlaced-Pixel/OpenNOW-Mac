@@ -158,6 +158,59 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Geronimo's `getStreamStartParameters` parser expects the normalized session JSON to include a `streamingProfile` object. OpenNOW carries any NVIDIA-provided `streamingProfileGuid` from CloudMatch/session-info/settings; when none is present for OpenNOW's local custom profile, it persists a client-side UUID per app/profile signature and sends that as `streamingProfile.streamingProfileGuid`.
 - CloudMatch raw session JSON can omit `tokenType` and `token`. OpenNOW must keep those secrets out of raw/persisted JSON and pass allocation auth as transient C strings into the Geronimo shim before `GridApp::setAuthInfo`.
 
+## Verified Feature-Control and Network QoS Facts
+
+- `GridApp::controlFeatures(NVbFeatureControlType_t, UInt32) -> bool` is exported as `_ZN7GridApp15controlFeaturesE23NVbFeatureControlType_tj`. It forwards through the initialized `IOInterface` with its enable argument fixed to `true`; it is not safe before `GridApp::initialize` has installed that interface.
+- `IOInterface::controlFeatures(NVbFeatureControlType_t, UInt32, bool) -> bool` and `BifrostSDKExecutor::controlFeatures(NVbFeatureControlType_t, UInt32, bool) -> bool` are exported as `_ZN11IOInterface15controlFeaturesE23NVbFeatureControlType_tjb` and `_ZN18BifrostSDKExecutor15controlFeaturesE23NVbFeatureControlType_tjb`.
+- The generic executor stores the latest value in its feature map before checking whether Bifrost is active. When active, it constructs an `NVbFeatureControl_t` with the 32-bit type at `+0x00`, enabled value at `+0x04`, and disabled value at `+0x08`, then calls `nvbFeatureControl`. The generic map has no exported getter and is not proof that the server or transport applied a value.
+- `nvbFeatureControl` uses the large `NVbResult_t` return convention: `x8` is result storage, `x0` is the Bifrost client, `x1` is the session id string, and `x2` points to `NVbFeatureControl_t`.
+- The request path is `nvbFeatureControl` to `NVB::BifrostClient::featureControl` to `NVB::SessionController::featureControl` to `NVB::Streamer::featureControl`.
+- `NVB::Streamer::featureControl` rejects feature types above `0x1a`. Its complete arm64 jump table is:
+
+| Type | Verified behavior |
+| --- | --- |
+| `0x00` | Hardware cursor capture |
+| `0x01` | Client network capture diagnostic |
+| `0x02` | Server network capture diagnostic |
+| `0x03` | Client stats recording diagnostic |
+| `0x04` | Server trace recording diagnostic |
+| `0x05` | Mouse acceleration |
+| `0x06` | Gamepad haptics |
+| `0x07` | Mouse sensitivity |
+| `0x08` | Tracking remote cursor image |
+| `0x09` | Performance indicator |
+| `0x0a` | Mouse settings input event |
+| `0x0b` | Content-capture alpha format |
+| `0x0c` | VSync interval |
+| `0x0d` | Present-completed timestamp control |
+| `0x0e` | Reserved and rejected with result `0x65` in this build |
+| `0x0f` | Dynamic resolution/frame-rate control mode |
+| `0x10` | Maximum streaming bitrate |
+| `0x11` | Stutter indicator |
+| `0x12` | Remote-input device/controller overlay |
+| `0x13` | L4S state |
+| `0x14` | Video-quality snapshot |
+| `0x15` | True HDR parameters |
+| `0x16` | Prefilter parameters |
+| `0x17` | HUD streaming/SCX delta-QP parameters |
+| `0x18` | QP delta-map view |
+| `0x19` | Video modifiers |
+| `0x1a` | Reflex latency flash indicator overlay |
+
+- None of the 27 feature-control cases accepts a DSCP value, IP traffic class, arbitrary ECN codepoint, QoS traffic type, or congestion-control policy.
+- `GridApp::setDynamicStreamingMode(UInt16, UInt32) -> bool` and `GridApp::setStreamingMaxBitrate(UInt16, UInt32) -> bool` use feature types `0x0f` and `0x10`. Both requests store the stream index at `+0x04` and the 32-bit value at `+0x08`; their executor state changes only after `nvbFeatureControl` succeeds.
+- `IOInterface::getDynamicStreamingMode() -> UInt32` and `IOInterface::getMaxBitrateKbps() -> UInt32` are local accepted-state readbacks. Their no-executor defaults are `3` and `35000` Kbps.
+- `GridApp::setL4sState(UInt16, bool) -> bool`, `IOInterface::setL4sState(UInt16, bool) -> bool`, and `BifrostSDKExecutor::setL4sState(UInt16, bool) -> bool` are exported as `_ZN7GridApp11setL4sStateEtb`, `_ZN11IOInterface11setL4sStateEtb`, and `_ZN18BifrostSDKExecutor11setL4sStateEtb`.
+- The named L4S request uses feature type `0x13`, stream index at request `+0x04`, and Boolean state at `+0x06`. The executor changes its accepted-state byte at `+0x2c` only after `nvbFeatureControl` returns success.
+- `IOInterface::getL4sState() -> UInt32` reads the executor's accepted-state byte. It returns `1` when no executor exists. This is local accepted-state readback, not an independent server-state query.
+- The L4S transport path is feature type `0x13` to NVST message type `0x0c`, then `ClientSession::sendL4sStateChange(UInt32, bool)`. Only after that send succeeds does `SignalingHandler::toggleEcnMarking(bool)` call `WebRtcTransport::setEcn(EcnField_t)` on the active transport.
+- Disabling L4S selects ECN field value `0`. Enabling it selects field value `2` or `1` from NVIDIA's general setting at `+0x2cd8`; invalid configured values fall back to `0`. The application controls only the L4S Boolean and cannot choose the ECN codepoint through this ABI.
+- Bifrost contains internal network setters, including `NetworkRtpSink::{setDscpValue,setQosTrafficType,enableEcn}`, `UdpRtpSource::{setDscpValue,setQosTrafficType,setReceiveTosInfo}`, `WebRtcTransport::{setDscpValue,socketDscpEnable,setEcn,setReceiveTosInfo}`, `NattHolePunch::setDscpValue`, and `NvNetworkPlatformInterface::{socketDscpEnable,socketDscpUpdate,socketSetSendWithEcn,socketSetReceiveTosInfo}`.
+- `WebRtcTransport` and `ClientSession` control methods are private symbols. The externally visible `NetworkRtpSink`, `UdpRtpSource`, `NattHolePunch`, and `NvNetworkPlatformInterface` methods still require an active session-owned object pointer or socket descriptor that no exported `GridApp`, `IOInterface`, executor, or `nvb*` API returns.
+- `UdpRtpSourceCreate` and the exported transport constructors create new unrelated transport objects; they do not acquire the active stream transport. Constructing one cannot control the session already owned by Bifrost.
+- `ClientSession::sendQosPreferenceChange(UInt32, UInt32)` is an internal dynamic-streaming-mode command, not an application-owned arbitrary QoS setter.
+- Therefore L4S is the only verified application-owned ECN/QoS-related runtime control. Direct DSCP, traffic-class, ECN-codepoint, and QoS-traffic-type controls must remain unexposed until NVIDIA provides an owned acquisition API and an applied-state readback path.
+
 ## Integration Constraints
 
 - Do not call `nvbStartSession` directly from Swift.
