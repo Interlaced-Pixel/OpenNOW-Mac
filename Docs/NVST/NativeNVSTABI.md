@@ -28,7 +28,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Geronimo's `GridApp::setAuthInfo(NVbAuthInfo_t&)` forwards a two-field auth struct directly to `SessionControllerImpl::setAuthInfo`; field 0 is the token C string pointer and field 1 is the pointer-sized auth type value.
 - Geronimo's initialized `GridApp` stores the Bifrost client pointer at `GridApp + 0x18` on arm64 before calling `nvbRegisterCallback`.
 - `GridApp::onNVbCallback(void *, NVbCallbackType_t, NVbCallbackData_t *)` is exported and is the original Geronimo callback target registered with Bifrost.
-- OpenNOW leaves Geronimo's Bifrost callback registration intact. It clones the `GridApp` vtable per session and fills the null host `onPrepareResult` and `onStreamingBegin` slots, preserving Geronimo's own callback dispatch and client ownership.
+- Bifrost callback registration is single-assignment. OpenNOW temporarily intercepts Geronimo's verified lazy `_nvbRegisterCallback` import during serialized `GridApp::initialize`, substitutes a callback that invokes `GridApp::onNVbCallback` first and then observes verified haptic events, and restores the import immediately after registration. It does not attempt rejected post-initialization callback replacement and does not change Bifrost client ownership.
 - `nvbStartSession` is not Swift-callable directly because it uses the arm64 C++ struct-return convention.
 - Verified arm64 register use at `_nvbStartSession`:
 - `x8`: result storage pointer for `NVbResult_t`.
