@@ -225,6 +225,24 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Bifrost contains a private internal-event case that calls `SessionController::doResume()` and resubmits action `2` on the existing controller. Neither architecture has a proven producer for that internal event, Geronimo does not act on the corresponding server pause/resume session-notification values, and no exported API can safely inject it. This path must remain unsupported unless a live session proves it reachable.
 - No exported API performs in-place endpoint mutation or authoritative endpoint readback. None of the `0x00...0x1a` feature-control cases changes endpoint configuration, starts or stops a streamer, or triggers resume. Same-session public resume is the only verified endpoint-refresh mechanism, and endpoint selection remains controlled by returned `SessionInfo.connectionInfo`.
 
+## Verified Packet-Size Facts
+
+- `NVbVideoSettings_t` is `0x160` bytes and stores its requested packet size as a `uint16_t` at `+0x38`.
+- `Nsk::convertToStreamingParams` maps that value to `NVbStreamSettings_t + 0x48`; the value is measured in bytes.
+- Bifrost treats configured values below `512` bytes as invalid and replaces them with `512`.
+- Geronimo/Bifrost deep-copies every `0x170`-byte `NVbStreamSettings_t` during startup. OpenNOW may therefore apply a server-measured packet size to the converted settings before `GridApp::start` or `GridApp::resume`.
+- No exported feature-control case changes packet size at runtime. Internal packet-size detection, `ServerControl::sendPacketSizeChangeRequest`, and `ClientStatsTool::setAllowedPacketSizeDetectionParams` require inaccessible session-owned objects and provide no application callback or authoritative readback.
+- Runtime interface-change handling updates connection type but does not restart packet-size negotiation. Runtime packet-size adaptation must remain Bifrost-owned.
+
+## Verified Native Network Capability Test Boundary
+
+- `_nvbTestNetworkCapabilityAsync` accepts an 88-byte parameter block and starts a self-owned asynchronous UDP capability test. It deep-copies the server address and ordered six-byte `{uint16_t width, uint16_t height, uint16_t framesPerSecond}` profile records.
+- The native tester treats `serverAddress` as a bare DNS name or IP address and always connects to UDP port `5001`. It does not perform HTTP provisioning, parse `/v2/nettestsession`, consume credentials, or accept a port.
+- The returned 20-byte result contains a status code at `+0x00` and cancellation request id at `+0x04`. `_nvbTestNetworkAsyncCancel(uint32_t)` consumes that request id.
+- The completion callback receives callback-scoped capability data and a generated network-session GUID; both must be copied before the callback returns.
+- NVIDIA's unavailable `CrimsonNative/NetworkTest` dispatcher performs additional authenticated provisioning and maps the high-level zone response to the low-level UDP host before invoking this ABI. The browser `/v2/nettestsession` connection endpoint is HTTP/WebRTC and is not evidence of an NT2 UDP host on port `5001`.
+- OpenNOW must not call `_nvbTestNetworkCapabilityAsync` until the provisioned UDP host and all native threshold mappings are present in an observed dispatcher contract. Passing the known HTTP endpoint would target the wrong protocol.
+
 ## Integration Constraints
 
 - Do not call `nvbStartSession` directly from Swift.
