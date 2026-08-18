@@ -91,6 +91,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `0x1d2`: boolean copied from `SessionParameters + 0x234`.
 - `0x1d4`: connection info count.
 - `0x1d8`: `NVbConnectionInfo_t *`.
+- Bifrost's verified connection-info storage contains 20 records. OpenNOW rejects converted counts above 20 rather than relying on larger Geronimo-side vector capacity.
 - `0x1e0`: Bifrost session id C string pointer copied from `SessionParameters + 0x250` when present.
 - `0x1e8`: user age copied from `SessionParameters + 0x280`.
 
@@ -342,10 +343,13 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `OpenNOWNativeNVSTGeronimoPump` must run on the main thread for the lifetime of the session. Its integer argument is the `SDL_WaitEventTimeout` duration in milliseconds; `0` performs nonblocking SDL polling. A false `SDLEventProcessor::processEvents` result is terminal.
 - The vendor main loop dispatches `GridApp::processEvents()` before SDL processing and services SDL at render-loop cadence with a maximum 16 ms wait. OpenNOW preserves that order and uses a nonblocking 60 Hz timer in AppKit common run-loop modes so title-bar, menu, and event-tracking loops do not suspend native callback delivery.
 - Swift keeps the main-thread pump active while waiting for asynchronous pause and stop callbacks. It invalidates the timer before destroying the native session.
+- Swift retains externally visible connection ownership until callback handling, pump invalidation, and native destruction have all completed. A new connect cannot enter while disconnect, recovery reset, or successful pause destruction is in progress.
 - Automatic recovery is disabled in production until authenticated resume parity is proven. The diagnostic recovery mode permits exactly one same-session attempt and never applies exponential or blanket retries.
 - Launch failures include a bounded ordered phase sequence, last callback identifiers, readiness gates, operation type, and attempt identifier in sanitized report metadata. Tokens, headers, query parameters, and metadata values are excluded.
 - A successful pause destroys local media and GridApp resources without calling `GridApp::stop`, preserving the intentionally paused cloud session for a later resume allocation.
 - Normal disconnect calls `GridApp::stop(char const *, int)`, waits for slot `+0x158`, then invalidates the pump timer and destroys the session. Remote termination skips this stop wait because the vendor session is already stopped.
+- Stop-result code `0` is the only callback outcome that changes shim state to stopped. A nonzero result changes state to failed, and Swift records request failure, callback failure, or the bounded callback timeout before forced destruction.
+- `GridApp::updateAuthToken` exposes a response pointer but no verified writable capacity in the pinned ABI. OpenNOW writes only the empty-string byte required by the callback and returns immediately; it does not invoke asynchronous auth refresh from the main-thread pump or assume a fabricated 16 KiB destination. Native refresh remains fail-closed until a capacity field or another bounded ownership contract is verified.
 - `GridAppD2` calls `GridApp::uninitialize()` internally. OpenNOW must not call uninitialize a second time, and it keeps the process platform and both dylib handles alive until the destructor returns.
 - Destruction restores the embedded Metal view to the retained proxy window, detaches the per-session callback owner and waits for in-flight callbacks, destroys shim-owned media, runs `GridAppD2`, releases the video surface and reference-counted process platform, frees the cloned vtable, and closes the dylib handles.
 
