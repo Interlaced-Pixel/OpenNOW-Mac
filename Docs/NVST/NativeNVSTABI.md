@@ -27,7 +27,6 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `nvbRegisterCallback(client, context, callback)` builds an `NVbCallback_t` from two pointer-sized fields. Field 0 is callback context; field 1 is the callback function. The callback function is invoked as `bool callback(void *context, UInt32 callbackType, void *callbackData)`.
 - `nvbSetAuthInfo(client, token, authType)` builds the internal `NVbAuthInfo_t` from a C string token and integer auth type. Verified mappings are `7` for Jarvis, `8` for JWT, and `9` for GFN JWT.
 - Geronimo's `GridApp::setAuthInfo(NVbAuthInfo_t&)` forwards a two-field auth struct directly to `SessionControllerImpl::setAuthInfo`; field 0 is the token C string pointer and field 1 is the pointer-sized auth type value.
-- NVIDIA calls `GridApp::setAuthInfo` before `GridApp::prepare` for fresh and resumed initialization. OpenNOW preserves that ordering so Bifrost client initialization receives the allocation auth context; deferring auth until prepared state causes fresh start to be rejected as a competing active session even though explicit resume can connect.
 - Geronimo's initialized `GridApp` stores the Bifrost client pointer at `GridApp + 0x18` on arm64 before calling `nvbRegisterCallback`.
 - `GridApp::onNVbCallback(void *, NVbCallbackType_t, NVbCallbackData_t *)` is exported and is the original Geronimo callback target registered with Bifrost.
 - Bifrost validates clients against an image-local registry. Calls involving a Geronimo-created client must use the exact `nvbCreateClient` and `nvbRegisterCallback` targets bound in Geronimo's import table; resolving either function through a different loaded image produces `NVB_R_INVALID_CLIENT_OBJECT`.
@@ -264,7 +263,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Do not call `nvbStartSession` directly from Swift.
 - Use a C++/Objective-C++ shim for any `nvb*` API returning or accepting non-trivial C++/large result structs.
 - The OpenNOW shim must not create a standalone Bifrost session client for streaming startup; Geronimo owns native client initialization, auth, stream conversion, session start, and stop handling.
-- OpenNOW sets auth, requests `GridApp::prepare`, converts and deep-copies streaming parameters, and frees the temporary `NVbStreamingParams_t`. Its main-thread pump then delivers prepare, initializes media, and calls `GridApp::start(SessionControl::SessionParameters, NVbTracingContext_t)` or `GridApp::resume(char const *, SessionParameters, NVbTracingContext_t)`.
+- OpenNOW creates and waits for the CloudMatch session before entering Geronimo. Its main-thread pump sets auth after successful prepare delivery, initializes media, and calls `GridApp::resume(char const *, SessionParameters, NVbTracingContext_t)` with the allocated session id. Calling `GridApp::start(SessionControl::SessionParameters, NVbTracingContext_t)` at that point attempts to create a second server session and returns `NVB_R_SESSION_LIMIT_REACHED`.
 
 ## Verified Media/Input Binding Facts
 

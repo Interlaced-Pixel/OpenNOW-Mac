@@ -209,7 +209,7 @@ Goal: Geronimo owns the full lifecycle: prepare, start, resume, pause, stop, des
 Tasks:
 
 - Completed: added C APIs for callback registration, full resume, pause, result-bearing stop, and destroy.
-- Completed: call `GridApp::resume(char const*, SessionParameters const&, NVbTracingContext_t const&)` for resumed allocations.
+- Completed: call `GridApp::resume(char const*, SessionParameters const&, NVbTracingContext_t const&)` to attach Geronimo to every session preallocated through CloudMatch, including a user's initial launch.
 - Completed: await authoritative pause/stop callbacks while the main-thread pump remains active.
 - Completed: maintain explicit native and Swift lifecycle state and guarantee CloudMatch cleanup after allocation failures.
 - Completed: quiesce callbacks, destroy local paused-session resources without sending stop, run destructor-driven uninitialize, then release the process platform and dylib handles.
