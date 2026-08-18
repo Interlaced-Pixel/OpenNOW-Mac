@@ -152,7 +152,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `0x20`: device id `std::string`; must be non-empty.
 - `0x38`: `NVbCommunicationParams_t` block consumed by `GeronimoSettingsImpl::overrideCommunicationParams`.
 - `0x64`: synchronous initialization boolean copied into Bifrost init parameters.
-- NVIDIA's pinned `GFNQueryHandler::OnQueryNative` stores client profile `8` at `0x1c`, sets synchronous initialization to `true` at `0x64`, and leaves the client/display name at `0xe8` empty. OpenNOW mirrors those values while still advancing its state machine from the `onPrepareResult` event delivered by `GridApp::processEvents()`.
+- NVIDIA's pinned `GFNQueryHandler::OnQueryNative` stores client profile `8` at `0x1c`, sets synchronous initialization to `true` at `0x64`, and leaves the client/display name at `0xe8` empty. After `GridApp::prepare` returns true, the reference immediately initializes the decoder and continues startup instead of waiting for `onPrepareResult`; OpenNOW mirrors that synchronous transition and retains callback-driven completion for asynchronous prepare.
 - The normalized session `port` is the prepare/start endpoint fallback when `serverAddress` does not embed a port. An embedded host port remains authoritative, including bracketed IPv6 authorities.
 - `0x68`: converted server type integer copied into GridApp/Bifrost init state.
 - `0x70`: locale `std::string`.
