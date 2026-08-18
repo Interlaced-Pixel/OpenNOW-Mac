@@ -105,6 +105,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `GridApp::start(SessionParameters, NVbTracingContext_t)` calls `GridApp::setNVbSessionParams`, parses trace parent into `NVbSessionParams_t + 0x190`, initializes the agent plugin, then calls `SessionControllerImpl::startSession(NVbSessionParams_t)`.
 - `Nsk::convertToStreamingParams(StreamStartParameters, VideoDecoderInitParams, NVbStreamingParams_t)` and `Nsk::free(NVbStreamingParams_t&)` are private/non-external symbols in the current Geronimo build. OpenNOW resolves them from the `getStreamStartParameters` image base using verified arm64 text offsets `0x8a060` and `0x89a88`, or x86_64 offsets `0x9d740` and `0x9d3a0`.
 - `VideoDecoderInitParams` must not be an all-zero block. `convertToStreamingParams` reads decoder-init fields at `+0x00` and `+0x04`, then dereferences the pointer at `+0x10` and reads `+0x60` from that capability object while choosing platform streaming settings. Passing a null pointer at `+0x10` crashes at address `0x60` before Geronimo can return a failure code.
+- NVIDIA's pinned `SimpleGridApp::setupVideoDecoder` passes `0` as the second argument to `platformCreateVideoDecoder`; that parameter is not the negotiated codec. The codec is supplied later at `PlatformDecoderSettings + 0x0c` during decoder initialization. `SimpleGridApp::setDecoderDetails` forwards the negotiated dynamic-streaming mode as argument `x5` to `GridApp::setDecoderInfo`, so OpenNOW preserves `selectedFeatures.dynamicStreamingMode` instead of forcing mode `0`.
 - `0x00`: app id.
 - `0x08`: server address `std::string`.
 - `0x20`: server port copied into `NVbSessionParams_t + 0x10`.
@@ -151,7 +152,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `0x20`: device id `std::string`; must be non-empty.
 - `0x38`: `NVbCommunicationParams_t` block consumed by `GeronimoSettingsImpl::overrideCommunicationParams`.
 - `0x64`: synchronous initialization boolean copied into Bifrost init parameters.
-- OpenNOW sets synchronous initialization to `false`; the shim advances its state machine from the asynchronous `onPrepareResult` event delivered by `GridApp::processEvents()`.
+- NVIDIA's pinned `GFNQueryHandler::OnQueryNative` stores client profile `8` at `0x1c`, sets synchronous initialization to `true` at `0x64`, and leaves the client/display name at `0xe8` empty. OpenNOW mirrors those values while still advancing its state machine from the `onPrepareResult` event delivered by `GridApp::processEvents()`.
 - The normalized session `port` is the prepare/start endpoint fallback when `serverAddress` does not embed a port. An embedded host port remains authoritative, including bracketed IPv6 authorities.
 - `0x68`: converted server type integer copied into GridApp/Bifrost init state.
 - `0x70`: locale `std::string`.
