@@ -7,6 +7,7 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `libBifrost2.dylib` exports the raw `nvst*` API and higher-level `nvb*` API.
 - `libGeronimo.dylib` imports `nvb*` from `libBifrost2.dylib` and provides the macOS integration layer around session control, VideoToolbox, audio, SDL/input, and GridApp callbacks.
 - `libGeronimo.dylib`, `libBifrost2.dylib`, `libGsAudioWebRTC.dylib`, and `SDL2.framework` use `@executable_path/../Frameworks` install names, matching OpenNOW.app embedding.
+- `NativeNVSTRuntimeManifest.json` pins SHA-256 and per-architecture Mach-O UUID values for all four artifacts. CI validates source artifacts byte-for-byte, and the Objective-C++ shim rejects Geronimo or Bifrost images whose loaded-architecture UUID does not match the verified private ABI.
 
 ## Verified Raw `nvst*` Primitives
 
@@ -338,9 +339,17 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - `SessionTerminationInfo` stores termination reason at `+0x00`, extended code at `+0x04`, resumable at `+0x40`, and session-alive at `+0x41`. OpenNOW forwards reason and extended code as native phase `62` and suppresses that terminal event when a local stop is already pending.
 - `GridApp::onPrepareResult` queues delivery under `GridApp + 0x430`; `GridApp::processEvents()` swaps and dispatches that queue on its caller. OpenNOW initializes the SDL/audio/video path after successful prepare delivery and before publishing native phase `30` or calling `GridApp::start`.
 - `OpenNOWNativeNVSTGeronimoPump` must run on the main thread for the lifetime of the session. Its integer argument is the `SDL_WaitEventTimeout` duration in milliseconds; `0` performs nonblocking SDL polling. A false `SDLEventProcessor::processEvents` result is terminal.
-- The vendor main loop dispatches `GridApp::processEvents()` before SDL processing and services SDL at render-loop cadence with a maximum 16 ms wait. OpenNOW preserves that order and uses a nonblocking 60 Hz timer in the default AppKit run-loop mode. The timer therefore yields completely during title-bar, menu, and other event-tracking loops instead of competing with AppKit for input delivery.
+- The vendor main loop dispatches `GridApp::processEvents()` before SDL processing and services SDL at render-loop cadence with a maximum 16 ms wait. OpenNOW preserves that order and uses a nonblocking 60 Hz timer in AppKit common run-loop modes so title-bar, menu, and event-tracking loops do not suspend native callback delivery.
 - Swift keeps the main-thread pump active while waiting for asynchronous pause and stop callbacks. It invalidates the timer before destroying the native session.
+- Automatic recovery is disabled in production until authenticated resume parity is proven. The diagnostic recovery mode permits exactly one same-session attempt and never applies exponential or blanket retries.
+- Launch failures include a bounded ordered phase sequence, last callback identifiers, readiness gates, operation type, and attempt identifier in sanitized report metadata. Tokens, headers, query parameters, and metadata values are excluded.
 - A successful pause destroys local media and GridApp resources without calling `GridApp::stop`, preserving the intentionally paused cloud session for a later resume allocation.
 - Normal disconnect calls `GridApp::stop(char const *, int)`, waits for slot `+0x158`, then invalidates the pump timer and destroys the session. Remote termination skips this stop wait because the vendor session is already stopped.
 - `GridAppD2` calls `GridApp::uninitialize()` internally. OpenNOW must not call uninitialize a second time, and it keeps the process platform and both dylib handles alive until the destructor returns.
 - Destruction restores the embedded Metal view to the retained proxy window, detaches the per-session callback owner and waits for in-flight callbacks, destroys shim-owned media, runs `GridAppD2`, releases the video surface and reference-counted process platform, frees the cloned vtable, and closes the dylib handles.
+
+## Authenticated Validation Boundary
+
+- Deterministic CI validates ABI, payload conversion, state-machine behavior, native object construction, callback ownership, and teardown without cloud credentials.
+- `.github/workflows/nvst-authenticated.yml` is the protected real-runtime gate. It requires `OPN_NVST_TEST_TOKEN` and `OPN_NVST_TEST_APP_ID`, creates an AppKit surface, allocates a CloudMatch session, executes real Geronimo start and pump readiness, remains connected for five seconds, and performs a callback-driven stop.
+- A passing deterministic suite is not evidence of authenticated launch parity. Release readiness requires a passing protected workflow against the exact runtime manifest.
