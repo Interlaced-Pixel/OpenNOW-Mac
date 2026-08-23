@@ -144,7 +144,8 @@ private actor ControlledNativeInputRecorder {
     await recorder.unblock()
     await finishTask.value
 
-    #expect(await recorder.snapshot() == [.event(keyPress), .event(keyRelease), .event(gamepadNeutral)])
+    let recordedInputs = await recorder.snapshot()
+    #expect(recordedInputs == [.event(keyPress), .event(keyRelease), .event(gamepadNeutral)])
 }
 
 @Test func nativeNVSTDispatcherPrioritizesReleaseOverNonLossyBacklog() async {
