@@ -25,6 +25,7 @@ struct LoginView: View {
                     accounts: accounts,
                     pendingGameShortcut: $viewModel.pendingGameShortcut,
                     onSwitch: viewModel.activateAccount,
+                    onAddAccount: viewModel.addAccount,
                     onSignOut: viewModel.signOut,
                     onForget: viewModel.forgetAccount,
                     onRefreshAuth: viewModel.refreshActiveSessionIfPossible,

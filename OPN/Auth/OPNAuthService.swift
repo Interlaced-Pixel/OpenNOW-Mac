@@ -168,7 +168,13 @@ public final class OPNAuthService: @unchecked Sendable {
                         NSWorkspace.shared.open(verificationURL)
                     }
                 }
-                let session = Self.opnSession(from: try await self.starfleetService.pollDeviceAuthorization(deviceCode: response.deviceCode, interval: challenge.interval, timeout: max(1, response.expiresAt.timeIntervalSinceNow)))
+                var session = Self.opnSession(from: try await self.starfleetService.pollDeviceAuthorization(deviceCode: response.deviceCode, interval: challenge.interval, timeout: max(1, response.expiresAt.timeIntervalSinceNow)))
+                session = await self.sessionByFillingMissingUserId(session)
+                guard AccountStorageKeys.requireUserId(session.userId) != nil else {
+                    _ = await self.jarvisAuthService.finishLogin(success: false)
+                    DispatchQueue.main.async { completion(false, OPNAuthSession(), "NVIDIA did not return a user id for this session.") }
+                    return
+                }
                 await self.jarvisAuthService.setSession(session)
                 self.saveSession(session)
                 _ = await self.jarvisAuthService.finishLogin(success: true)
@@ -309,7 +315,7 @@ public final class OPNAuthService: @unchecked Sendable {
 
     private func saveSession(_ session: OPNAuthSession, replacingIdentity: String?) {
         guard session.isAuthenticated, !session.accessToken.isEmpty else { return }
-        guard let identity = sessionIdentity(from: session), !identity.isEmpty else { return }
+        guard let identity = sessionIdentity(from: session) else { return }
 
         Task { [jarvisAuthService, starfleetService] in
             await jarvisAuthService.setSession(session)
@@ -326,7 +332,7 @@ public final class OPNAuthService: @unchecked Sendable {
 
         let defaults = Self.authUserDefaults()
         defaults.set(true, forKey: "OPN_HasSavedSession")
-        defaults.set(identity, forKey: "OPN_ActiveUserId")
+        defaults.set(identity, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
         defaults.synchronize()
     }
 
@@ -350,7 +356,6 @@ public final class OPNAuthService: @unchecked Sendable {
         var session = loadSavedSession()
         guard session.isAuthenticated else { return }
         let oldIdentity = sessionIdentity(from: session)
-        session.userId = ""
         session.displayName = ""
         session.email = ""
         session.idpId = Self.defaultIdpId
@@ -359,15 +364,18 @@ public final class OPNAuthService: @unchecked Sendable {
 
     func loadSavedSession() -> OPNAuthSession {
         let defaults = Self.authUserDefaults()
-        var activeUserId: String?
-        let accounts = loadAccountDictionaries(activeUserId: &activeUserId)
-        let preferredUserId = defaults.string(forKey: "OPN_ActiveUserId") ?? activeUserId
+        var storedActiveUserId: String?
+        let accounts = loadAccountDictionaries(activeUserId: &storedActiveUserId)
+        let preferredUserId = resolvedActiveUserId(
+            preferredUserId: defaults.string(forKey: AccountStorageKeys.activeUserIdDefaultsKey) ?? storedActiveUserId,
+            accounts: accounts
+        )
         var fallback: NSDictionary?
 
         for account in accounts {
+            guard let identity = sessionIdentity(from: account) else { continue }
             if fallback == nil { fallback = account }
-            let identity = sessionIdentity(from: account)
-            if preferredUserId?.isEmpty == false, identity == preferredUserId {
+            if let preferredUserId, identity == preferredUserId {
                 let session = session(from: account)
                 if session.isAuthenticated { return session }
             }
@@ -375,8 +383,8 @@ public final class OPNAuthService: @unchecked Sendable {
 
         if let fallback {
             let session = session(from: fallback)
-            if let identity = sessionIdentity(from: fallback), !identity.isEmpty {
-                defaults.set(identity, forKey: "OPN_ActiveUserId")
+            if let identity = sessionIdentity(from: fallback) {
+                defaults.set(identity, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
             }
             defaults.set(true, forKey: "OPN_HasSavedSession")
             defaults.synchronize()
@@ -401,7 +409,7 @@ public final class OPNAuthService: @unchecked Sendable {
     }
 
     func loadSavedSession(forUserId userId: String) -> OPNAuthSession {
-        guard !userId.isEmpty else { return OPNAuthSession() }
+        guard let userId = AccountStorageKeys.requireUserId(userId) else { return OPNAuthSession() }
         for account in loadAccountDictionaries(activeUserId: nil) {
             if sessionIdentity(from: account) == userId {
                 return session(from: account)
@@ -411,30 +419,40 @@ public final class OPNAuthService: @unchecked Sendable {
     }
 
     func setActiveSessionUserId(_ userId: String) {
-        guard !userId.isEmpty else { return }
-        var activeUserId: String?
-        let accounts = loadAccountDictionaries(activeUserId: &activeUserId)
+        guard let userId = AccountStorageKeys.requireUserId(userId) else { return }
+        var storedActiveUserId: String?
+        let accounts = loadAccountDictionaries(activeUserId: &storedActiveUserId)
         guard accounts.contains(where: { sessionIdentity(from: $0) == userId }) else { return }
         saveAccountDictionaries(accounts, activeUserId: userId)
         let defaults = Self.authUserDefaults()
-        defaults.set(userId, forKey: "OPN_ActiveUserId")
+        defaults.set(userId, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
         defaults.set(true, forKey: "OPN_HasSavedSession")
         defaults.synchronize()
+        let session = loadSavedSession(forUserId: userId)
+        guard session.isAuthenticated else { return }
+        Task { [weak self] in
+            await self?.syncBackendSessions(session)
+        }
     }
 
     func removeSavedSession(userId: String) {
-        guard !userId.isEmpty else { return }
-        var activeUserId: String?
-        let existing = loadAccountDictionaries(activeUserId: &activeUserId)
+        guard let userId = AccountStorageKeys.requireUserId(userId) else { return }
+        var storedActiveUserId: String?
+        let existing = loadAccountDictionaries(activeUserId: &storedActiveUserId)
+        let currentActive = resolvedActiveUserId(
+            preferredUserId: AccountStorageKeys.activeUserId() ?? storedActiveUserId,
+            accounts: existing
+        )
+        let wasActive = currentActive == userId
         let accounts = existing.filter { sessionIdentity(from: $0) != userId }
-        let newActive = activeUserId == userId ? accounts.compactMap(sessionIdentity).first : activeUserId
+        let newActive = wasActive ? accounts.compactMap(sessionIdentity).first : currentActive
         saveAccountDictionaries(accounts, activeUserId: newActive)
         let defaults = Self.authUserDefaults()
         if let newActive, !newActive.isEmpty {
-            defaults.set(newActive, forKey: "OPN_ActiveUserId")
+            defaults.set(newActive, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
             defaults.set(true, forKey: "OPN_HasSavedSession")
         } else {
-            defaults.removeObject(forKey: "OPN_ActiveUserId")
+            defaults.removeObject(forKey: AccountStorageKeys.activeUserIdDefaultsKey)
             defaults.removeObject(forKey: "OPN_HasSavedSession")
         }
         defaults.synchronize()
@@ -442,7 +460,7 @@ public final class OPNAuthService: @unchecked Sendable {
 
     func clearSession() {
         let defaults = Self.authUserDefaults()
-        if let activeUserId = defaults.string(forKey: "OPN_ActiveUserId"), !activeUserId.isEmpty {
+        if let activeUserId = AccountStorageKeys.requireUserId(defaults.string(forKey: AccountStorageKeys.activeUserIdDefaultsKey) ?? "") {
             removeSavedSession(userId: activeUserId)
             Task { [jarvisAuthService, starfleetService] in
                 await jarvisAuthService.clearSession()
@@ -455,7 +473,7 @@ public final class OPNAuthService: @unchecked Sendable {
         }
         defaults.removeObject(forKey: "OPN_HasSavedSession")
         defaults.removeObject(forKey: "GFN_HasSavedSession")
-        defaults.removeObject(forKey: "OPN_ActiveUserId")
+        defaults.removeObject(forKey: AccountStorageKeys.activeUserIdDefaultsKey)
         defaults.synchronize()
         Task { [jarvisAuthService, starfleetService] in
             await jarvisAuthService.clearSession()
@@ -498,7 +516,13 @@ public final class OPNAuthService: @unchecked Sendable {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let session = Self.opnSession(from: try await self.starfleetService.exchangeAuthorizationCode(authCode: authCode, redirectURI: redirectUri, codeVerifier: codeVerifier, providerIdpId: providerIdpId))
+                var session = Self.opnSession(from: try await self.starfleetService.exchangeAuthorizationCode(authCode: authCode, redirectURI: redirectUri, codeVerifier: codeVerifier, providerIdpId: providerIdpId))
+                session = await self.sessionByFillingMissingUserId(session)
+                guard AccountStorageKeys.requireUserId(session.userId) != nil else {
+                    _ = await self.jarvisAuthService.finishLogin(success: false)
+                    DispatchQueue.main.async { completion(false, OPNAuthSession(), "NVIDIA did not return a user id for this session.") }
+                    return
+                }
                 await self.jarvisAuthService.setSession(session)
                 self.saveSession(session)
                 _ = await self.jarvisAuthService.finishLogin(success: true)
@@ -658,11 +682,26 @@ public final class OPNAuthService: @unchecked Sendable {
         return SHA256.hash(data: Data("\(hostname):\(user):opennow-stable".utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func authUserDefaults() -> UserDefaults {
-        if let suiteName = ProcessInfo.processInfo.environment["OPN_AUTH_USER_DEFAULTS_SUITE"], !suiteName.isEmpty {
-            return UserDefaults(suiteName: suiteName) ?? .standard
+    var activeUserId: String {
+        AccountStorageKeys.activeUserId() ?? ""
+    }
+
+    func applyActiveSessionToBackends() async {
+        let session = loadSavedSession()
+        guard session.isAuthenticated else { return }
+        await syncBackendSessions(session)
+    }
+
+    func serverLogout(idToken: String, locale: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            serverLogout(idToken: idToken, locale: locale) { success, _ in
+                continuation.resume(returning: success)
+            }
         }
-        return .standard
+    }
+
+    private static func authUserDefaults() -> UserDefaults {
+        AccountStorageKeys.authUserDefaults()
     }
 
     private func applicationSupportBasePath() -> String? {
@@ -708,7 +747,8 @@ public final class OPNAuthService: @unchecked Sendable {
     private func loadAccountDictionaries(activeUserId: UnsafeMutablePointer<String?>?) -> [NSDictionary] {
         let store = accountsFilePath().flatMap(loadPropertyListDictionary)
         activeUserId?.pointee = store?["active_user_id"] as? String
-        return store?["accounts"] as? [NSDictionary] ?? []
+        let accounts = (store?["accounts"] as? [NSDictionary] ?? []).map(accountDictionaryByFillingMissingUserId)
+        return accounts.filter { sessionIdentity(from: $0) != nil }
     }
 
     private func saveAccountDictionaries(_ accounts: [NSDictionary], activeUserId: String?) {
@@ -727,11 +767,55 @@ public final class OPNAuthService: @unchecked Sendable {
     }
 
     private func sessionIdentity(from session: OPNAuthSession) -> String? {
-        [session.userId, session.email, session.displayName, session.accessToken].first { !$0.isEmpty }
+        AccountStorageKeys.requireUserId(session.userId)
     }
 
     private func sessionIdentity(from dictionary: NSDictionary) -> String? {
-        ["user_id", "email", "display_name", "access_token"].compactMap { dictionary[$0] as? String }.first { !$0.isEmpty }
+        AccountStorageKeys.requireUserId(dictionary["user_id"] as? String ?? "")
+    }
+
+    private func resolvedActiveUserId(preferredUserId: String?, accounts: [NSDictionary]) -> String? {
+        if let preferredUserId, accounts.contains(where: { sessionIdentity(from: $0) == preferredUserId }) {
+            return preferredUserId
+        }
+        if let preferredUserId {
+            let normalized = preferredUserId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let match = accounts.first(where: { ($0["email"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized }) {
+                return sessionIdentity(from: match)
+            }
+        }
+        return accounts.compactMap(sessionIdentity).first
+    }
+
+    private func accountDictionaryByFillingMissingUserId(_ dictionary: NSDictionary) -> NSDictionary {
+        if sessionIdentity(from: dictionary) != nil { return dictionary }
+        let idToken = dictionary["id_token"] as? String ?? ""
+        let userId = (StarfleetTokenParser.jwtClaims(idToken)["sub"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userId.isEmpty else { return dictionary }
+        let updated = NSMutableDictionary(dictionary: dictionary)
+        updated["user_id"] = userId
+        return updated
+    }
+
+    private func sessionByFillingMissingUserId(_ session: OPNAuthSession) async -> OPNAuthSession {
+        if AccountStorageKeys.requireUserId(session.userId) != nil { return session }
+        var updated = session
+        let jwtUserId = (StarfleetTokenParser.jwtClaims(session.idToken)["sub"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !jwtUserId.isEmpty {
+            updated.userId = jwtUserId
+            return updated
+        }
+        guard !session.accessToken.isEmpty else { return updated }
+        do {
+            let userInfo = try await starfleetService.fetchUserInfo(accessToken: session.accessToken)
+            if !userInfo.userId.isEmpty { updated.userId = userInfo.userId }
+            if updated.displayName.isEmpty { updated.displayName = userInfo.displayName }
+            if updated.email.isEmpty { updated.email = userInfo.email }
+            if updated.idpId.isEmpty { updated.idpId = userInfo.idpId }
+        } catch {
+            return updated
+        }
+        return updated
     }
 
     private func dictionary(from session: OPNAuthSession) -> NSDictionary {

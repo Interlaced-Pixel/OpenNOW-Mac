@@ -10,7 +10,6 @@ final class OPNSessionManager: NSObject, @unchecked Sendable {
     private var adStatesBySessionId: [String: [String: Any]] = [:]
 
     private static let defaultBaseUrl = CloudMatch.productionBaseURLString
-    private static let persistedActiveSessionIdKey = "OpenNOW.Stream.ActiveSessionId"
 
     func setAccessToken(_ token: String) {
         lock.withLock { accessToken = token }
@@ -858,17 +857,17 @@ final class OPNSessionManager: NSObject, @unchecked Sendable {
 
     private func storePersistedActiveSessionId(_ sessionId: String) {
         guard !sessionId.isEmpty else { return }
-        let current = UserDefaults.standard.string(forKey: Self.persistedActiveSessionIdKey) ?? ""
+        let current = UserDefaults.standard.string(forKey: AccountStorageKeys.persistedActiveSessionIdKey()) ?? ""
         guard current != sessionId else { return }
-        UserDefaults.standard.set(sessionId, forKey: Self.persistedActiveSessionIdKey)
+        UserDefaults.standard.set(sessionId, forKey: AccountStorageKeys.persistedActiveSessionIdKey())
         UserDefaults.standard.synchronize()
         OPNSentry.logInfoMessage(OPNSentry.formattedLogMessage(level: "info", area: "SessionManager", message: "Persisted active sessionId=\(sessionId)"))
     }
 
     private func clearPersistedActiveSessionId(_ sessionId: String) {
-        let current = UserDefaults.standard.string(forKey: Self.persistedActiveSessionIdKey) ?? ""
+        let current = UserDefaults.standard.string(forKey: AccountStorageKeys.persistedActiveSessionIdKey()) ?? ""
         guard !current.isEmpty, sessionId.isEmpty || current == sessionId else { return }
-        UserDefaults.standard.removeObject(forKey: Self.persistedActiveSessionIdKey)
+        UserDefaults.standard.removeObject(forKey: AccountStorageKeys.persistedActiveSessionIdKey())
         UserDefaults.standard.synchronize()
         OPNSentry.logInfoMessage(OPNSentry.formattedLogMessage(level: "info", area: "SessionManager", message: "Cleared persisted active sessionId=\(current)"))
     }

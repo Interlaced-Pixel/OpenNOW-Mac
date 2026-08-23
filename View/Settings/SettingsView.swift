@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import SwiftData
 import SwiftUI
 
 private enum SettingsVendorLayout {
@@ -119,11 +120,23 @@ private enum SettingsFormat {
 
 struct SettingsView: View {
     @ObservedObject var viewModel: CatalogViewModel
+    let accounts: [LoginAccount]
+    let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
+    let onSignOut: () -> Void
+    let onForget: (LoginAccount) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(viewModel: viewModel)
-            SettingsContent(viewModel: viewModel)
+            SettingsContent(
+                viewModel: viewModel,
+                accounts: accounts,
+                onSwitch: onSwitch,
+                onAddAccount: onAddAccount,
+                onSignOut: onSignOut,
+                onForget: onForget
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SettingsSurfaceBackground())
@@ -217,6 +230,11 @@ private struct SettingsSidebar: View {
 
 private struct SettingsContent: View {
     @ObservedObject var viewModel: CatalogViewModel
+    let accounts: [LoginAccount]
+    let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
+    let onSignOut: () -> Void
+    let onForget: (LoginAccount) -> Void
 
     var body: some View {
         ScrollView {
@@ -242,7 +260,14 @@ private struct SettingsContent: View {
     @ViewBuilder private var page: some View {
         switch viewModel.selectedSettingsPage {
         case .account:
-            AccountSettingsPage(viewModel: viewModel)
+            AccountSettingsPage(
+                viewModel: viewModel,
+                accounts: accounts,
+                onSwitch: onSwitch,
+                onAddAccount: onAddAccount,
+                onSignOut: onSignOut,
+                onForget: onForget
+            )
         case .interface:
             InterfaceSettingsPage(viewModel: viewModel)
         case .connections:
@@ -264,7 +289,7 @@ private struct SettingsContent: View {
 
     private var subtitle: String {
         switch viewModel.selectedSettingsPage {
-        case .account: return "Membership, profile, and current NVIDIA session details."
+        case .account: return "Saved NVIDIA accounts, membership, profile, and current session details."
         case .interface: return "Choose the desktop catalog or controller-first TV interface."
         case .connections: return "Manage store accounts used for library sync and ownership detection."
         case .gameplay: return "Tune streaming quality, latency, input, audio, and microphone behavior."
@@ -308,6 +333,11 @@ private struct SettingsHeader: View {
 
 private struct AccountSettingsPage: View {
     @ObservedObject var viewModel: CatalogViewModel
+    let accounts: [LoginAccount]
+    let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
+    let onSignOut: () -> Void
+    let onForget: (LoginAccount) -> Void
     @State private var revealSensitive = false
     @State private var copiedKey = ""
 
@@ -348,6 +378,22 @@ private struct AccountSettingsPage: View {
                     }
                     Spacer(minLength: 0)
                     AccountHealthBadge(title: accountHealthTitle, subtitle: accountHealthSubtitle, positive: accountHealthPositive)
+                }
+            }
+
+            SettingsCard(title: "NVIDIA Accounts") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(accounts) { savedAccount in
+                        savedNVIDIAAccountRow(savedAccount)
+                    }
+                    HStack(spacing: 10) {
+                        SettingsActionButton(title: "ADD ACCOUNT", tone: .secondary, minimumWidth: 128, action: onAddAccount)
+                        SettingsActionButton(title: "SIGN OUT", tone: .secondary, minimumWidth: 110, action: onSignOut)
+                        SettingsActionButton(title: "FORGET CURRENT", minimumWidth: 156) {
+                            onForget(viewModel.account)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
 
@@ -437,6 +483,59 @@ private struct AccountSettingsPage: View {
 
     private var displayedEmail: String {
         revealSensitive ? viewModel.account.email : SettingsFormat.maskedEmail(viewModel.account.email)
+    }
+
+    private func savedNVIDIAAccountRow(_ savedAccount: LoginAccount) -> some View {
+        let isCurrent = isCurrentAccount(savedAccount)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                SettingsAccountAvatar(email: savedAccount.email, size: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(savedAccount.displayName)
+                            .font(.settingsNvidia(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if isCurrent {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color.openNowGreen)
+                        }
+                    }
+                    Text(savedAccount.providerName.isEmpty ? "NVIDIA" : savedAccount.providerName)
+                        .font(.settingsNvidia(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.56))
+                }
+                Spacer()
+                if isCurrent {
+                    Text("CURRENT")
+                        .font(.settingsNvidia(size: 10, weight: .bold))
+                        .foregroundStyle(.black)
+                        .tracking(0.8)
+                        .padding(.horizontal, 8)
+                        .frame(height: 20)
+                        .background(Color.openNowGreen)
+                } else {
+                    HStack(spacing: 8) {
+                        SettingsActionButton(title: "SWITCH", tone: .secondary, minimumWidth: 86) {
+                            onSwitch(savedAccount)
+                        }
+                        SettingsActionButton(title: "FORGET", minimumWidth: 86) {
+                            onForget(savedAccount)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func isCurrentAccount(_ savedAccount: LoginAccount) -> Bool {
+        if let lhs = AccountStorageKeys.requireUserId(savedAccount.userId),
+           let rhs = AccountStorageKeys.requireUserId(viewModel.account.userId) {
+            return lhs == rhs
+        }
+        return savedAccount.persistentModelID == viewModel.account.persistentModelID
     }
 
     private var accountHealthPositive: Bool {

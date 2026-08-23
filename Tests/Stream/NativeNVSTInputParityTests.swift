@@ -134,7 +134,7 @@ private actor ControlledNativeInputRecorder {
     dispatcher.enqueue(keyPress)
     await recorder.waitForCount(1)
     for playerIndex in 0..<20 {
-        dispatcher.enqueue(.gamepad(GamepadState(deviceID: "controller-\(playerIndex)", playerIndex: playerIndex, leftStickX: 0.5, timestamp: timestamp)))
+        dispatcher.enqueue(.gamepad(GamepadState(deviceID: InputDeviceID("controller-\(playerIndex)"), playerIndex: playerIndex, leftStickX: 0.5, timestamp: timestamp)))
         #expect(dispatcher.pendingInputCount <= 3)
     }
     dispatcher.enqueue(keyRelease)

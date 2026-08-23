@@ -215,7 +215,7 @@ private struct MouseButtonTransition: Equatable {
     #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 130, y: 770), to: frame) == CGPoint(x: 130, y: 770))
     #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 20, y: 900), to: frame) == CGPoint(x: 101, y: 799))
     #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 950, y: 100), to: frame) == CGPoint(x: 899, y: 201))
-    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: .nan, y: 300), to: frame) == nil)
+    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: CGFloat.nan, y: 300), to: frame) == nil)
 }
 
 @Test @MainActor func cursorModeTransitionReleasesButtonsUsingPreviousMode() throws {

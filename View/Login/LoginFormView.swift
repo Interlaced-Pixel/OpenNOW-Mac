@@ -5,6 +5,7 @@
 //
 
 import Combine
+import SwiftData
 import SwiftUI
 
 struct LoginFormView: View {
@@ -69,27 +70,46 @@ struct LoginFormView: View {
                 }
                 .padding(.bottom, 34)
 
-                providerPicker
-                    .padding(.bottom, 18)
+                if showsRememberedAccounts {
+                    rememberedAccountsList
+                        .padding(.bottom, 18)
+                } else {
+                    providerPicker
+                        .padding(.bottom, 18)
 
-                Button(action: startVendorLogin) {
-                    Text(viewModel.hasPendingOAuth ? "REOPEN" : "GET IN")
-                }
-                .buttonStyle(VendorGetInButtonStyle())
-                .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
-                .accessibilityHint("Opens \(viewModel.selectedProvider.title) authentication in your browser")
-                .padding(.bottom, 12)
+                    Button(action: startVendorLogin) {
+                        Text(viewModel.hasPendingOAuth ? "REOPEN" : "GET IN")
+                    }
+                    .buttonStyle(VendorGetInButtonStyle())
+                    .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+                    .accessibilityHint("Opens \(viewModel.selectedProvider.title) authentication in your browser")
+                    .padding(.bottom, 12)
 
-                Button(action: startDeviceCodeLogin) {
-                    Text("BROWSER SIGN-IN")
-                        .font(.nvidiaSans(size: 12, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen)
-                        .tracking(0.8)
+                    Button(action: startDeviceCodeLogin) {
+                        Text("BROWSER SIGN-IN")
+                            .font(.nvidiaSans(size: 12, weight: .bold))
+                            .foregroundStyle(Color.openNowGreen)
+                            .tracking(0.8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+                    .accessibilityHint("Opens NVIDIA browser authentication")
+                    .padding(.bottom, viewModel.deviceCodeUserCode.isEmpty ? 12 : 12)
+
+                    if !accounts.isEmpty {
+                        Button(action: viewModel.showRememberedAccounts) {
+                            Text("BACK TO SAVED ACCOUNTS")
+                                .font(.nvidiaSans(size: 12, weight: .bold))
+                                .foregroundStyle(Color.gfnTextSecondary)
+                                .tracking(0.8)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+                        .padding(.bottom, 20)
+                    } else {
+                        Color.clear.frame(height: 20)
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
-                .accessibilityHint("Opens NVIDIA browser authentication")
-                .padding(.bottom, viewModel.deviceCodeUserCode.isEmpty ? 32 : 12)
 
                 if !viewModel.deviceCodeUserCode.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -185,6 +205,106 @@ struct LoginFormView: View {
                     .foregroundStyle(Color.gfnTextTertiary)
             }
         }
+    }
+
+    private var showsRememberedAccounts: Bool {
+        !accounts.isEmpty && !viewModel.isShowingAccountPicker
+    }
+
+    private var rememberedAccountsList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("SAVED ACCOUNTS")
+                .font(.nvidiaSans(size: 11, weight: .bold))
+                .foregroundStyle(Color.gfnTextTertiary)
+                .tracking(0.8)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(accounts) { account in
+                    rememberedAccountRow(account)
+                }
+            }
+
+            Button(action: viewModel.showNewAccountLogin) {
+                Text("USE A DIFFERENT ACCOUNT")
+                    .font(.nvidiaSans(size: 12, weight: .bold))
+                    .foregroundStyle(Color.openNowGreen)
+                    .tracking(0.8)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+            .accessibilityHint("Start NVIDIA sign-in for another account")
+            .padding(.top, 6)
+        }
+    }
+
+    private func rememberedAccountRow(_ account: LoginAccount) -> some View {
+        let isLastActive = AccountStorageKeys.activeUserId() == account.userId
+        let canRestore = viewModel.canRestoreAccount(account)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                CatalogAccountAvatar(account: account, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(account.displayName)
+                            .font(.nvidiaSans(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if isLastActive {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color.openNowGreen)
+                        }
+                    }
+                    Text(account.providerName.isEmpty ? "NVIDIA" : account.providerName)
+                        .font(.nvidiaSans(size: 11, weight: .regular))
+                        .foregroundStyle(Color.gfnTextTertiary)
+                        .lineLimit(1)
+                    Text("Last login \(lastLoginText(account.lastLoginAt))")
+                        .font(.nvidiaSans(size: 11, weight: .regular))
+                        .foregroundStyle(Color.gfnTextSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.selectRememberedAccount(account)
+                    viewModel.activateAccount(account)
+                } label: {
+                    Text(canRestore ? "CONTINUE" : "SIGN IN")
+                }
+                .buttonStyle(VendorGetInButtonStyle())
+                .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+
+                Button(role: .destructive) {
+                    viewModel.forgetAccount(account)
+                } label: {
+                    Text("FORGET")
+                        .font(.nvidiaSans(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .tracking(0.6)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .overlay { Rectangle().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isLaunchingOAuth || viewModel.isAuthenticating)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 320, alignment: .leading)
+        .background(Color.white.opacity(isLastActive ? 0.10 : 0.06))
+        .overlay {
+            Rectangle().stroke(isLastActive ? Color.openNowGreen.opacity(0.55) : Color.gfnStroke, lineWidth: 1)
+        }
+    }
+
+    private func lastLoginText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private func startVendorLogin() {

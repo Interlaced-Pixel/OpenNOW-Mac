@@ -37,7 +37,13 @@ import Testing
 
     @Test func cachedRegionsDeduplicatePersistedNormalizedUrls() {
         let defaults = UserDefaults.standard
-        let cachedRegionsKey = "OpenNOW.Stream.CachedRegions"
+        let cachedRegionsKey: String = {
+            if let userId = AccountStorageKeys.activeUserId(),
+               let key = AccountStorageKeys.key(.cachedRegions, userId: userId) {
+                return key
+            }
+            return AccountStorageKeys.Legacy.cachedRegions
+        }()
         let previousCachedRegions = defaults.object(forKey: cachedRegionsKey)
         defer {
             if let previousCachedRegions { defaults.set(previousCachedRegions, forKey: cachedRegionsKey) }

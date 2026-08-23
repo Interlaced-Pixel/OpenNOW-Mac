@@ -10,14 +10,14 @@ import SwiftData
 
 @Model
 final class LoginAccount {
-    @Attribute(.unique) var email: String
+    var email: String
     var displayName: String
     var providerIdpId: String
     var providerName: String
     var membershipTier: String
     var authorizationState: String
     var authStatus: String
-    var userId: String = ""
+    @Attribute(.unique) var userId: String = ""
     var externalUserId: String = ""
     var preferredRegion: String
     var createdAt: Date

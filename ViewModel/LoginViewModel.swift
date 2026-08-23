@@ -6,7 +6,6 @@
 
 import AppKit
 import Combine
-import CryptoKit
 import Foundation
 import SwiftData
 import SwiftUI
@@ -22,7 +21,6 @@ private final class LoginWeakObject<T: AnyObject>: @unchecked Sendable {
 @MainActor
 final class LoginViewModel: ObservableObject {
     @Published var email = ""
-    @Published var oauthCallbackText = ""
     @Published var providers = [LoginProvider.nvidia]
     @Published var selectedProvider = LoginProvider.nvidia
     @Published var rememberSession = true
@@ -40,11 +38,11 @@ final class LoginViewModel: ObservableObject {
     @Published var deviceCodeVerificationURI = ""
 
     private let authService = OPNAuthService.shared
-    private let jarvisAuthService = JarvisAuthService(transport: JarvisURLSessionTransport())
     private var modelContext: ModelContext?
     private var accounts: [LoginAccount] = []
     private var sessions: [LoginSession] = []
     private var devices: [LoginDeviceRegistration] = []
+    private var oauthRestoreUserId: String?
 
     var authStatusSummary: String {
         if isAuthenticating { return JarvisAuthStatus.pendingLogin.rawValue.replacingOccurrences(of: "_", with: " ") }
@@ -65,7 +63,14 @@ final class LoginViewModel: ObservableObject {
 
     var activeAccount: LoginAccount? {
         guard let activeSession else { return nil }
+        if let userId = AccountStorageKeys.requireUserId(activeSession.userId) {
+            if let match = accounts.first(where: { $0.userId == userId }) { return match }
+        }
         return accounts.first { $0.email == activeSession.accountEmail }
+    }
+
+    var rememberedAccounts: [LoginAccount] {
+        accounts.sorted { $0.lastLoginAt > $1.lastLoginAt }
     }
 
     var primaryDevice: LoginDeviceRegistration {
@@ -80,10 +85,6 @@ final class LoginViewModel: ObservableObject {
         acceptedTerms && !isLaunchingOAuth && !isAuthenticating
     }
 
-    var canCompleteOAuth: Bool {
-        hasPendingOAuth && !oauthCallbackText.trimmed.isEmpty && !isAuthenticating
-    }
-
     func update(modelContext: ModelContext, accounts: [LoginAccount], sessions: [LoginSession], devices: [LoginDeviceRegistration]) {
         self.modelContext = modelContext
         self.accounts = accounts
@@ -94,6 +95,7 @@ final class LoginViewModel: ObservableObject {
     func bootstrap() {
         OpenNOWLog.info(.auth, "Login bootstrap started accounts=\(accounts.count) sessions=\(sessions.count) devices=\(devices.count)")
         ensureDeviceRegistration()
+        hydrateAccountsFromAuthServiceIfNeeded()
         prefillLastAccount()
         refreshLoginProviders()
         OpenNOWLog.info(.auth, "Login bootstrap completed hasActiveSession=\(activeSession != nil) hasPendingOAuth=\(hasPendingOAuth)")
@@ -109,6 +111,23 @@ final class LoginViewModel: ObservableObject {
         email = account.email
         selectedProvider = providerOption(idpId: account.providerIdpId, fallbackName: account.providerName)
         rememberSession = account.rememberSession
+        isShowingAccountPicker = false
+    }
+
+    func showNewAccountLogin() {
+        withAnimation(.snappy) {
+            isShowingAccountPicker = true
+        }
+    }
+
+    func showRememberedAccounts() {
+        withAnimation(.snappy) {
+            isShowingAccountPicker = false
+        }
+    }
+
+    func canRestoreAccount(_ account: LoginAccount) -> Bool {
+        storedSession(for: account) != nil || authService.loadSavedSession(forUserId: account.userId).isAuthenticated
     }
 
     func selectProvider(_ provider: LoginProvider) {
@@ -116,20 +135,24 @@ final class LoginViewModel: ObservableObject {
     }
 
     func launchOAuth() {
-        Task { await beginOAuth() }
+        Task { await beginOAuth(preservingCurrentAccount: false) }
+    }
+
+    func addAccount() {
+        if isAccountLifecycleBlocked {
+            validationMessage = "End your current game session before adding an account."
+            return
+        }
+        Task { await beginOAuth(preservingCurrentAccount: activeSession != nil) }
     }
 
     func launchDeviceCodeOAuth() {
         Task { await beginDeviceCodeOAuth() }
     }
 
-    func completeOAuthWithCallbackText() {
-        Task { await completeOAuth(callbackText: oauthCallbackText) }
-    }
-
     func handleOAuthCallback(_ url: URL) {
         guard url.scheme == "com.nvidia.geforcenow" || url.scheme == "opennow" else { return }
-        Task { await completeOAuth(callbackText: url.absoluteString) }
+        OpenNOWLog.info(.auth, "Ignoring custom-scheme OAuth callback because browser sign-in completes through the local listener")
     }
 
     func handleOpenedFile(_ url: URL) {
@@ -156,10 +179,21 @@ final class LoginViewModel: ObservableObject {
     }
 
     func activateAccount(_ account: LoginAccount) {
+        if isAccountLifecycleBlocked {
+            validationMessage = "End your current game session before switching accounts."
+            return
+        }
+        if let active = activeAccount, accountsMatch(active, account) {
+            return
+        }
         Task { _ = await restoreAccountSession(account) }
     }
 
     func signOut() {
+        if isAccountLifecycleBlocked {
+            validationMessage = "End your current game session before signing out."
+            return
+        }
         Task { await signOutCurrentSession() }
     }
 
@@ -174,19 +208,22 @@ final class LoginViewModel: ObservableObject {
     }
 
     func forgetAccount(_ account: LoginAccount) {
-        guard let modelContext else { return }
-        for session in sessions where session.accountEmail == account.email {
-            modelContext.delete(session)
+        if isAccountLifecycleBlocked {
+            validationMessage = "End your current game session before forgetting an account."
+            return
         }
-        modelContext.delete(account)
-        trySave()
+        Task { await forgetAccountAndRebind(account) }
     }
 
-    private func beginOAuth() async {
+    private var isAccountLifecycleBlocked: Bool {
+        WebRTCMediaStreamLifecycle.hasActiveStream
+    }
+
+    private func beginOAuth(preservingCurrentAccount: Bool) async {
         validationMessage = ""
         successMessage = ""
         let loginProvider = selectedProvider
-        OpenNOWLog.info(.auth, "Beginning OAuth launch provider=\(loginProvider.idpId)")
+        OpenNOWLog.info(.auth, "Beginning OAuth launch provider=\(loginProvider.idpId) preservingCurrent=\(preservingCurrentAccount)")
 
         guard acceptedTerms else {
             OpenNOWLog.warning(.auth, "OAuth launch blocked because terms were not accepted")
@@ -194,6 +231,7 @@ final class LoginViewModel: ObservableObject {
             return
         }
 
+        oauthRestoreUserId = preservingCurrentAccount ? AccountStorageKeys.canonicalUserId(accountUserId: activeAccount?.userId ?? "", sessionUserId: activeSession?.userId ?? "") : nil
         isLaunchingOAuth = true
         validationMessage = "Finish \(loginProvider.title) sign-in in the browser. OpenNOW will continue automatically."
 
@@ -204,19 +242,24 @@ final class LoginViewModel: ObservableObject {
                 self.isLaunchingOAuth = false
                 self.currentAuthorizationURL = ""
                 self.clearPendingOAuthState()
-                self.oauthCallbackText = ""
+                let restoreUserId = self.oauthRestoreUserId
+                self.oauthRestoreUserId = nil
 
                 guard success else {
                     self.validationMessage = error.isEmpty ? "\(loginProvider.title) sign-in failed." : error
                     OpenNOWLog.error(.auth, "OAuth start failed provider=\(loginProvider.idpId) error=\(self.validationMessage)")
+                    if let restoreUserId {
+                        self.authService.setActiveSessionUserId(restoreUserId)
+                        await self.authService.applyActiveSessionToBackends()
+                    }
                     return
                 }
 
-                await self.jarvisAuthService.setSession(session)
                 self.persistSignedInSession(session: session, userInfo: nil, authMethod: Jarvis.Operation.getSessionToken.rawValue)
+                self.bindRuntimeTokens(session)
                 self.validationMessage = ""
                 self.successMessage = "\(loginProvider.title) account connected. Client token and session metadata are ready."
-                OpenNOWLog.info(.auth, "OAuth start completed provider=\(loginProvider.idpId)")
+                OpenNOWLog.info(.auth, "OAuth start completed provider=\(loginProvider.idpId) userId=\(session.userId)")
             }
         }
     }
@@ -225,57 +268,7 @@ final class LoginViewModel: ObservableObject {
         OpenNOWLog.info(.auth, "Starfleet device-code OAuth is unavailable; launching browser OAuth instead")
         deviceCodeUserCode = ""
         deviceCodeVerificationURI = ""
-        await beginOAuth()
-    }
-
-    private func completeOAuth(callbackText: String) async {
-        validationMessage = ""
-        successMessage = ""
-
-        let device = primaryDevice
-        guard !device.pendingOAuthState.isEmpty, !device.pendingOAuthCodeVerifier.isEmpty else {
-            OpenNOWLog.warning(.auth, "OAuth callback ignored because pending state is missing")
-            validationMessage = "Start browser sign-in before completing authorization."
-            return
-        }
-
-        guard let query = Self.callbackQuery(from: callbackText.trimmed) else {
-            OpenNOWLog.warning(.auth, "OAuth callback rejected because callback text could not be parsed")
-            validationMessage = "Paste the full callback URL or authorization query from the browser."
-            requestedFocus = .callback
-            return
-        }
-
-        isAuthenticating = true
-        defer { isAuthenticating = false }
-        OpenNOWLog.info(.auth, "Completing OAuth callback provider=\(device.pendingOAuthProviderIdpId.isEmpty ? selectedProvider.idpId : device.pendingOAuthProviderIdpId)")
-
-        do {
-            let callback = try await jarvisAuthService.parseCallback(query: query, expectedState: device.pendingOAuthState)
-            let providerIdpId = device.pendingOAuthProviderIdpId.isEmpty ? selectedProvider.idpId : device.pendingOAuthProviderIdpId
-            let redirectURI = device.pendingOAuthRedirectURI.isEmpty ? JarvisOAuthConfiguration.gfnPC.redirectURI : device.pendingOAuthRedirectURI
-            let session = try await jarvisAuthService.exchangeAuthorizationCode(
-                authCode: callback.code,
-                redirectURI: redirectURI,
-                codeVerifier: device.pendingOAuthCodeVerifier,
-                providerIdpId: providerIdpId
-            )
-            let userInfo = try await jarvisAuthService.getCurrentUser(forceRefresh: false)
-            persistSignedInSession(session: session, userInfo: userInfo, authMethod: Jarvis.Operation.getSessionToken.rawValue)
-            clearPendingOAuthState()
-            oauthCallbackText = ""
-            currentAuthorizationURL = ""
-            trySave()
-            _ = await jarvisAuthService.finishLogin(success: true)
-            let providerTitle = providerOption(idpId: providerIdpId, fallbackName: selectedProvider.title).title
-            successMessage = "\(providerTitle) account connected. Client token and session metadata are ready."
-            OpenNOWLog.info(.auth, "OAuth callback completed userId=\(session.userId) provider=\(providerIdpId)")
-        } catch {
-            _ = await jarvisAuthService.finishLogin(success: false)
-            validationMessage = Self.userFacingError(error)
-            requestedFocus = .callback
-            OpenNOWLog.error(.auth, "OAuth callback failed: \(validationMessage)")
-        }
+        await beginOAuth(preservingCurrentAccount: false)
     }
 
     private func restoreAccountSession(_ account: LoginAccount) async -> Bool {
@@ -285,8 +278,8 @@ final class LoginViewModel: ObservableObject {
         selectedProvider = providerOption(idpId: account.providerIdpId, fallbackName: account.providerName)
         rememberSession = account.rememberSession
 
-        guard let storedSession = sessions.first(where: { $0.accountEmail == account.email && !$0.accessToken.isEmpty }) else {
-            OpenNOWLog.warning(.auth, "Session restore failed because no saved session exists for account=\(account.email)")
+        guard let userId = AccountStorageKeys.requireUserId(account.userId) ?? AccountStorageKeys.requireUserId(storedSession(for: account)?.userId ?? "") else {
+            OpenNOWLog.warning(.auth, "Session restore failed because no user id exists for account=\(account.email)")
             validationMessage = "No saved session exists for this account. Sign in again."
             return false
         }
@@ -294,44 +287,44 @@ final class LoginViewModel: ObservableObject {
         isAuthenticating = true
         defer { isAuthenticating = false }
 
-        var jarvisSession = JarvisSession(
-            accessToken: storedSession.accessToken,
-            idToken: storedSession.idToken,
-            refreshToken: storedSession.refreshToken,
-            userId: storedSession.userId,
-            displayName: account.displayName,
-            email: account.email,
-            membershipTier: account.membershipTier,
-            idpId: storedSession.idpId.isEmpty ? account.providerIdpId : storedSession.idpId,
-            expiresAt: Int64(storedSession.expiresAt.timeIntervalSince1970),
-            isAuthenticated: true,
-            clientToken: storedSession.clientToken,
-            clientTokenExpiry: Int64(storedSession.clientTokenExpiresAt.timeIntervalSince1970 * 1000.0),
-            clientTokenExpiryLength: 0,
-            accessTokenExpiry: Int64(storedSession.expiresAt.timeIntervalSince1970 * 1000.0)
-        )
-        if jarvisSession.idTokenExpiry == 0 {
-            jarvisSession.idTokenExpiry = JarvisSessionParser.idTokenExpiry(storedSession.idToken)
+        var jarvisSession = authService.loadSavedSession(forUserId: userId)
+        var migratedFromSwiftData = false
+        if !jarvisSession.isAuthenticated, let storedSession = storedSession(for: account), !storedSession.accessToken.isEmpty {
+            jarvisSession = makeJarvisSession(from: storedSession, account: account)
+            migratedFromSwiftData = true
         }
 
+        guard jarvisSession.isAuthenticated, AccountStorageKeys.requireUserId(jarvisSession.userId) != nil else {
+            OpenNOWLog.warning(.auth, "Session restore failed because no saved session exists for userId=\(userId)")
+            validationMessage = "No saved session exists for this account. Sign in again."
+            return false
+        }
+
+        if migratedFromSwiftData {
+            authService.saveSession(jarvisSession)
+        }
+        authService.setActiveSessionUserId(userId)
+        await authService.applyActiveSessionToBackends()
+
         do {
-            OpenNOWLog.info(.auth, "Refreshing saved session account=\(account.email)")
-            await jarvisAuthService.setSession(jarvisSession)
-            let refreshed = try await jarvisAuthService.refreshSession(force: !jarvisSession.isIdTokenValid)
+            OpenNOWLog.info(.auth, "Refreshing saved session userId=\(userId)")
+            let refreshed = try await authService.refreshSession(forceRefresh: !jarvisSession.isIdTokenValid)
             persistSignedInSession(session: refreshed, userInfo: nil, authMethod: Jarvis.Operation.getSessionToken.rawValue)
+            bindRuntimeTokens(refreshed)
             successMessage = "Session refreshed for \(account.displayName)."
-            OpenNOWLog.info(.auth, "Session refreshed account=\(account.email)")
+            OpenNOWLog.info(.auth, "Session refreshed userId=\(userId)")
             return true
         } catch {
-            if storedSession.canContinueOffline && !storedSession.isExpired {
-                markActive(accountEmail: account.email)
+            if let storedSession = storedSession(for: account), storedSession.canContinueOffline, !storedSession.isExpired {
+                markActive(userId: userId)
+                bindRuntimeTokens(jarvisSession)
                 trySave()
                 successMessage = "Using saved offline session for \(account.displayName)."
-                OpenNOWLog.warning(.auth, "Using offline saved session account=\(account.email) refreshError=\(error.localizedDescription)")
+                OpenNOWLog.warning(.auth, "Using offline saved session userId=\(userId) refreshError=\(error.localizedDescription)")
                 return false
             } else {
                 validationMessage = "Saved session expired. Sign in again."
-                OpenNOWLog.warning(.auth, "Session restore failed account=\(account.email) error=\(error.localizedDescription)")
+                OpenNOWLog.warning(.auth, "Session restore failed userId=\(userId) error=\(error.localizedDescription)")
                 return false
             }
         }
@@ -339,20 +332,62 @@ final class LoginViewModel: ObservableObject {
 
     private func signOutCurrentSession() async {
         OpenNOWLog.info(.auth, "Signing out current session")
-        for account in accounts {
-            account.isActive = false
-            account.authStatus = JarvisAuthStatus.notLoggedIn.rawValue
+        let currentAccount = activeAccount
+        let currentSession = activeSession
+        let idToken = currentSession?.idToken ?? ""
+
+        if let currentAccount {
+            currentAccount.isActive = false
+            currentAccount.authStatus = JarvisAuthStatus.notLoggedIn.rawValue
         }
-        for session in sessions {
-            session.isActive = false
+        if let currentSession {
+            currentSession.isActive = false
+            currentSession.accessToken = ""
+            currentSession.refreshToken = ""
+            currentSession.idToken = ""
+            currentSession.clientToken = ""
         }
         clearPendingOAuthState()
         currentAuthorizationURL = ""
-        oauthCallbackText = ""
         trySave()
-        await jarvisAuthService.clearSession()
+
+        if idToken.isEmpty {
+            authService.clearSession()
+        } else {
+            _ = await authService.serverLogout(idToken: idToken, locale: "")
+        }
+        OPNSessionManager.shared.setAccessToken("")
         successMessage = "Signed out."
-        OpenNOWLog.info(.auth, "Sign out completed")
+        OpenNOWLog.info(.auth, "Sign out completed userId=\(currentAccount?.userId ?? "")")
+    }
+
+    private func forgetAccountAndRebind(_ account: LoginAccount) async {
+        guard let modelContext else { return }
+        let forgottenUserId = AccountStorageKeys.requireUserId(account.userId)
+        let wasActive = activeAccount.map { accountsMatch($0, account) } ?? false
+        let remaining = accounts.filter { !accountsMatch($0, account) }
+
+        for session in sessions where sessionBelongs(session, to: account) {
+            modelContext.delete(session)
+            sessions.removeAll { $0.id == session.id }
+        }
+        modelContext.delete(account)
+        accounts.removeAll { accountsMatch($0, account) }
+        trySave()
+
+        if let forgottenUserId {
+            authService.removeSavedSession(userId: forgottenUserId)
+        }
+
+        if wasActive {
+            if let next = remaining.sorted(by: { $0.lastLoginAt > $1.lastLoginAt }).first {
+                _ = await restoreAccountSession(next)
+            } else {
+                authService.clearSession()
+                OPNSessionManager.shared.setAccessToken("")
+            }
+        }
+        OpenNOWLog.info(.auth, "Forgot account userId=\(forgottenUserId ?? "") wasActive=\(wasActive)")
     }
 
     private func persistSignedInSession(session: JarvisSession, userInfo: JarvisUserInfo?, authMethod: String) {
@@ -362,38 +397,47 @@ final class LoginViewModel: ObservableObject {
             return
         }
 
+        guard let userId = AccountStorageKeys.requireUserId(session.userId) else {
+            validationMessage = "NVIDIA did not return a user id for this session."
+            OpenNOWLog.error(.auth, "Cannot persist signed-in session because userId is empty")
+            return
+        }
+
         let now = Date()
         let normalizedEmail = Self.normalizedEmail(session: session, userInfo: userInfo, fallbackEmail: email)
         let displayName = Self.displayName(session: session, userInfo: userInfo, email: normalizedEmail)
         let providerIdpId = session.idpId.isEmpty ? selectedProvider.idpId : session.idpId
         let resolvedProvider = providerOption(idpId: providerIdpId, fallbackName: selectedProvider.title)
-        let existingSession = sessions.first { $0.accountEmail == normalizedEmail && $0.isActive } ?? sessions.first { $0.accountEmail == normalizedEmail }
+        let existingSession = sessions.first { $0.userId == userId } ?? sessions.first { $0.accountEmail == normalizedEmail }
 
         for account in accounts { account.isActive = false }
         for storedSession in sessions { storedSession.isActive = false }
 
         let account: LoginAccount
-        if let existingAccount = accounts.first(where: { $0.email == normalizedEmail }) {
+        if let existingAccount = accounts.first(where: { $0.userId == userId })
+            ?? accounts.first(where: { $0.userId.isEmpty && $0.email == normalizedEmail }) {
             account = existingAccount
         } else {
             account = LoginAccount(
                 email: normalizedEmail,
                 displayName: displayName,
                 providerIdpId: providerIdpId,
-                providerName: resolvedProvider.title
+                providerName: resolvedProvider.title,
+                userId: userId
             )
             modelContext.insert(account)
             accounts.insert(account, at: 0)
         }
 
         let authorization = NesAuthorizationPolicy().result(authType: JarvisAuthType.jwtGFN.rawValue)
+        account.email = normalizedEmail
         account.displayName = displayName
         account.providerIdpId = providerIdpId
         account.providerName = resolvedProvider.title
         account.membershipTier = session.membershipTier.isEmpty ? "Free" : session.membershipTier
         account.authorizationState = authorization.state.rawValue
         account.authStatus = JarvisAuthStatus.loggedIn.rawValue
-        account.userId = session.userId
+        account.userId = userId
         account.externalUserId = userInfo?.externalId ?? session.userId
         account.lastLoginAt = now
         account.rememberSession = rememberSession
@@ -442,16 +486,119 @@ final class LoginViewModel: ObservableObject {
         }
         primaryDevice.lastUsedAt = now
         trySave()
-        OpenNOWLog.info(.auth, "Persisted signed-in session account=\(normalizedEmail) provider=\(providerIdpId) canContinueOffline=\(rememberSession)")
+        authService.saveSession(session)
+        OpenNOWLog.info(.auth, "Persisted signed-in session userId=\(userId) account=\(normalizedEmail) provider=\(providerIdpId) canContinueOffline=\(rememberSession)")
     }
 
-    private func markActive(accountEmail: String) {
+    private func markActive(userId: String) {
         for account in accounts {
-            account.isActive = account.email == accountEmail
+            account.isActive = account.userId == userId
             account.authStatus = account.isActive ? JarvisAuthStatus.loggedIn.rawValue : JarvisAuthStatus.notLoggedIn.rawValue
         }
         for session in sessions {
-            session.isActive = session.accountEmail == accountEmail
+            session.isActive = session.userId == userId
+        }
+        authService.setActiveSessionUserId(userId)
+    }
+
+    private func bindRuntimeTokens(_ session: JarvisSession) {
+        OPNSessionManager.shared.setAccessToken(session.accessToken)
+        let userId = AccountStorageKeys.requireUserId(session.userId) ?? ""
+        OPNGameServiceSwiftAdapter.configureCatalogSession(accessToken: session.accessToken, idToken: session.idToken, userId: userId)
+    }
+
+    private func storedSession(for account: LoginAccount) -> LoginSession? {
+        if let userId = AccountStorageKeys.requireUserId(account.userId) {
+            if let match = sessions.first(where: { $0.userId == userId && !$0.accessToken.isEmpty }) { return match }
+            if let match = sessions.first(where: { $0.userId == userId }) { return match }
+        }
+        return sessions.first { $0.accountEmail == account.email && !$0.accessToken.isEmpty }
+            ?? sessions.first { $0.accountEmail == account.email }
+    }
+
+    private func sessionBelongs(_ session: LoginSession, to account: LoginAccount) -> Bool {
+        if let userId = AccountStorageKeys.requireUserId(account.userId), session.userId == userId { return true }
+        return session.accountEmail == account.email
+    }
+
+    private func accountsMatch(_ lhs: LoginAccount, _ rhs: LoginAccount) -> Bool {
+        if let lhsId = AccountStorageKeys.requireUserId(lhs.userId), let rhsId = AccountStorageKeys.requireUserId(rhs.userId) {
+            return lhsId == rhsId
+        }
+        return lhs.persistentModelID == rhs.persistentModelID
+    }
+
+    private func makeJarvisSession(from storedSession: LoginSession, account: LoginAccount) -> JarvisSession {
+        var session = JarvisSession(
+            accessToken: storedSession.accessToken,
+            idToken: storedSession.idToken,
+            refreshToken: storedSession.refreshToken,
+            userId: AccountStorageKeys.requireUserId(storedSession.userId) ?? account.userId,
+            displayName: account.displayName,
+            email: account.email,
+            membershipTier: account.membershipTier,
+            idpId: storedSession.idpId.isEmpty ? account.providerIdpId : storedSession.idpId,
+            expiresAt: Int64(storedSession.expiresAt.timeIntervalSince1970),
+            isAuthenticated: true,
+            clientToken: storedSession.clientToken,
+            clientTokenExpiry: Int64(storedSession.clientTokenExpiresAt.timeIntervalSince1970 * 1000.0),
+            clientTokenExpiryLength: 0,
+            accessTokenExpiry: Int64(storedSession.expiresAt.timeIntervalSince1970 * 1000.0)
+        )
+        if session.idTokenExpiry == 0 {
+            session.idTokenExpiry = JarvisSessionParser.idTokenExpiry(storedSession.idToken)
+        }
+        return session
+    }
+
+    private func hydrateAccountsFromAuthServiceIfNeeded() {
+        guard let modelContext else { return }
+        let saved = authService.loadSavedSessions()
+        guard !saved.isEmpty else { return }
+        let existingUserIds = Set(accounts.compactMap { AccountStorageKeys.requireUserId($0.userId) })
+        let now = Date()
+        var inserted = false
+        for session in saved {
+            guard let userId = AccountStorageKeys.requireUserId(session.userId), !existingUserIds.contains(userId) else { continue }
+            let email = Self.normalizedEmail(session: session, userInfo: nil, fallbackEmail: "")
+            let provider = providerOption(idpId: session.idpId, fallbackName: "")
+            let account = LoginAccount(
+                email: email,
+                displayName: Self.displayName(session: session, userInfo: nil, email: email),
+                providerIdpId: session.idpId.isEmpty ? provider.idpId : session.idpId,
+                providerName: provider.title,
+                membershipTier: session.membershipTier.isEmpty ? "Free" : session.membershipTier,
+                userId: userId,
+                lastLoginAt: now,
+                isActive: false
+            )
+            modelContext.insert(account)
+            accounts.append(account)
+            let expiry = Date(timeIntervalSince1970: TimeInterval(session.expiresAt > 0 ? session.expiresAt : Int64(now.addingTimeInterval(86_400).timeIntervalSince1970)))
+            let clientExpiry = session.clientTokenExpiry > 0 ? Date(timeIntervalSince1970: TimeInterval(session.clientTokenExpiry) / 1000.0) : expiry
+            let storedSession = LoginSession(
+                accountEmail: email,
+                authMethod: Jarvis.Operation.getSessionToken.rawValue,
+                accessToken: session.accessToken,
+                clientToken: session.clientToken,
+                idToken: session.idToken,
+                refreshToken: session.refreshToken,
+                userId: userId,
+                idpId: session.idpId,
+                deviceId: primaryDevice.deviceId,
+                issuedAt: now,
+                expiresAt: expiry,
+                clientTokenExpiresAt: clientExpiry,
+                isActive: false,
+                canContinueOffline: true
+            )
+            modelContext.insert(storedSession)
+            sessions.append(storedSession)
+            inserted = true
+        }
+        if inserted {
+            trySave()
+            OpenNOWLog.info(.auth, "Hydrated SwiftData accounts from the token vault count=\(accounts.count)")
         }
     }
 
@@ -474,10 +621,17 @@ final class LoginViewModel: ObservableObject {
     }
 
     private func prefillLastAccount() {
-        guard email.isEmpty, let account = accounts.first else { return }
+        guard email.isEmpty else { return }
+        let lastActiveUserId = AccountStorageKeys.activeUserId()
+        let account = rememberedAccounts.first { account in
+            guard let lastActiveUserId else { return false }
+            return account.userId == lastActiveUserId
+        } ?? rememberedAccounts.first
+        guard let account else { return }
         email = account.email
         selectedProvider = providerOption(idpId: account.providerIdpId, fallbackName: account.providerName)
         rememberSession = account.rememberSession
+        isShowingAccountPicker = rememberedAccounts.isEmpty
     }
 
     private func refreshLoginProviders() {
@@ -576,30 +730,6 @@ final class LoginViewModel: ObservableObject {
         let candidates = [userInfo?.displayName, userInfo?.preferredUsername, session.displayName]
         if let value = candidates.compactMap({ $0?.trimmed }).first(where: { !$0.isEmpty }) { return value }
         return email.split(separator: "@").first.map { String($0).capitalized } ?? "Player"
-    }
-
-    private static func callbackQuery(from text: String) -> String? {
-        if let url = URL(string: text), let query = url.query, !query.isEmpty { return query }
-        if text.contains("code=") || text.contains("error=") { return text.hasPrefix("?") ? String(text.dropFirst()) : text }
-        return nil
-    }
-
-    private static func userFacingError(_ error: Error) -> String {
-        if let jarvisError = error as? JarvisAuthError { return jarvisError.localizedDescription }
-        return error.localizedDescription
-    }
-
-    private static func randomOAuthString(length: Int) -> String {
-        let alphabet = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
-        return String((0..<length).compactMap { _ in alphabet.randomElement() })
-    }
-
-    private static func codeChallenge(for verifier: String) -> String {
-        let digest = SHA256.hash(data: Data(verifier.utf8))
-        return Data(digest).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
     }
 }
 

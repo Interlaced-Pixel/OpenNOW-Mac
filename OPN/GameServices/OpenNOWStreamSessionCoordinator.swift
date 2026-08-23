@@ -767,7 +767,6 @@ private struct PreparedStreamLaunch {
 
 private enum StreamSessionLimitStartStore {
     private static let lock = NSLock()
-    private static let key = "OpenNOW.Stream.SessionLimitStartedAtEpochSeconds"
     private static let maxStoredAgeSeconds: TimeInterval = 24 * 60 * 60
 
     static func startedAtEpochSeconds(for sessionId: String, now: Date = Date()) -> TimeInterval {
@@ -794,12 +793,12 @@ private enum StreamSessionLimitStartStore {
     }
 
     private static func storedStarts(nowEpoch: TimeInterval) -> [String: TimeInterval] {
-        let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+        let raw = UserDefaults.standard.dictionary(forKey: AccountStorageKeys.sessionLimitStartedAtKey()) as? [String: Double] ?? [:]
         return raw.filter { nowEpoch - $0.value <= maxStoredAgeSeconds }
     }
 
     private static func persist(_ starts: [String: TimeInterval]) {
-        UserDefaults.standard.set(starts, forKey: key)
+        UserDefaults.standard.set(starts, forKey: AccountStorageKeys.sessionLimitStartedAtKey())
         UserDefaults.standard.synchronize()
     }
 }

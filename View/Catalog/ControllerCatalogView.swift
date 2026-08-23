@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import SwiftData
 import SwiftUI
 
 private enum ControllerDetailAction: Equatable {
@@ -58,6 +59,8 @@ private enum ControllerActionMenuItem {
     case recordings
     case settings
     case switchAccount(LoginAccount)
+    case addAccount
+    case forgetAccount
     case signOut
 
     var title: String {
@@ -70,6 +73,8 @@ private enum ControllerActionMenuItem {
         case .recordings: return "Open Recordings"
         case .settings: return "Open Settings"
         case .switchAccount(let account): return "Switch to \(account.displayName)"
+        case .addAccount: return "Add Account"
+        case .forgetAccount: return "Forget Current Account"
         case .signOut: return "Sign Out"
         }
     }
@@ -91,6 +96,8 @@ private enum ControllerActionMenuItem {
         case .recordings: return "play.rectangle.fill"
         case .settings: return "gearshape.fill"
         case .switchAccount: return "person.crop.circle"
+        case .addAccount: return "person.crop.circle.badge.plus"
+        case .forgetAccount: return "person.crop.circle.badge.minus"
         case .signOut: return "rectangle.portrait.and.arrow.right"
         }
     }
@@ -129,6 +136,7 @@ struct ControllerCatalogView: View {
     @ObservedObject var viewModel: CatalogViewModel
     let accounts: [LoginAccount]
     let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
     let onSignOut: () -> Void
     let onForget: (LoginAccount) -> Void
 
@@ -260,7 +268,14 @@ struct ControllerCatalogView: View {
             }
         case .settings:
             ControllerEmbeddedPage(title: "Settings", subtitle: "Streaming, account, interface, and system options", layout: layout) {
-                SettingsView(viewModel: viewModel)
+                SettingsView(
+                    viewModel: viewModel,
+                    accounts: accounts,
+                    onSwitch: onSwitch,
+                    onAddAccount: onAddAccount,
+                    onSignOut: onSignOut,
+                    onForget: onForget
+                )
             }
         }
     }
@@ -303,10 +318,19 @@ struct ControllerCatalogView: View {
         var items: [ControllerActionMenuItem] = [.refresh]
         if viewModel.isBrowseMode { items.append(.clearSearch) }
         items.append(contentsOf: [.home, .library, .favorites, .recordings, .settings])
-        for account in accounts where account.id != viewModel.account.id {
-            items.append(.switchAccount(account))
+        for account in accounts {
+            let isCurrent: Bool
+            if let lhs = AccountStorageKeys.requireUserId(account.userId),
+               let rhs = AccountStorageKeys.requireUserId(viewModel.account.userId) {
+                isCurrent = lhs == rhs
+            } else {
+                isCurrent = account.persistentModelID == viewModel.account.persistentModelID
+            }
+            if !isCurrent {
+                items.append(.switchAccount(account))
+            }
         }
-        items.append(.signOut)
+        items.append(contentsOf: [.addAccount, .forgetAccount, .signOut])
         return items
     }
 
@@ -696,6 +720,10 @@ struct ControllerCatalogView: View {
             viewModel.showSettings(.interface)
         case .switchAccount(let account):
             onSwitch(account)
+        case .addAccount:
+            onAddAccount()
+        case .forgetAccount:
+            onForget(viewModel.account)
         case .signOut:
             onSignOut()
         }

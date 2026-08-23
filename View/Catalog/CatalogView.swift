@@ -9,6 +9,7 @@ import AVKit
 import Combine
 import CryptoKit
 import ImageIO
+import SwiftData
 import SwiftUI
 
 private enum CatalogVendorLayout {
@@ -64,6 +65,7 @@ extension Font {
 struct CatalogView: View {
     let accounts: [LoginAccount]
     let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
     let onSignOut: () -> Void
     let onForget: (LoginAccount) -> Void
     let onRefreshAuth: () async -> Bool
@@ -75,6 +77,8 @@ struct CatalogView: View {
     @StateObject private var viewModel: CatalogViewModel
     @State private var showsMainMenu = false
     @State private var windowTopInset = CatalogVendorLayout.windowTopInset
+    @State private var isShowingAccountActionBlockedAlert = false
+    @State private var accountPendingForget: LoginAccount?
 
     init(
         account: LoginAccount,
@@ -82,6 +86,7 @@ struct CatalogView: View {
         accounts: [LoginAccount],
         pendingGameShortcut: Binding<GFNGameShortcut?>,
         onSwitch: @escaping (LoginAccount) -> Void,
+        onAddAccount: @escaping () -> Void,
         onSignOut: @escaping () -> Void,
         onForget: @escaping (LoginAccount) -> Void,
         onRefreshAuth: @escaping () async -> Bool,
@@ -89,6 +94,7 @@ struct CatalogView: View {
     ) {
         self.accounts = accounts
         self.onSwitch = onSwitch
+        self.onAddAccount = onAddAccount
         self.onSignOut = onSignOut
         self.onForget = onForget
         self.onRefreshAuth = onRefreshAuth
@@ -140,7 +146,14 @@ struct CatalogView: View {
                 .transition(.opacity)
             } else {
                 if controllerModeEnabled {
-                    ControllerCatalogView(viewModel: viewModel, accounts: accounts, onSwitch: onSwitch, onSignOut: onSignOut, onForget: onForget)
+                    ControllerCatalogView(
+                        viewModel: viewModel,
+                        accounts: accounts,
+                        onSwitch: guardedSwitch,
+                        onAddAccount: guardedAddAccount,
+                        onSignOut: guardedSignOut,
+                        onForget: requestForget
+                    )
                         .transition(.opacity)
                 } else {
                     GeometryReader { proxy in
@@ -150,9 +163,24 @@ struct CatalogView: View {
                             Color.clear
                                 .frame(height: topInset)
                             VStack(spacing: 0) {
-                                CatalogTopBar(viewModel: viewModel, accounts: accounts, showsMainMenu: $showsMainMenu, onSwitch: onSwitch, onSignOut: onSignOut, onForget: onForget)
+                                CatalogTopBar(
+                                    viewModel: viewModel,
+                                    accounts: accounts,
+                                    showsMainMenu: $showsMainMenu,
+                                    onSwitch: guardedSwitch,
+                                    onAddAccount: guardedAddAccount,
+                                    onSignOut: guardedSignOut,
+                                    onForget: requestForget
+                                )
                                 if viewModel.selectedMainPage == .settings {
-                                    SettingsView(viewModel: viewModel)
+                                    SettingsView(
+                                        viewModel: viewModel,
+                                        accounts: accounts,
+                                        onSwitch: guardedSwitch,
+                                        onAddAccount: guardedAddAccount,
+                                        onSignOut: guardedSignOut,
+                                        onForget: requestForget
+                                    )
                                 } else if viewModel.selectedMainPage == .recordings {
                                     RecordingsView()
                                 } else {
@@ -166,7 +194,7 @@ struct CatalogView: View {
                     .transition(.opacity)
 
                     if showsMainMenu {
-                        CatalogMainMenuOverlay(viewModel: viewModel, isPresented: $showsMainMenu, onSignOut: onSignOut, windowTopInset: windowTopInset)
+                        CatalogMainMenuOverlay(viewModel: viewModel, isPresented: $showsMainMenu, onSignOut: guardedSignOut, windowTopInset: windowTopInset)
                             .transition(.opacity)
                             .zIndex(12)
                     }
@@ -205,6 +233,63 @@ struct CatalogView: View {
         .onChange(of: viewModel.activeStreamConfiguration) { @MainActor _, _ in updateWindowTitleForActiveStream() }
         .onDisappear { @MainActor in onWindowTitleChange(nil) }
         .preferredColorScheme(.dark)
+        .alert("End your session first", isPresented: $isShowingAccountActionBlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Switching accounts, adding an account, signing out, or forgetting an account isn’t available while a game is launching or streaming.")
+        }
+        .confirmationDialog(
+            "Forget this NVIDIA account?",
+            isPresented: Binding(
+                get: { accountPendingForget != nil },
+                set: { if !$0 { accountPendingForget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let account = accountPendingForget {
+                Button("Forget \(account.displayName)", role: .destructive) {
+                    onForget(account)
+                    accountPendingForget = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                accountPendingForget = nil
+            }
+        } message: {
+            Text("This removes saved tokens and local session data for this account on this Mac.")
+        }
+    }
+
+    private var isAccountLifecycleBlocked: Bool {
+        viewModel.isLaunchFlowVisible || viewModel.activeStreamConfiguration != nil || WebRTCMediaStreamLifecycle.hasActiveStream
+    }
+
+    private func guardedSwitch(_ account: LoginAccount) {
+        performAccountAction { onSwitch(account) }
+    }
+
+    private func guardedAddAccount() {
+        performAccountAction(onAddAccount)
+    }
+
+    private func guardedSignOut() {
+        performAccountAction(onSignOut)
+    }
+
+    private func requestForget(_ account: LoginAccount) {
+        guard !isAccountLifecycleBlocked else {
+            isShowingAccountActionBlockedAlert = true
+            return
+        }
+        accountPendingForget = account
+    }
+
+    private func performAccountAction(_ action: () -> Void) {
+        guard !isAccountLifecycleBlocked else {
+            isShowingAccountActionBlockedAlert = true
+            return
+        }
+        action()
     }
 
     private func boundedWindowTopInset(for height: CGFloat) -> CGFloat {
@@ -855,6 +940,7 @@ private struct CatalogTopBar: View {
     let accounts: [LoginAccount]
     @Binding var showsMainMenu: Bool
     let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
     let onSignOut: () -> Void
     let onForget: (LoginAccount) -> Void
 
@@ -892,12 +978,22 @@ private struct CatalogTopBar: View {
                     Spacer()
                     Menu {
                         ForEach(accounts) { account in
-                            Button(account.displayName) { onSwitch(account) }
+                            Button {
+                                onSwitch(account)
+                            } label: {
+                                if isCurrentAccount(account) {
+                                    Label(account.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(account.displayName)
+                                }
+                            }
+                            .disabled(isCurrentAccount(account))
                         }
                         Divider()
+                        Button("Add Account", action: onAddAccount)
                         Button("Sign Out", action: onSignOut)
-                        ForEach(accounts) { account in
-                            Button("Forget \(account.displayName)", role: .destructive) { onForget(account) }
+                        Button("Forget \(viewModel.account.displayName)", role: .destructive) {
+                            onForget(viewModel.account)
                         }
                     } label: {
                         HStack(spacing: 12) {
@@ -936,6 +1032,14 @@ private struct CatalogTopBar: View {
         case .recordings: return "Recordings"
         case .settings: return "Settings"
         }
+    }
+
+    private func isCurrentAccount(_ account: LoginAccount) -> Bool {
+        if let lhs = AccountStorageKeys.requireUserId(account.userId),
+           let rhs = AccountStorageKeys.requireUserId(viewModel.account.userId) {
+            return lhs == rhs
+        }
+        return account.persistentModelID == viewModel.account.persistentModelID
     }
 
     private var catalogSearchField: some View {

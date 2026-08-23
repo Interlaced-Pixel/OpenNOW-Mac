@@ -172,7 +172,7 @@ final class CatalogViewModel: ObservableObject {
     @Published var unavailableSettingsRegionUrl = ""
     @Published var isRefreshingSettingsRegions = false
     @Published var microphoneDeviceOptions: [OPNStreamMicrophoneDeviceOption] = []
-    @Published var previousGameSession = CatalogPreviousGameSession.load()
+    @Published var previousGameSession: CatalogPreviousGameSession?
     @Published var playtimeStatistics = CatalogPlaytimeStatistics.empty
     @Published var subscriptionStatus = CatalogSubscriptionStatus.unavailable
     @Published var favoriteGameIdentities: Set<String> = []
@@ -215,7 +215,11 @@ final class CatalogViewModel: ObservableObject {
         self.session = session
         self.onRefreshAuth = onRefreshAuth
         let playtimeAccountIdentifier = Self.playtimeAccountIdentifier(account: account, session: session)
-        playtimeStatistics = CatalogPlaytimeStatistics.load(accountIdentifier: playtimeAccountIdentifier)
+        playtimeStatistics = CatalogPlaytimeStatistics.load(
+            accountIdentifier: playtimeAccountIdentifier,
+            additionalLegacyIdentifiers: [account.email, account.externalUserId]
+        )
+        previousGameSession = CatalogPreviousGameSession.load(userId: playtimeAccountIdentifier)
         $searchQuery
             .dropFirst()
             .removeDuplicates()
@@ -684,7 +688,9 @@ final class CatalogViewModel: ObservableObject {
     func selectSettingsRegion(_ regionUrl: String) {
         selectedSettingsRegionUrl = regionUrl
         unavailableSettingsRegionUrl = ""
-        OPNStreamPreferences.saveSelectedRegionUrl(regionUrl)
+        let userId = Self.playtimeAccountIdentifier(account: account, session: session)
+        OPNStreamPreferences.saveSelectedRegionUrl(regionUrl, userId: userId)
+        account.preferredRegion = regionUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Auto" : regionUrl
         loadSettingsPreferences()
     }
 
@@ -823,7 +829,7 @@ final class CatalogViewModel: ObservableObject {
         if let finishedConfiguration {
             let session = CatalogPreviousGameSession(configuration: finishedConfiguration, success: success, message: message, report: report)
             previousGameSession = session
-            session.save()
+            session.save(userId: Self.playtimeAccountIdentifier(account: account, session: self.session))
             if let report, report.durationSeconds > 0 {
                 var statistics = playtimeStatistics
                 statistics.record(title: session.title, durationSeconds: report.durationSeconds, endedAt: session.endedAt)
@@ -1910,6 +1916,7 @@ final class CatalogViewModel: ObservableObject {
     private func loadSettingsPreferences() {
         settingsPreferencesGeneration += 1
         let generation = settingsPreferencesGeneration
+        let userId = Self.playtimeAccountIdentifier(account: account, session: session)
         settingsPreferencesTask?.cancel()
         settingsPreferencesTask = Task.detached(priority: .userInitiated) {
             let capabilities = OPNStreamPreferences.loadDeviceCapabilities()
@@ -1918,8 +1925,8 @@ final class CatalogViewModel: ObservableObject {
                 capabilities: capabilities,
                 profile: profile,
                 remoteCoOpPreferences: OPNRemoteCoOpPreferencesStore.load(),
-                selectedRegionUrl: OPNStreamPreferences.loadSelectedRegionUrl(),
-                regionOptions: Self.launchRegionOptions(from: OPNStreamPreferences.loadCachedRegions()),
+                selectedRegionUrl: OPNStreamPreferences.loadSelectedRegionUrl(userId: userId),
+                regionOptions: Self.launchRegionOptions(from: OPNStreamPreferences.loadCachedRegions(userId: userId)),
                 microphoneDeviceOptions: OPNStreamPreferences.loadMicrophoneDeviceOptions()
             )
             await MainActor.run { [weak self] in
@@ -2217,6 +2224,16 @@ final class CatalogViewModel: ObservableObject {
     private func configureCatalogService() {
         let userId = session.userId.isEmpty ? account.userId : session.userId
         OPNGameServiceSwiftAdapter.configureCatalogSession(accessToken: session.accessToken, idToken: session.idToken, userId: userId)
+        OPNSessionManager.shared.setAccessToken(session.accessToken)
+        if let canonical = AccountStorageKeys.requireUserId(userId) {
+            let storedRegion = OPNStreamPreferences.loadSelectedRegionUrl(userId: canonical)
+            if storedRegion.isEmpty {
+                let preferred = account.preferredRegion.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !preferred.isEmpty, preferred.caseInsensitiveCompare("Auto") != .orderedSame {
+                    OPNStreamPreferences.saveSelectedRegionUrl(preferred, userId: canonical)
+                }
+            }
+        }
     }
 
     private func refreshAuthIfNeeded(error: String) -> Bool {
@@ -2269,11 +2286,7 @@ final class CatalogViewModel: ObservableObject {
     }
 
     private static func playtimeAccountIdentifier(account: LoginAccount, session: LoginSession) -> String {
-        for value in [session.userId, account.userId, account.externalUserId, account.email] {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed.lowercased() }
-        }
-        return "default"
+        AccountStorageKeys.canonicalUserId(accountUserId: account.userId, sessionUserId: session.userId) ?? ""
     }
 
     private static func snapshotObject(for game: OPNCatalogGameObject) -> OPNCatalogGameObject {
@@ -2505,8 +2518,6 @@ struct CatalogPlatformOption: Identifiable {
 }
 
 struct CatalogPlaytimeStatistics: Codable, Equatable {
-    private static let storagePrefix = "OpenNOW.Catalog.PlaytimeStatistics"
-
     static let empty = CatalogPlaytimeStatistics(totalSeconds: 0, sessionCount: 0, lastSessionSeconds: 0, longestSessionSeconds: 0, lastPlayedTitle: "", lastPlayedAt: nil)
 
     private(set) var totalSeconds: Double
@@ -2531,8 +2542,10 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
         lastPlayedAt = endedAt
     }
 
-    static func load(accountIdentifier: String) -> CatalogPlaytimeStatistics {
-        guard let data = UserDefaults.standard.data(forKey: storageKey(accountIdentifier: accountIdentifier)),
+    static func load(accountIdentifier: String, additionalLegacyIdentifiers: [String] = []) -> CatalogPlaytimeStatistics {
+        migratePlaytimeIfNeeded(accountIdentifier: accountIdentifier, additionalLegacyIdentifiers: additionalLegacyIdentifiers)
+        guard let key = storageKey(accountIdentifier: accountIdentifier),
+              let data = UserDefaults.standard.data(forKey: key),
               let statistics = try? JSONDecoder().decode(CatalogPlaytimeStatistics.self, from: data) else {
             return .empty
         }
@@ -2540,12 +2553,37 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
     }
 
     func save(accountIdentifier: String) {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey(accountIdentifier: accountIdentifier))
+        guard let key = Self.storageKey(accountIdentifier: accountIdentifier),
+              let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 
-    private static func storageKey(accountIdentifier: String) -> String {
-        "\(storagePrefix).\(accountIdentifier)"
+    private static func storageKey(accountIdentifier: String) -> String? {
+        AccountStorageKeys.key(.playtimeStatistics, userId: accountIdentifier)
+    }
+
+    private static func migratePlaytimeIfNeeded(accountIdentifier: String, additionalLegacyIdentifiers: [String] = []) {
+        guard let accountKey = storageKey(accountIdentifier: accountIdentifier) else { return }
+        guard UserDefaults.standard.object(forKey: accountKey) == nil else { return }
+        var candidates = [
+            AccountStorageKeys.Legacy.playtimeStatistics(accountIdentifier: accountIdentifier),
+            AccountStorageKeys.Legacy.playtimeStatistics(accountIdentifier: accountIdentifier.lowercased()),
+        ]
+        for identifier in additionalLegacyIdentifiers {
+            let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            candidates.append(AccountStorageKeys.Legacy.playtimeStatistics(accountIdentifier: trimmed))
+            candidates.append(AccountStorageKeys.Legacy.playtimeStatistics(accountIdentifier: trimmed.lowercased()))
+        }
+        for candidate in candidates {
+            guard let data = UserDefaults.standard.data(forKey: candidate) else { continue }
+            UserDefaults.standard.set(data, forKey: accountKey)
+            if candidate != accountKey {
+                UserDefaults.standard.removeObject(forKey: candidate)
+            }
+            UserDefaults.standard.synchronize()
+            return
+        }
     }
 }
 
@@ -2592,8 +2630,6 @@ struct CatalogSubscriptionStatus: Equatable {
 }
 
 struct CatalogPreviousGameSession: Codable, Equatable {
-    private static let storageKey = "OpenNOW.Catalog.PreviousGameSession"
-
     let title: String
     let appId: String
     let store: String
@@ -2629,14 +2665,17 @@ struct CatalogPreviousGameSession: Codable, Equatable {
         return "\(seconds)s"
     }
 
-    static func load() -> CatalogPreviousGameSession? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return nil }
+    static func load(userId: String) -> CatalogPreviousGameSession? {
+        guard let key = AccountStorageKeys.key(.previousGameSession, userId: userId) else { return nil }
+        AccountStorageKeys.migrateObject(fromLegacyKey: AccountStorageKeys.Legacy.previousGameSession, toAccountKey: key)
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(CatalogPreviousGameSession.self, from: data)
     }
 
-    func save() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey)
+    func save(userId: String) {
+        guard let key = AccountStorageKeys.key(.previousGameSession, userId: userId),
+              let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 }
 

@@ -1465,7 +1465,12 @@ import Foundation
 @Test func sessionManagerStaleInternalClaimErrorFailsWithoutPollingFallback() async {
     await networkTestIsolationLock.withLock {
     let host = "resume-stale-internal.example.test"
-    UserDefaults.standard.set("resume-session", forKey: "OpenNOW.Stream.ActiveSessionId")
+    let testUserId = "session-manager-test-user"
+    let activeSessionKey = AccountStorageKeys.persistedActiveSessionIdKey(userId: testUserId)
+    let previousActiveUserId = AccountStorageKeys.authUserDefaults().string(forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+    AccountStorageKeys.authUserDefaults().set(testUserId, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+    UserDefaults.standard.set(testUserId, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+    UserDefaults.standard.set("resume-session", forKey: activeSessionKey)
     SessionManagerURLProtocol.install(host: host) { request in
         let path = request.url?.path ?? ""
         if request.httpMethod == "GET", path == "/v2/session/resume-session" {
@@ -1474,7 +1479,14 @@ import Foundation
         return SessionManagerURLProtocol.response(json: staleSessionResponse(), status: 400)
     }
     defer {
-        UserDefaults.standard.removeObject(forKey: "OpenNOW.Stream.ActiveSessionId")
+        UserDefaults.standard.removeObject(forKey: activeSessionKey)
+        if let previousActiveUserId {
+            AccountStorageKeys.authUserDefaults().set(previousActiveUserId, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+            UserDefaults.standard.set(previousActiveUserId, forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+        } else {
+            AccountStorageKeys.authUserDefaults().removeObject(forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+            UserDefaults.standard.removeObject(forKey: AccountStorageKeys.activeUserIdDefaultsKey)
+        }
         SessionManagerURLProtocol.uninstall(host: host)
     }
 
@@ -1490,7 +1502,7 @@ import Foundation
     let requests = SessionManagerURLProtocol.recordedRequests(host: host)
     #expect(result.0 == false)
     #expect(result.1 == "This GeForce NOW session is no longer resumable. End it and launch again.")
-    #expect(UserDefaults.standard.string(forKey: "OpenNOW.Stream.ActiveSessionId") == nil)
+    #expect(UserDefaults.standard.string(forKey: activeSessionKey) == nil)
     #expect(requests.map(\.httpMethod) == ["GET", "PUT"])
     }
 }

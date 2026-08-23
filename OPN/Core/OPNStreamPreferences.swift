@@ -379,6 +379,15 @@ public enum OPNStreamPreferences {
     private static let defaultUpscalingTargetIndex = 1
     private static let maxConcurrentRegionMeasurements = 4
     private static let k = Keys.self
+
+    private static func accountPreferenceKey(_ name: AccountStorageKeys.Name, legacyKey: String, userId: String?) -> String {
+        if let resolved = AccountStorageKeys.requireUserId(userId ?? ""),
+           let key = AccountStorageKeys.key(name, userId: resolved) {
+            AccountStorageKeys.migrateObject(fromLegacyKey: legacyKey, toAccountKey: key)
+            return key
+        }
+        return legacyKey
+    }
     private struct StreamingQualityPreset {
         let aspectIndex: Int
         let resolutionIndex: Int
@@ -673,7 +682,11 @@ public enum OPNStreamPreferences {
     }
 
     public static func loadSelectedRegionUrl() -> String {
-        storage.string(forKey: k.selectedRegionUrl) ?? ""
+        loadSelectedRegionUrl(userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func loadSelectedRegionUrl(userId: String?) -> String {
+        storage.string(forKey: accountPreferenceKey(.regionUrl, legacyKey: k.selectedRegionUrl, userId: userId)) ?? ""
     }
 
     public static func loadSelectedStreamingBaseUrl() -> String {
@@ -696,14 +709,24 @@ public enum OPNStreamPreferences {
     }
 
     public static func saveSelectedRegionUrl(_ url: String) {
+        saveSelectedRegionUrl(url, userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func saveSelectedRegionUrl(_ url: String, userId: String?) {
         let normalized = normalizedHTTPSBaseUrlOrEmpty(url)
-        if normalized.isEmpty { storage.removeObject(forKey: k.selectedRegionUrl) }
-        else { storage.set(normalized, forKey: k.selectedRegionUrl) }
+        let key = accountPreferenceKey(.regionUrl, legacyKey: k.selectedRegionUrl, userId: userId)
+        if normalized.isEmpty { storage.removeObject(forKey: key) }
+        else { storage.set(normalized, forKey: key) }
         storage.synchronize()
     }
 
     public static func loadCachedRegions() -> [OPNStreamRegionOption] {
-        guard let items = storage.array(forKey: k.cachedRegions) as? [[String: Any]] else { return [] }
+        loadCachedRegions(userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func loadCachedRegions(userId: String?) -> [OPNStreamRegionOption] {
+        let key = accountPreferenceKey(.cachedRegions, legacyKey: k.cachedRegions, userId: userId)
+        guard let items = storage.array(forKey: key) as? [[String: Any]] else { return [] }
         let regions: [OPNStreamRegionOption] = items.compactMap { item -> OPNStreamRegionOption? in
             guard let name = item["name"] as? String, let url = item["url"] as? String, !name.isEmpty, !url.isEmpty else { return nil }
             let normalizedURL = normalizedHTTPSBaseUrlOrEmpty(url)
@@ -714,12 +737,16 @@ public enum OPNStreamPreferences {
     }
 
     public static func saveCachedRegions(_ regions: [OPNStreamRegionOption]) {
+        saveCachedRegions(regions, userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func saveCachedRegions(_ regions: [OPNStreamRegionOption], userId: String?) {
         let items: [[String: Any]] = normalizedCachedRegions(regions).map { region in
             var item: [String: Any] = ["name": region.name, "url": region.url]
             if region.latencyMs >= 0 { item["latencyMs"] = region.latencyMs }
             return item
         }
-        storage.set(items, forKey: k.cachedRegions)
+        storage.set(items, forKey: accountPreferenceKey(.cachedRegions, legacyKey: k.cachedRegions, userId: userId))
         storage.synchronize()
     }
 
@@ -769,22 +796,32 @@ public enum OPNStreamPreferences {
     }
 
     public static func loadCachedCloudVariables() -> OPNStreamCloudVariables {
-        guard let json = storage.string(forKey: k.cachedCloudVariablesJSON), !json.isEmpty else { return OPNStreamCloudVariables() }
+        loadCachedCloudVariables(userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func loadCachedCloudVariables(userId: String?) -> OPNStreamCloudVariables {
+        let key = accountPreferenceKey(.cloudVariablesJSON, legacyKey: k.cachedCloudVariablesJSON, userId: userId)
+        guard let json = storage.string(forKey: key), !json.isEmpty else { return OPNStreamCloudVariables() }
         var variables = cloudVariables(from: json)
         variables.fetched = variables.fetched && variables.refreshIntervalSeconds > 0
         return variables
     }
 
     public static func saveCachedCloudVariables(_ variables: OPNStreamCloudVariables, rawJSON: String) {
+        saveCachedCloudVariables(variables, rawJSON: rawJSON, userId: AccountStorageKeys.activeUserId())
+    }
+
+    public static func saveCachedCloudVariables(_ variables: OPNStreamCloudVariables, rawJSON: String, userId: String?) {
         guard variables.fetched, !rawJSON.isEmpty else { return }
-        storage.set(rawJSON, forKey: k.cachedCloudVariablesJSON)
-        storage.set(Date().timeIntervalSince1970, forKey: k.cachedCloudVariablesTimestamp)
+        storage.set(rawJSON, forKey: accountPreferenceKey(.cloudVariablesJSON, legacyKey: k.cachedCloudVariablesJSON, userId: userId))
+        storage.set(Date().timeIntervalSince1970, forKey: accountPreferenceKey(.cloudVariablesTimestamp, legacyKey: k.cachedCloudVariablesTimestamp, userId: userId))
         storage.synchronize()
     }
 
     public static func fetchCloudVariables(token: String, userId: String = "", idpId: String = "", completion: @escaping @Sendable (OPNStreamCloudVariables) -> Void) {
-        let cached = loadCachedCloudVariables()
-        let cachedAt = storage.double(forKey: k.cachedCloudVariablesTimestamp)
+        let cached = loadCachedCloudVariables(userId: userId)
+        let timestampKey = accountPreferenceKey(.cloudVariablesTimestamp, legacyKey: k.cachedCloudVariablesTimestamp, userId: userId)
+        let cachedAt = storage.double(forKey: timestampKey)
         if cached.fetched, cachedAt > 0, Date().timeIntervalSince1970 - cachedAt < Double(cached.refreshIntervalSeconds) {
             DispatchQueue.main.async { completion(cached) }
             return
@@ -804,7 +841,7 @@ public enum OPNStreamPreferences {
                 let parsed = cloudVariables(from: json)
                 if parsed.fetched {
                     result = parsed
-                    saveCachedCloudVariables(result, rawJSON: json)
+                    saveCachedCloudVariables(result, rawJSON: json, userId: userId)
                 }
             }
             DispatchQueue.main.async { completion(result) }

@@ -107,8 +107,29 @@ struct OpenNOWApp: App {
             OpenNOWLog.info(.app, "SwiftData model container created")
             return container
         } catch {
-            OpenNOWLog.fatal(.app, "Could not create SwiftData model container: \(error.localizedDescription)")
-            fatalError("Could not create ModelContainer: \(error)")
+            OpenNOWLog.error(.app, "SwiftData container open failed: \(error.localizedDescription). Resetting the local login store after the userId unique-key migration.")
+            removeStoreFiles(at: modelConfiguration.url)
+            do {
+                let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+                OpenNOWLog.warning(.app, "SwiftData store was reset; remembered NVIDIA sessions will be rebuilt from the token vault if present.")
+                return container
+            } catch {
+                OpenNOWLog.fatal(.app, "Could not create SwiftData model container: \(error.localizedDescription)")
+                fatalError("Could not create ModelContainer: \(error)")
+            }
+        }
+    }
+
+    private static func removeStoreFiles(at url: URL) {
+        let fileManager = FileManager.default
+        let directory = url.deletingLastPathComponent()
+        let prefix = url.deletingPathExtension().lastPathComponent
+        guard let items = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            try? fileManager.removeItem(at: url)
+            return
+        }
+        for item in items where item.lastPathComponent.hasPrefix(prefix) {
+            try? fileManager.removeItem(at: item)
         }
     }
 

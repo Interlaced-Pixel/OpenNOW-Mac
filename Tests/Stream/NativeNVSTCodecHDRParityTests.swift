@@ -41,7 +41,7 @@ private func nativeAudioFrameTriggersRendererReopen(_ configuredChannelCount: UI
     #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: CGSize(width: 640.5, height: 360.5), backingScaleFactor: 2) == CGSize(width: 1_281, height: 721))
     #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: CGSize(width: 640, height: 360), backingScaleFactor: 1) == CGSize(width: 640, height: 360))
     #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: .zero, backingScaleFactor: 2) == nil)
-    #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: CGSize(width: .nan, height: 360), backingScaleFactor: 2) == nil)
+    #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: CGSize(width: CGFloat.nan, height: 360), backingScaleFactor: 2) == nil)
     #expect(NativeWebRTCStreamView.nativeNVSTDrawableSize(boundsSize: CGSize(width: 640, height: 360), backingScaleFactor: .infinity) == nil)
 }
 

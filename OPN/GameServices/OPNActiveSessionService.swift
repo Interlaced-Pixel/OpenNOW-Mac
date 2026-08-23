@@ -27,18 +27,17 @@ final class OPNActiveSessionObject: NSObject {
 }
 
 enum OPNActiveSessionService {
-    private static let persistedSessionIdKey = "OpenNOW.Stream.ActiveSessionId"
     private static let terminationPollLimit = 12
     private static let terminationPollDelay: TimeInterval = 0.25
 
     static func loadPersistedActiveSessionId() -> String {
-        UserDefaults.standard.string(forKey: persistedSessionIdKey) ?? ""
+        UserDefaults.standard.string(forKey: AccountStorageKeys.persistedActiveSessionIdKey()) ?? ""
     }
 
     static func clearPersistedActiveSessionId(_ sessionId: String = "") {
         let current = loadPersistedActiveSessionId()
         guard sessionId.isEmpty || current == sessionId else { return }
-        UserDefaults.standard.removeObject(forKey: persistedSessionIdKey)
+        UserDefaults.standard.removeObject(forKey: AccountStorageKeys.persistedActiveSessionIdKey())
     }
 
     static func fetchActiveSessions(accessToken: String, streamingBaseUrl: String = OPNStreamPreferences.loadSelectedStreamingBaseUrl(), completion: @escaping @Sendable (Bool, [OPNActiveSessionObject], String) -> Void) {
