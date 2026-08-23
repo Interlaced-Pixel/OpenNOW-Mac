@@ -8,7 +8,7 @@ import Testing
 struct NVSTNativeRuntimeTests {
 
 @Test func nvstNativeRuntimeLoadsVendoredBifrostSymbols() throws {
-    let frameworksDirectory = repoRoot().appendingPathComponent("vendor/nvidia-gfn/Frameworks", isDirectory: true)
+    let frameworksDirectory = testRuntimeFrameworksDirectory()
 
     let runtime = try NVSTNativeRuntime(frameworksDirectory: frameworksDirectory)
 
@@ -39,7 +39,7 @@ struct NVSTNativeRuntimeTests {
 }
 
 @Test func nvstNativeBridgeProbeUsesVendoredRuntime() throws {
-    let frameworksDirectory = repoRoot().appendingPathComponent("vendor/nvidia-gfn/Frameworks", isDirectory: true)
+    let frameworksDirectory = testRuntimeFrameworksDirectory()
     let result = NVSTNativeBridge.probe(configuration: NVSTNativeBridgeConfiguration(frameworksDirectory: frameworksDirectory))
 
     if case let .success(status) = result {
@@ -86,7 +86,7 @@ struct NVSTNativeRuntimeTests {
 }
 
 @Test @MainActor func nvstGeronimoCreatesWithVendoredGridAppCallbackABI() {
-    let frameworksDirectory = repoRoot().appendingPathComponent("vendor/nvidia-gfn/Frameworks", isDirectory: true)
+    let frameworksDirectory = testRuntimeFrameworksDirectory()
     var errorBuffer = [CChar](repeating: 0, count: 1024)
     let session = frameworksDirectory.path.withCString { frameworksPath in
         errorBuffer.withUnsafeMutableBufferPointer { buffer in
@@ -122,7 +122,7 @@ struct NVSTNativeRuntimeTests {
     }
     #expect(microphoneResult == -3)
 
-    OpenNOWTestNativeNVSTGeronimoDestroy(session)
+    _ = OpenNOWTestNativeNVSTGeronimoDestroy(session)
     #expect(retainedSurface == nil)
 }
 
@@ -244,8 +244,16 @@ struct NVSTNativeRuntimeTests {
 }
 
 private func vendoredBridge() throws -> NVSTNativeBridge {
-    let frameworksDirectory = repoRoot().appendingPathComponent("vendor/nvidia-gfn/Frameworks", isDirectory: true)
+    let frameworksDirectory = testRuntimeFrameworksDirectory()
     return try NVSTNativeBridge(configuration: NVSTNativeBridgeConfiguration(frameworksDirectory: frameworksDirectory))
+}
+
+private func testRuntimeFrameworksDirectory() -> URL {
+    if let privateFrameworksURL = Bundle.main.privateFrameworksURL,
+       FileManager.default.fileExists(atPath: privateFrameworksURL.appendingPathComponent(NVSTNativeRuntime.bundledLibraryName).path) {
+        return privateFrameworksURL
+    }
+    return repoRoot().appendingPathComponent("vendor/nvidia-gfn/Frameworks", isDirectory: true)
 }
 
 @MainActor private func nativeNVSTTestWindow() -> NSWindow {
@@ -303,7 +311,7 @@ private func OpenNOWNativeNVSTGeronimoInspectEndpoint(_ address: UnsafePointer<C
 private func OpenNOWTestNativeNVSTGeronimoCreate(_ frameworksPath: UnsafePointer<CChar>?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> UnsafeMutableRawPointer?
 
 @_silgen_name("OpenNOWNativeNVSTGeronimoDestroy")
-private func OpenNOWTestNativeNVSTGeronimoDestroy(_ session: UnsafeMutableRawPointer?)
+private func OpenNOWTestNativeNVSTGeronimoDestroy(_ session: UnsafeMutableRawPointer?) -> Int32
 
 @_silgen_name("OpenNOWNativeNVSTGeronimoSetVideoSurface")
 private func OpenNOWTestNativeNVSTGeronimoSetVideoSurface(_ session: UnsafeMutableRawPointer?, _ nativeHandle: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> Int32

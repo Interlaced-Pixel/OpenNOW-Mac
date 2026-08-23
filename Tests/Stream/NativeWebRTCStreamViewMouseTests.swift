@@ -100,6 +100,22 @@ private struct MouseButtonTransition: Equatable {
     #expect(!NativeWebRTCStreamView.reservesApplicationMenuKeyEquivalent(.control))
 }
 
+@Test @MainActor func nativeRendererIsDetachedBeforeWindowTeardown() {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720), styleMask: .borderless, backing: .buffered, defer: false)
+    let view = NativeWebRTCStreamView(frame: window.contentView?.bounds ?? .zero)
+    window.contentView = view
+
+    let rendererWindow = view.nativeNVSTVideoWindow()
+    #expect(rendererWindow != nil)
+    #expect(window.childWindows?.contains { $0 === rendererWindow } == true)
+
+    view.setNativeNVSTVideoVisible(true)
+    view.prepareNativeNVSTRendererForShutdown()
+
+    #expect(window.childWindows?.contains { $0 === rendererWindow } != true)
+    #expect(!view.nativeNVSTRendererSurfaceReady)
+}
+
 @Test @MainActor func streamShortcutContractMatchesWebRTCControls() {
     #expect(WebRTCMediaStreamCommand.shortcutCommand(keyCode: 5, modifierFlags: .command) == .toggleUnifiedHUD)
     #expect(WebRTCMediaStreamCommand.shortcutCommand(keyCode: 46, modifierFlags: .command) == .toggleMicrophone)
@@ -271,7 +287,8 @@ private struct MouseButtonTransition: Equatable {
     events.dropFirst().forEach { dispatcher.enqueue($0) }
     await dispatcher.finish()
 
-    #expect(await recorder.snapshot() == [
+    let recordedEvents = await recorder.snapshot()
+    #expect(recordedEvents == [
         .event(events[0]),
         .absoluteMove(NativeNVSTAbsoluteMouseEvent(x: 640, y: 360, timestamp: timestamp)),
         .event(events[1]),

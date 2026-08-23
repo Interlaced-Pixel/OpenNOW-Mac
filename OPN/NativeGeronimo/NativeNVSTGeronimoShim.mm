@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <memory>
@@ -298,6 +299,7 @@ using NVbEnumToString = const char *(*)(int32_t, int32_t);
 using OpenNOWGeronimoEventHandler = void (*)(void *, int32_t, uint32_t, uint32_t, uint32_t, int32_t, const char *, uint32_t, uint32_t, const char *);
 using OpenNOWGeronimoHapticHandler = void (*)(void *, uint16_t, uint16_t, uint16_t, uint16_t);
 using OpenNOWGeronimoAuthRefreshHandler = void (*)(void *, uint32_t, char *, size_t);
+using OpenNOWNativeNVSTGeronimoDestroyCompletion = void (*)(void *);
 using NVbCallback = bool (*)(void *, uint32_t, void *);
 using ObjectCtor = void (*)(void *);
 using ObjectDtor = void (*)(void *);
@@ -361,6 +363,10 @@ constexpr uint32_t MicrophoneChannelCount = 2;
 constexpr uint32_t MicrophoneFormat = 4;
 constexpr uint32_t VoiceAttackFrames = 2;
 constexpr uint32_t VoiceHangoverFrames = 20;
+constexpr int32_t NativeMicrophoneStatusDisabled = 0;
+constexpr int32_t NativeMicrophoneStatusAvailable = 1;
+constexpr int32_t NativeMicrophoneStatusCapturerUnavailable = 2;
+constexpr int32_t NativeMicrophoneStatusSetupFailed = 3;
 
 static_assert(GeronimoPrepareSynchronous, "Geronimo prepare must match the reference client initialization mode");
 
@@ -512,6 +518,7 @@ struct OpenNOWNativeNVSTGeronimoSession {
     std::condition_variable callbacksDrained;
     std::recursive_mutex operationMutex;
     std::mutex stateMutex;
+    std::condition_variable stopCompleted;
     std::mutex mediaMutex;
     NativeSessionState state = NativeSessionState::created;
     std::unique_ptr<PendingStart> pendingStart;
@@ -520,6 +527,10 @@ struct OpenNOWNativeNVSTGeronimoSession {
     bool streamingBegan = false;
     bool connectedEventDelivered = false;
     bool stopIssued = false;
+    bool stopAcknowledged = false;
+    std::atomic<bool> deferredDestroyScheduled{false};
+    OpenNOWNativeNVSTGeronimoDestroyCompletion destroyCompletion = nullptr;
+    void *destroyCompletionContext = nullptr;
     bool microphoneAvailable = false;
     bool microphoneSetupSucceeded = false;
     bool microphoneEnabled = false;
@@ -527,6 +538,7 @@ struct OpenNOWNativeNVSTGeronimoSession {
     bool voiceActivityEnabled = false;
     MicrophoneRouteSlot *microphoneRoute = nullptr;
     bool microphoneHookLeaseAcquired = false;
+    std::string microphoneFailure;
     bool registeredGamepads[4] = {};
     bool hapticFeatureEnabled = false;
     NVbCallback originalBifrostCallback = nullptr;
@@ -537,6 +549,7 @@ struct OpenNOWNativeNVSTGeronimoSession {
     void *eventProcessor = nullptr;
     void *window = nullptr;
     void *videoDecoder = nullptr;
+    std::shared_ptr<AsyncVideoFrameRenderer> videoRenderer;
     void *audioRenderer = nullptr;
     void *audioCapturer = nullptr;
     uint32_t requestedCodec = DefaultNVbCodecH264;
@@ -564,6 +577,12 @@ size_t gPlatformReferenceCount = 0;
 void setSessionFailure(OpenNOWNativeNVSTGeronimoSession *session, const char *message);
 bool setSessionFailureUnlessStopping(OpenNOWNativeNVSTGeronimoSession *session, const char *message);
 bool ensureVideoDecoderLocked(OpenNOWNativeNVSTGeronimoSession *session, uint32_t codec);
+void waitForMicrophoneRouteDrain(OpenNOWNativeNVSTGeronimoSession *session);
+int32_t destroyGeronimoSession(OpenNOWNativeNVSTGeronimoSession *session,
+                               bool fromDeferredCleanup,
+                               OpenNOWNativeNVSTGeronimoDestroyCompletion completion = nullptr,
+                               void *completionContext = nullptr);
+extern "C" int32_t OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer);
 
 void setError(char *buffer, size_t length, const char *message) {
     if (buffer == nullptr || length == 0) { return; }
@@ -699,17 +718,32 @@ MicrophoneRouteSlot *registerMicrophoneRoute(void *client) {
     return nullptr;
 }
 
-void unregisterMicrophoneRoute(MicrophoneRouteSlot *slot) {
+void beginUnregisterMicrophoneRoute(MicrophoneRouteSlot *slot) {
     if (slot == nullptr) { return; }
-    std::unique_lock<std::mutex> routesLock(gMicrophoneRoutesMutex);
+    std::lock_guard<std::mutex> routesLock(gMicrophoneRoutesMutex);
     slot->client.store(nullptr, std::memory_order_release);
-    slot->drained.wait(routesLock, [slot] { return slot->inFlight.load(std::memory_order_acquire) == 0; });
+}
+
+bool waitForMicrophoneRouteDrain(MicrophoneRouteSlot *slot, std::chrono::seconds timeout) {
+    if (slot == nullptr) { return true; }
+    std::unique_lock<std::mutex> routesLock(gMicrophoneRoutesMutex);
+    if (!slot->drained.wait_for(routesLock, timeout, [slot] {
+            return slot->inFlight.load(std::memory_order_acquire) == 0;
+        })) {
+        return false;
+    }
     {
         std::lock_guard<std::mutex> stateLock(slot->stateMutex);
         resetVoiceActivity(slot->vad);
     }
     slot->volume.store(1.0f, std::memory_order_release);
     slot->vadEnabled.store(false, std::memory_order_release);
+    return true;
+}
+
+bool unregisterMicrophoneRoute(MicrophoneRouteSlot *slot) {
+    beginUnregisterMicrophoneRoute(slot);
+    return waitForMicrophoneRouteDrain(slot, std::chrono::seconds(3));
 }
 
 bool boundedRange(uint64_t offset, uint64_t size, uint64_t limit) {
@@ -1049,9 +1083,9 @@ void emitHapticRecords(OpenNOWNativeNVSTGeronimoSession *session, const void *ca
 bool openNOWBifrostCallback(void *gridApp, uint32_t callbackType, void *callbackData) {
     OpenNOWNativeNVSTGeronimoSession *session = beginGridAppCallback(gridApp);
     if (session == nullptr) { return false; }
+    GridAppCallbackLease callbackLease{session};
     NVbCallback originalCallback = session->originalBifrostCallback;
     if (originalCallback == nullptr) { return false; }
-    GridAppCallbackLease callbackLease{session};
     const bool handled = originalCallback(gridApp, callbackType, callbackData);
     if (callbackType == NVbCallbackTypeEvent) { emitHapticRecords(session, callbackData); }
     return handled;
@@ -1059,8 +1093,9 @@ bool openNOWBifrostCallback(void *gridApp, uint32_t callbackType, void *callback
 
 void openNOWGridAppUpdateAuthToken(void *gridApp, void *updateAuthToken) {
     OpenNOWNativeNVSTGeronimoSession *session = beginGridAppCallback(gridApp);
-    if (session == nullptr || updateAuthToken == nullptr) { return; }
+    if (session == nullptr) { return; }
     GridAppCallbackLease callbackLease{session};
+    if (updateAuthToken == nullptr) { return; }
     char *response = loadUnaligned<char *>(updateAuthToken, 0x08);
     if (response == nullptr) { return; }
     response[0] = '\0';
@@ -1147,6 +1182,11 @@ void openNOWGridAppStreamingBegin(void *gridApp, const void *streamInfo) {
         {
             std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
             session->microphoneSetupSucceeded = session->microphoneAvailable && micSetupSucceeded && session->audioCapturer != nullptr;
+            if (session->microphoneAvailable && !session->microphoneSetupSucceeded && session->microphoneFailure.empty()) {
+                session->microphoneFailure = streamInfo == nullptr
+                    ? "Geronimo streaming-begin callback did not provide microphone setup status."
+                    : "Geronimo streaming-begin callback reported microphone setup failure.";
+            }
             callVoidVirtual(session->audioRenderer, 0x48);
             callVoidVirtual(session->audioCapturer, session->microphoneEnabled && session->microphoneSetupSucceeded ? 0x48 : 0x40);
             if (!session->videoDecoderStarted) {
@@ -1244,9 +1284,13 @@ void openNOWGridAppStreamingTerminated(void *gridApp, const void *terminationInf
     {
         std::lock_guard<std::mutex> stateLock(session->stateMutex);
         locallyRequested = session->stopIssued;
+        if (locallyRequested) {
+            session->stopAcknowledged = true;
+        }
         shouldEmit = !locallyRequested && session->state != NativeSessionState::stopped;
         if (shouldEmit) { session->state = NativeSessionState::stopped; }
     }
+    if (locallyRequested) { session->stopCompleted.notify_all(); }
     if (shouldEmit) {
         emitEvent(session,
                   62,
@@ -1308,9 +1352,11 @@ void openNOWGridAppStopResult(void *gridApp, const void *failureInfo) {
     {
         std::lock_guard<std::mutex> stateLock(session->stateMutex);
         locallyRequested = session->stopIssued;
+        session->stopAcknowledged = true;
         session->state = resultCode == 0 ? NativeSessionState::stopped : NativeSessionState::failed;
         if (resultCode != 0) { session->lastError = "GridApp stop callback reported failure."; }
     }
+    session->stopCompleted.notify_all();
     emitEvent(session, locallyRequested ? 60 : 61, 0, 0, 0, resultCode, failureInfo == nullptr ? nullptr : nvbResultName(session, resultCode));
 }
 
@@ -1734,6 +1780,42 @@ void destroyPolymorphicObject(void *&object) {
     if (destructor != nullptr) { destructor(ownedObject); }
 }
 
+void stopAndDestroyPolymorphicObject(void *&object, size_t stopSlot, const char *label) {
+    if (object == nullptr) { return; }
+    try {
+        callVoidVirtual(object, stopSlot);
+    } catch (...) {
+        fprintf(stderr, "OpenNOW failed to stop native %s.\n", label == nullptr ? "media object" : label);
+    }
+    try {
+        destroyPolymorphicObject(object);
+    } catch (...) {
+        fprintf(stderr, "OpenNOW failed to destroy native %s.\n", label == nullptr ? "media object" : label);
+        object = nullptr;
+    }
+}
+
+void destroyPolymorphicObjectSafely(void *&object, const char *label) {
+    if (object == nullptr) { return; }
+    try {
+        destroyPolymorphicObject(object);
+    } catch (...) {
+        fprintf(stderr, "OpenNOW failed to destroy native %s.\n", label == nullptr ? "media object" : label);
+        object = nullptr;
+    }
+}
+
+void destroyConstructedObjectSafely(void *&object, ObjectDtor destructor, const char *label) {
+    if (object == nullptr) { return; }
+    try {
+        destroyConstructedObject(object, destructor);
+    } catch (...) {
+        fprintf(stderr, "OpenNOW failed to destroy native %s.\n", label == nullptr ? "constructed object" : label);
+        ::operator delete(object);
+        object = nullptr;
+    }
+}
+
 bool installGridAppCallbacks(OpenNOWNativeNVSTGeronimoSession *session, char *errorBuffer, size_t errorBufferLength) {
     auto **sourceVTable = reinterpret_cast<void **>(resolve(session->libraryHandle, "_ZTV7GridApp", errorBuffer, errorBufferLength));
     if (sourceVTable == nullptr) { return false; }
@@ -1802,17 +1884,79 @@ bool installGridAppCallbacks(OpenNOWNativeNVSTGeronimoSession *session, char *er
     return true;
 }
 
-void detachGridAppCallbacks(OpenNOWNativeNVSTGeronimoSession *session) {
-    if (session == nullptr) { return; }
+bool detachGridAppCallbacks(OpenNOWNativeNVSTGeronimoSession *session) {
+    if (session == nullptr) { return true; }
     {
         std::lock_guard<std::mutex> lock(gGridAppSessionsMutex);
         session->acceptsCallbacks.store(false, std::memory_order_release);
         gGridAppSessions.erase(session->gridApp);
     }
     std::unique_lock<std::mutex> lock(session->callbackMutex);
-    session->callbacksDrained.wait(lock, [session] {
-        return session->callbacksInFlight.load(std::memory_order_acquire) == 0;
+    if (session->callbacksDrained.wait_for(lock, std::chrono::seconds(3), [session] {
+            return session->callbacksInFlight.load(std::memory_order_acquire) == 0;
+        })) {
+        return true;
+    }
+    bool expected = false;
+    if (!session->deferredDestroyScheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return false;
+    }
+    try {
+        std::thread([session] {
+            std::unique_lock<std::mutex> drainLock(session->callbackMutex);
+            session->callbacksDrained.wait(drainLock, [session] {
+                return session->callbacksInFlight.load(std::memory_order_acquire) == 0;
+            });
+            waitForMicrophoneRouteDrain(session);
+            destroyGeronimoSession(session, true);
+        }).detach();
+    } catch (...) {
+        session->deferredDestroyScheduled.store(false, std::memory_order_release);
+        fprintf(stderr, "OpenNOW could not schedule deferred native callback drainage.\n");
+    }
+    fprintf(stderr, "OpenNOW native callback drainage exceeded 3 seconds; native session destruction was deferred.\n");
+    return false;
+}
+
+void waitForMicrophoneRouteDrain(OpenNOWNativeNVSTGeronimoSession *session) {
+    if (session == nullptr || session->microphoneRoute == nullptr) { return; }
+    std::unique_lock<std::mutex> routesLock(gMicrophoneRoutesMutex);
+    session->microphoneRoute->drained.wait(routesLock, [session] {
+        return session->microphoneRoute == nullptr ||
+            session->microphoneRoute->inFlight.load(std::memory_order_acquire) == 0;
     });
+}
+
+bool waitForNativeStopAcknowledgement(OpenNOWNativeNVSTGeronimoSession *session, std::chrono::seconds timeout) {
+    std::unique_lock<std::mutex> stateLock(session->stateMutex);
+    if (!session->stopIssued || session->stopAcknowledged) { return true; }
+    return session->stopCompleted.wait_for(stateLock, timeout, [session] {
+        return session->stopAcknowledged;
+    });
+}
+
+bool scheduleDeferredNativeDestruction(OpenNOWNativeNVSTGeronimoSession *session) {
+    bool expected = false;
+    if (!session->deferredDestroyScheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return true;
+    }
+    try {
+        std::thread([session] {
+            waitForMicrophoneRouteDrain(session);
+            {
+                std::unique_lock<std::mutex> stateLock(session->stateMutex);
+                session->stopCompleted.wait(stateLock, [session] {
+                    return !session->stopIssued || session->stopAcknowledged;
+                });
+            }
+            destroyGeronimoSession(session, true);
+        }).detach();
+        return true;
+    } catch (...) {
+        session->deferredDestroyScheduled.store(false, std::memory_order_release);
+        fprintf(stderr, "OpenNOW could not schedule deferred native session destruction.\n");
+        return false;
+    }
 }
 
 void setSessionFailure(OpenNOWNativeNVSTGeronimoSession *session, const char *message) {
@@ -1857,8 +2001,8 @@ bool ensureVideoDecoderLocked(OpenNOWNativeNVSTGeronimoSession *session, uint32_
     const uint32_t creationCodec = videoDecoderCreationCodec(codec);
     if (creationCodec == 0) { return false; }
     if (session->videoDecoder != nullptr && session->activeCodec == codec) { return true; }
-    callVoidVirtual(session->videoDecoder, 0x60);
-    destroyPolymorphicObject(session->videoDecoder);
+    stopAndDestroyPolymorphicObject(session->videoDecoder, 0x60, "video decoder");
+    session->videoRenderer.reset();
     session->activeCodec = 0;
     session->videoDecoderStarted = false;
 
@@ -1869,14 +2013,14 @@ bool ensureVideoDecoderLocked(OpenNOWNativeNVSTGeronimoSession *session, uint32_
     storeUnaligned<uint32_t>(creationSettings.bytes, 0x1c, 1);
     void *candidate = session->functions.createVideoDecoder(creationSettings, 0);
     if (candidate == nullptr) { return false; }
-    const std::shared_ptr<AsyncVideoFrameRenderer> &renderer = session->functions.windowAsyncRenderer(session->window);
+    std::shared_ptr<AsyncVideoFrameRenderer> renderer = session->functions.windowAsyncRenderer(session->window);
     if (!renderer) {
-        destroyPolymorphicObject(candidate);
+        destroyPolymorphicObjectSafely(candidate, "video decoder candidate");
         return false;
     }
     VideoDecoderInitialize initialize = virtualFunction<VideoDecoderInitialize>(candidate, VideoDecoderInitializeSlotOffset);
     if (initialize == nullptr || initialize != session->functions.vtDecoderInitialize) {
-        destroyPolymorphicObject(candidate);
+        destroyPolymorphicObjectSafely(candidate, "video decoder candidate");
         return false;
     }
     PlatformDecoderSettings decoderSettings{};
@@ -1885,10 +2029,11 @@ bool ensureVideoDecoderLocked(OpenNOWNativeNVSTGeronimoSession *session, uint32_
     storeUnaligned<uint8_t>(decoderSettings.bytes, 0x1d, 1);
     int32_t decoderResult = initialize(candidate, session->ioInterface, decoderSettings, renderer);
     if (decoderResult != 0) {
-        destroyPolymorphicObject(candidate);
+        destroyPolymorphicObjectSafely(candidate, "video decoder candidate");
         return false;
     }
     session->videoDecoder = candidate;
+    session->videoRenderer = std::move(renderer);
     session->activeCodec = codec;
     session->videoDecoderStarted = false;
     session->functions.setDecoderInfo(session->gridApp, 2, 1, 3, 42, session->requestedDynamicStreamingMode, 0, false);
@@ -1962,10 +2107,14 @@ bool setupPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
         return false;
     }
 
+    session->microphoneFailure.clear();
     if (session->microphoneAvailable) {
         session->audioCapturer = session->functions.createAudioCapturer();
-        if (session->audioCapturer != nullptr && !initializeAudioObject(session->audioCapturer, session->ioInterface, audioSettings)) {
+        if (session->audioCapturer == nullptr) {
+            session->microphoneFailure = "Geronimo audio capturer factory returned no capturer.";
+        } else if (!initializeAudioObject(session->audioCapturer, session->ioInterface, audioSettings)) {
             destroyPolymorphicObject(session->audioCapturer);
+            session->microphoneFailure = "Geronimo audio capturer initialization failed.";
         }
     }
 
@@ -1978,8 +2127,8 @@ bool setupPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
 
 void teardownPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
     std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
-    callVoidVirtual(session->videoDecoder, 0x60);
-    destroyPolymorphicObject(session->videoDecoder);
+    stopAndDestroyPolymorphicObject(session->videoDecoder, 0x60, "video decoder");
+    session->videoRenderer.reset();
     session->activeCodec = 0;
     session->videoDecoderStarted = false;
 
@@ -1988,22 +2137,22 @@ void teardownPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
     if (capturer != nullptr) {
         auto shutdownCapturer = [capturer] {
             void *ownedCapturer = capturer;
-            callVoidVirtual(ownedCapturer, 0x50);
-            destroyPolymorphicObject(ownedCapturer);
+            stopAndDestroyPolymorphicObject(ownedCapturer, 0x50, "audio capturer");
         };
         try {
             std::thread worker(shutdownCapturer);
             worker.join();
         } catch (...) {
-            shutdownCapturer();
+            try { shutdownCapturer(); } catch (...) {
+                fprintf(stderr, "OpenNOW audio capturer fallback destruction failed.\n");
+            }
         }
     }
 
-    callVoidVirtual(session->audioRenderer, 0x58);
-    destroyPolymorphicObject(session->audioRenderer);
-    destroyConstructedObject(session->window, session->functions.windowDtor);
-    destroyConstructedObject(session->eventProcessor, session->functions.eventProcessorDtor);
-    destroyConstructedObject(session->graphicsContext, session->functions.graphicsContextDtor);
+    stopAndDestroyPolymorphicObject(session->audioRenderer, 0x58, "audio renderer");
+    destroyConstructedObjectSafely(session->window, session->functions.windowDtor, "native window");
+    destroyConstructedObjectSafely(session->eventProcessor, session->functions.eventProcessorDtor, "event processor");
+    destroyConstructedObjectSafely(session->graphicsContext, session->functions.graphicsContextDtor, "graphics context");
 }
 
 int32_t completePreparedStart(OpenNOWNativeNVSTGeronimoSession *session) {
@@ -2029,7 +2178,6 @@ int32_t completePreparedStart(OpenNOWNativeNVSTGeronimoSession *session) {
         pending->parameters.defaultStreamSettings = pending->streamSettings.front();
     }
     if (!setupPlatformMedia(session)) {
-        teardownPlatformMedia(session);
         emitEvent(session, 70, 0, 0, 0, -10);
         return -10;
     }
@@ -2042,7 +2190,6 @@ int32_t completePreparedStart(OpenNOWNativeNVSTGeronimoSession *session) {
         : pending->start(session->gridApp, pending->parameters, tracingContext);
     if (!accepted) {
         setSessionFailure(session, pending->shouldResume ? "GridApp::resume failed after successful prepare." : "GridApp::start failed after successful prepare.");
-        teardownPlatformMedia(session);
         emitEvent(session, 70, 0, 0, 0, -11);
         return -11;
     }
@@ -2418,11 +2565,15 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoSetMicrophoneEnabled(void *sessionPo
     }
     std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
     if (!session->microphoneAvailable || session->audioCapturer == nullptr) {
-        setError(errorBuffer, errorBufferLength, "Native Geronimo microphone capture is unavailable for this session.");
+        setError(errorBuffer, errorBufferLength, session->microphoneFailure.empty()
+            ? "Native Geronimo microphone capture is unavailable for this session."
+            : session->microphoneFailure.c_str());
         return -4;
     }
     if (enabled != 0 && !session->microphoneSetupSucceeded) {
-        setError(errorBuffer, errorBufferLength, "Native Geronimo microphone setup did not complete for this session.");
+        setError(errorBuffer, errorBufferLength, session->microphoneFailure.empty()
+            ? "Native Geronimo microphone setup did not complete for this session."
+            : session->microphoneFailure.c_str());
         return -5;
     }
     session->microphoneEnabled = enabled != 0;
@@ -2432,6 +2583,32 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoSetMicrophoneEnabled(void *sessionPo
     }
     callVoidVirtual(session->audioCapturer, session->microphoneEnabled ? 0x48 : 0x40);
     return 0;
+}
+
+extern "C" int32_t OpenNOWNativeNVSTGeronimoGetMicrophoneStatus(void *sessionPointer,
+                                                                  char *errorBuffer,
+                                                                  size_t errorBufferLength) {
+    auto *session = static_cast<OpenNOWNativeNVSTGeronimoSession *>(sessionPointer);
+    if (session == nullptr) {
+        setError(errorBuffer, errorBufferLength, "Native Geronimo microphone status requires a session.");
+        return -1;
+    }
+    std::lock_guard<std::recursive_mutex> operationLock(session->operationMutex);
+    std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
+    if (!session->microphoneAvailable) { return NativeMicrophoneStatusDisabled; }
+    if (session->audioCapturer == nullptr) {
+        setError(errorBuffer, errorBufferLength, session->microphoneFailure.empty()
+            ? "Geronimo audio capturer is unavailable."
+            : session->microphoneFailure.c_str());
+        return NativeMicrophoneStatusCapturerUnavailable;
+    }
+    if (!session->microphoneSetupSucceeded) {
+        setError(errorBuffer, errorBufferLength, session->microphoneFailure.empty()
+            ? "Geronimo microphone setup did not complete."
+            : session->microphoneFailure.c_str());
+        return NativeMicrophoneStatusSetupFailed;
+    }
+    return NativeMicrophoneStatusAvailable;
 }
 
 extern "C" int32_t OpenNOWNativeNVSTGeronimoSetMicrophoneVolume(void *sessionPointer, double volume) {
@@ -2526,6 +2703,119 @@ extern "C" size_t OpenNOWNativeNVSTGeronimoTestMicrophoneRouteCount() {
     return count;
 }
 
+extern "C" int32_t OpenNOWNativeNVSTGeronimoTestCallbackLeaseDrainage() {
+    OpenNOWNativeNVSTGeronimoSession session;
+    session.gridApp = &session;
+    session.originalBifrostCallback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(gGridAppSessionsMutex);
+        gGridAppSessions[session.gridApp] = &session;
+    }
+    std::vector<std::thread> workers;
+    constexpr size_t workerCount = 128;
+    try {
+        workers.reserve(workerCount);
+        for (size_t index = 0; index < workerCount; ++index) {
+            workers.emplace_back([gridApp = session.gridApp, index] {
+                if (index % 2 == 0) {
+                    openNOWBifrostCallback(gridApp, NVbCallbackTypeEvent, nullptr);
+                } else {
+                    openNOWGridAppUpdateAuthToken(gridApp, nullptr);
+                }
+            });
+        }
+    } catch (...) {
+        for (std::thread &worker : workers) {
+            if (worker.joinable()) { worker.join(); }
+        }
+        std::lock_guard<std::mutex> lock(gGridAppSessionsMutex);
+        gGridAppSessions.erase(session.gridApp);
+        session.acceptsCallbacks.store(false, std::memory_order_release);
+        return -1;
+    }
+    for (std::thread &worker : workers) {
+        worker.join();
+    }
+    const bool drained = session.callbacksInFlight.load(std::memory_order_acquire) == 0;
+    {
+        std::lock_guard<std::mutex> lock(gGridAppSessionsMutex);
+        gGridAppSessions.erase(session.gridApp);
+        session.acceptsCallbacks.store(false, std::memory_order_release);
+    }
+    return drained ? 1 : 0;
+}
+
+extern "C" int32_t OpenNOWNativeNVSTGeronimoTestMicrophoneRouteDrainage() {
+    int clientMarker = 0;
+    MicrophoneRouteSlot *route = registerMicrophoneRoute(&clientMarker);
+    if (route == nullptr) { return -1; }
+    constexpr size_t workerCount = 64;
+    std::mutex coordinationMutex;
+    std::condition_variable coordination;
+    size_t acquiredCount = 0;
+    bool releaseWorkers = false;
+    bool allWorkersAcquired = true;
+    std::vector<std::thread> workers;
+    try {
+        workers.reserve(workerCount);
+        for (size_t index = 0; index < workerCount; ++index) {
+            workers.emplace_back([&] {
+                MicrophoneRouteSlot *heldRoute = acquireMicrophoneRoute(&clientMarker);
+                std::unique_lock<std::mutex> lock(coordinationMutex);
+                allWorkersAcquired = allWorkersAcquired && heldRoute == route;
+                ++acquiredCount;
+                coordination.notify_all();
+                coordination.wait(lock, [&] { return releaseWorkers; });
+                lock.unlock();
+                releaseMicrophoneRoute(heldRoute);
+            });
+        }
+    } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(coordinationMutex);
+            releaseWorkers = true;
+        }
+        coordination.notify_all();
+        for (std::thread &worker : workers) {
+            if (worker.joinable()) { worker.join(); }
+        }
+        unregisterMicrophoneRoute(route);
+        return -2;
+    }
+    {
+        std::unique_lock<std::mutex> lock(coordinationMutex);
+        if (!coordination.wait_for(lock, std::chrono::seconds(3), [&] { return acquiredCount == workerCount; })) {
+            releaseWorkers = true;
+            lock.unlock();
+            coordination.notify_all();
+            for (std::thread &worker : workers) { worker.join(); }
+            unregisterMicrophoneRoute(route);
+            return -3;
+        }
+    }
+    bool unregisterResult = false;
+    std::thread unregisterThread([&] {
+        unregisterResult = unregisterMicrophoneRoute(route);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (route->client.load(std::memory_order_acquire) != nullptr &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    {
+        std::lock_guard<std::mutex> lock(coordinationMutex);
+        releaseWorkers = true;
+    }
+    coordination.notify_all();
+    for (std::thread &worker : workers) { worker.join(); }
+    unregisterThread.join();
+    if (route->client.load(std::memory_order_acquire) != nullptr) {
+        unregisterMicrophoneRoute(route);
+        return -4;
+    }
+    return allWorkersAcquired && unregisterResult ? 1 : 0;
+}
+
 int32_t startOrResumeGeronimo(void *sessionPointer,
                               const char *rawSessionJSON,
                               const char *streamingProfileJSON,
@@ -2616,6 +2906,8 @@ int32_t startOrResumeGeronimo(void *sessionPointer,
     }
     session->microphoneAvailable = microphoneAvailable != 0;
     session->microphoneEnabled = session->microphoneAvailable && microphoneEnabled != 0;
+    session->microphoneSetupSucceeded = false;
+    session->microphoneFailure.clear();
     session->requestedCodec = codecFromJSON(cloud, geronimo);
     session->requestedDynamicStreamingMode = static_cast<uint32_t>(std::clamp(jsonIntAtPath(profile, "selectedFeatures.dynamicStreamingMode"), 0, 3));
     const char *const tokenPaths[] = { "token", "authToken", "jwt", "auth.token", "sessionToken" };
@@ -3387,9 +3679,11 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoStopWithResult(void *sessionPointer,
                                session->state == NativeSessionState::configured ||
                                session->state == NativeSessionState::failed;
         session->stopIssued = true;
+        session->stopAcknowledged = completesImmediately;
         session->state = completesImmediately ? NativeSessionState::stopped : NativeSessionState::stopping;
         session->pendingStart.reset();
     }
+    if (completesImmediately) { session->stopCompleted.notify_all(); }
     if (completesImmediately) {
         emitEvent(session, 60, 0, 0, 0, code);
         return 0;
@@ -3397,6 +3691,11 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoStopWithResult(void *sessionPointer,
     try {
         if (session->gridApp == nullptr || session->functions.stop == nullptr ||
             !session->functions.stop(session->gridApp, reason == nullptr ? "OpenNOW native NVST stop" : reason, code)) {
+            {
+                std::lock_guard<std::mutex> stateLock(session->stateMutex);
+                session->stopAcknowledged = true;
+            }
+            session->stopCompleted.notify_all();
             setSessionFailure(session, "GridApp::stop rejected the native stop request.");
             setError(errorBuffer, errorBufferLength, "GridApp::stop rejected the native stop request.");
             emitEvent(session, 70, 0, 0, 0, -2);
@@ -3404,6 +3703,11 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoStopWithResult(void *sessionPointer,
         }
         return 0;
     } catch (...) {
+        {
+            std::lock_guard<std::mutex> stateLock(session->stateMutex);
+            session->stopAcknowledged = true;
+        }
+        session->stopCompleted.notify_all();
         setSessionFailure(session, "GridApp::stop raised an unexpected C++ exception.");
         setError(errorBuffer, errorBufferLength, "GridApp::stop raised an unexpected C++ exception.");
         emitEvent(session, 70, 0, 0, 0, -2);
@@ -3415,10 +3719,22 @@ extern "C" void OpenNOWNativeNVSTGeronimoStop(void *sessionPointer) {
     OpenNOWNativeNVSTGeronimoStopWithResult(sessionPointer, "OpenNOW native NVST stop", 0, nullptr, 0);
 }
 
-extern "C" void OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
-    auto *session = static_cast<OpenNOWNativeNVSTGeronimoSession *>(sessionPointer);
-    if (session == nullptr) { return; }
+namespace {
+
+int32_t destroyGeronimoSession(OpenNOWNativeNVSTGeronimoSession *session,
+                               bool fromDeferredCleanup,
+                               OpenNOWNativeNVSTGeronimoDestroyCompletion completion,
+                               void *completionContext) {
+    if (session == nullptr) { return 0; }
+    if (!fromDeferredCleanup && session->deferredDestroyScheduled.load(std::memory_order_acquire)) { return 1; }
     std::unique_lock<std::recursive_mutex> operationLock(session->operationMutex);
+    if (fromDeferredCleanup) {
+        session->deferredDestroyScheduled.store(false, std::memory_order_release);
+    } else if (completion != nullptr) {
+        session->destroyCompletion = completion;
+        session->destroyCompletionContext = completionContext;
+    }
+    beginUnregisterMicrophoneRoute(session->microphoneRoute);
     if (session->hapticFeatureEnabled && session->functions.controlFeatures != nullptr) {
         try { session->functions.controlFeatures(session->gridApp, NVbFeatureGamepadHaptics, 0); }
         catch (...) { fprintf(stderr, "OpenNOW failed to disable native haptics during teardown.\n"); }
@@ -3443,6 +3759,7 @@ extern "C" void OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
                           session->functions.stop != nullptr;
         if (shouldForceStop) {
             session->stopIssued = true;
+            session->stopAcknowledged = false;
             session->state = NativeSessionState::stopping;
             session->pendingStart.reset();
         }
@@ -3453,15 +3770,33 @@ extern "C" void OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
                 std::lock_guard<std::mutex> stateLock(session->stateMutex);
                 session->state = NativeSessionState::failed;
                 session->lastError = "GridApp::stop rejected the forced native stop request.";
+                session->stopAcknowledged = true;
+                session->stopCompleted.notify_all();
             }
         } catch (...) {
             std::lock_guard<std::mutex> stateLock(session->stateMutex);
             session->state = NativeSessionState::failed;
             session->lastError = "GridApp::stop raised during forced native destruction.";
+            session->stopAcknowledged = true;
+            session->stopCompleted.notify_all();
             fprintf(stderr, "OpenNOW forced native stop raised an unexpected C++ exception.\n");
         }
     }
-    if (session->gridAppVTable != nullptr) { detachGridAppCallbacks(session); }
+    if (!waitForNativeStopAcknowledgement(session, std::chrono::seconds(3))) {
+        if (scheduleDeferredNativeDestruction(session)) {
+            fprintf(stderr, "OpenNOW native stop acknowledgement exceeded 3 seconds; native session destruction was deferred.\n");
+        }
+        operationLock.unlock();
+        return 1;
+    }
+    if (!unregisterMicrophoneRoute(session->microphoneRoute)) {
+        if (scheduleDeferredNativeDestruction(session)) {
+            fprintf(stderr, "OpenNOW native microphone callback drainage exceeded 3 seconds; native session destruction was deferred.\n");
+        }
+        operationLock.unlock();
+        return 1;
+    }
+    session->microphoneRoute = nullptr;
     {
         std::lock_guard<std::mutex> eventLock(session->eventMutex);
         session->eventHandler = nullptr;
@@ -3473,6 +3808,10 @@ extern "C" void OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
         session->hapticContext = nullptr;
         session->authRefreshHandler = nullptr;
         session->authRefreshContext = nullptr;
+    }
+    if (session->gridAppVTable != nullptr && !detachGridAppCallbacks(session)) {
+        operationLock.unlock();
+        return 1;
     }
     try { teardownPlatformMedia(session); }
     catch (...) { fprintf(stderr, "OpenNOW native media destruction raised an unexpected C++ exception.\n"); }
@@ -3523,6 +3862,29 @@ extern "C" void OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
         dlclose(session->bifrostHandle);
         session->bifrostHandle = nullptr;
     }
+    const auto completionCallback = session->destroyCompletion;
+    void *completionCallbackContext = session->destroyCompletionContext;
+    session->destroyCompletion = nullptr;
+    session->destroyCompletionContext = nullptr;
     operationLock.unlock();
     delete session;
+    if (completionCallback != nullptr) { completionCallback(completionCallbackContext); }
+    return 0;
+}
+
+}
+
+extern "C" int32_t OpenNOWNativeNVSTGeronimoDestroy(void *sessionPointer) {
+    return destroyGeronimoSession(static_cast<OpenNOWNativeNVSTGeronimoSession *>(sessionPointer), false, nullptr, nullptr);
+}
+
+extern "C" int32_t OpenNOWNativeNVSTGeronimoDestroyWithCompletion(void *sessionPointer,
+                                                                  OpenNOWNativeNVSTGeronimoDestroyCompletion completion,
+                                                                  void *completionContext) {
+    return destroyGeronimoSession(
+        static_cast<OpenNOWNativeNVSTGeronimoSession *>(sessionPointer),
+        false,
+        completion,
+        completionContext
+    );
 }

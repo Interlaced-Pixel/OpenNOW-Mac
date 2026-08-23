@@ -71,6 +71,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
         case connectFailure
         case sessionLimitFailure
         case suspendedConnect
+        case suspendedDisconnect
         case success
     }
 
@@ -88,13 +89,18 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     private(set) var dynamicStreamingModeUpdates: [NativeNVSTDynamicStreamingMode] = []
     private(set) var l4sUpdates: [Bool] = []
     private let mode: Mode
+    private let reportedMicrophoneStatus: NativeNVSTMicrophoneStatus
     private let terminalStream: AsyncStream<NativeNVSTTransportTermination>
     private let terminalContinuation: AsyncStream<NativeNVSTTransportTermination>.Continuation
     private var connectContinuation: CheckedContinuation<NativeNVSTTransportConnection, Error>?
     private var connectStartedContinuations: [CheckedContinuation<Void, Never>] = []
+    private var disconnectContinuation: CheckedContinuation<Void, Never>?
+    private var disconnectStartedContinuations: [CheckedContinuation<Void, Never>] = []
+    private var disconnectReleaseRequested = false
 
-    init(mode: Mode) {
+    init(mode: Mode, microphoneStatus: NativeNVSTMicrophoneStatus = .disabled) {
         self.mode = mode
+        self.reportedMicrophoneStatus = microphoneStatus
         let pair = AsyncStream<NativeNVSTTransportTermination>.makeStream()
         terminalStream = pair.stream
         terminalContinuation = pair.continuation
@@ -125,7 +131,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
             }
         }
         await mediaReceiver.receiveVideoFrame(NativeNVSTVideoFrame(streamID: 1, codec: .h264, timestamp: MediaTimestamp(nanoseconds: 1), durationNanoseconds: 16_666_667, width: 1920, height: 1080, isKeyFrame: true, payload: Data([1, 2, 3])))
-        return NativeNVSTTransportConnection(session: allocation.session, runtimeStatus: try await prepare())
+        return NativeNVSTTransportConnection(session: allocation.session, runtimeStatus: try await prepare(), microphoneStatus: reportedMicrophoneStatus)
     }
 
     func waitForConnect() async {
@@ -149,6 +155,10 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
 
     func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws {
         microphoneConfigurations.append(configuration)
+    }
+
+    func microphoneStatus() async -> NativeNVSTMicrophoneStatus {
+        reportedMicrophoneStatus
     }
 
     func togglePerformanceOverlay() async throws {
@@ -176,6 +186,30 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
         disconnectCount += 1
         connectContinuation?.resume(throwing: CancellationError())
         connectContinuation = nil
+        if case .suspendedDisconnect = mode {
+            disconnectStartedContinuations.forEach { $0.resume() }
+            disconnectStartedContinuations.removeAll()
+            if disconnectReleaseRequested { return }
+            await withCheckedContinuation { continuation in
+                disconnectContinuation = continuation
+            }
+        }
+    }
+
+    func waitForDisconnect() async {
+        if disconnectCount > 0 { return }
+        await withCheckedContinuation { continuation in
+            disconnectStartedContinuations.append(continuation)
+        }
+    }
+
+    func finishDisconnect() {
+        if let disconnectContinuation {
+            disconnectContinuation.resume()
+            self.disconnectContinuation = nil
+        } else {
+            disconnectReleaseRequested = true
+        }
     }
 
     func pause() async throws {
@@ -222,6 +256,41 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(await provider.startCount == 1)
     #expect(await provider.finished == [nativeFinish(.failed)])
     #expect(await transport.disconnectCount == 1)
+}
+
+@Test func nativeNVSTPathWaitsForTransportTeardownBeforeCloudFinish() async throws {
+    let provider = RecordingNativeNVSTSessionProvider()
+    let transport = RecordingNativeNVSTTransport(mode: .suspendedDisconnect)
+    let path = NativeNVSTStreamingPath(sessionProvider: provider, transport: transport)
+    _ = try await path.start(configuration: nativeConfiguration())
+
+    let stopTask = Task { try await path.stop(reason: .userRequested, message: "Ordered stop") }
+    await transport.waitForDisconnect()
+    #expect(await provider.finished.isEmpty)
+
+    await transport.finishDisconnect()
+    _ = try await stopTask.value
+    #expect(await provider.finished == [nativeFinish(.userRequested)])
+}
+
+@Test @MainActor func nativeNVSTLifecycleStaysRegisteredUntilTerminationCompletion() {
+    let streamID = UUID()
+    var terminationCompletion: WebRTCMediaStreamQuitDecisionHandler?
+    WebRTCMediaStreamLifecycle.activate(streamID, quitRequestHandler: { completion in
+        terminationCompletion = completion
+        return true
+    })
+    defer { WebRTCMediaStreamLifecycle.deactivate(streamID) }
+
+    #expect(WebRTCMediaStreamLifecycle.hasActiveStream)
+    let quitAccepted = WebRTCMediaStreamLifecycle.requestApplicationQuitDecision(completion: { _ in })
+    #expect(quitAccepted)
+    #expect(WebRTCMediaStreamLifecycle.hasActiveStream)
+    #expect(terminationCompletion != nil)
+
+    WebRTCMediaStreamLifecycle.deactivate(streamID)
+    terminationCompletion?(true)
+    #expect(!WebRTCMediaStreamLifecycle.hasActiveStream)
 }
 
 @Test func nativeNVSTPathRejectsActorReentrantConcurrentStart() async throws {
@@ -357,6 +426,34 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     var iterator = newStream.makeAsyncIterator()
     #expect(await iterator.next() == frame)
     await mediaSession.finish()
+}
+
+@Test func nativeNVSTMediaSessionDrainsSustainedFramesBeforeImmediateClose() async {
+    let mediaSession = NativeNVSTMediaSession()
+    let stream = await mediaSession.videoFrames(bufferingPolicy: .bufferingNewest(240))
+    let consumer = Task {
+        var frameCount = 0
+        for await _ in stream {
+            frameCount += 1
+        }
+        return frameCount
+    }
+
+    for index in 0..<120 {
+        await mediaSession.receiveVideoFrame(NativeNVSTVideoFrame(
+            streamID: 1,
+            codec: .h264,
+            timestamp: MediaTimestamp(nanoseconds: UInt64(index)),
+            durationNanoseconds: 16_666_667,
+            width: 1920,
+            height: 1080,
+            isKeyFrame: index == 0,
+            payload: Data([UInt8(index % 255)])
+        ))
+    }
+    await mediaSession.finish()
+
+    #expect(await consumer.value == 120)
 }
 
 @Test func nativeNVSTPathRejectsPerformanceOverlayToggleWhenStopped() async throws {
@@ -808,6 +905,45 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(NativeNVSTBifrostTransport.microphoneCaptureAccess(requested: true, authorizationStatus: .denied) == false)
     #expect(NativeNVSTBifrostTransport.microphoneCaptureAccess(requested: true, authorizationStatus: .restricted) == false)
     #expect(NativeNVSTBifrostTransport.microphoneCaptureAccess(requested: true, authorizationStatus: .notDetermined) == nil)
+}
+
+@Test func nativeNVSTMicrophoneStatusPreservesDistinctNativeFailureCauses() {
+    #expect(NativeNVSTBifrostTransport.microphoneStatus(access: .disabled, nativeCode: 2) == .disabled)
+    #expect(NativeNVSTBifrostTransport.microphoneStatus(access: .permissionDenied, nativeCode: 1) == .permissionDenied)
+    #expect(NativeNVSTBifrostTransport.microphoneStatus(access: .authorized, nativeCode: 1) == .available)
+    #expect(NativeNVSTBifrostTransport.microphoneStatus(access: .authorized, nativeCode: 2) == .capturerUnavailable)
+    #expect(NativeNVSTBifrostTransport.microphoneStatus(access: .authorized, nativeCode: 3) == .setupFailed)
+}
+
+@Test func nativeNVSTMicrophoneTelemetryUsesStableFailureGrouping() {
+    #expect(NativeNVSTBifrostTransport.microphoneTelemetryEventName(for: .permissionDenied) == "nvst.microphone.status")
+    #expect(NativeNVSTBifrostTransport.microphoneTelemetryEventName(for: .available) == "nvst.microphone.status")
+    #expect(NativeNVSTBifrostTransport.microphoneTelemetryEventName(for: .capturerUnavailable) == "nvst.microphone.initialization.failed")
+    #expect(NativeNVSTBifrostTransport.microphoneTelemetryEventName(for: .setupFailed) == "nvst.microphone.initialization.failed")
+}
+
+@Test func nativeNVSTTransportConnectionCarriesRuntimeMicrophoneAvailability() {
+    let session = nativeAllocation().session
+    let runtime = NVSTNativeBridgeStatus(
+        libraryURL: URL(fileURLWithPath: "/tmp/libBifrost2.dylib"),
+        bundledArtifactURLs: [],
+        resolvedSymbols: [],
+        runtimeAvailable: true
+    )
+
+    #expect(NativeNVSTTransportConnection(session: session, runtimeStatus: runtime, microphoneStatus: .available).microphoneStatus.isAvailable)
+    #expect(!NativeNVSTTransportConnection(session: session, runtimeStatus: runtime, microphoneStatus: .capturerUnavailable).microphoneStatus.isAvailable)
+}
+
+@Test func nativeNVSTPathPropagatesRuntimeMicrophoneStatus() async throws {
+    let transport = RecordingNativeNVSTTransport(mode: .success, microphoneStatus: .setupFailed)
+    let path = NativeNVSTStreamingPath(sessionProvider: RecordingNativeNVSTSessionProvider(), transport: transport)
+
+    _ = try await path.start(configuration: nativeConfiguration())
+
+    #expect(await path.microphoneStatus() == .setupFailed)
+    #expect(await transport.microphoneEnabledUpdates.isEmpty)
+    _ = try await path.stop()
 }
 
 @Test func nativeNVSTPreservesMeasuredPacketSizeInGeronimoProfile() throws {

@@ -2,6 +2,12 @@ import AppKit
 import AVFoundation
 import Foundation
 
+enum NativeNVSTMicrophoneAccess: Equatable {
+    case disabled
+    case permissionDenied
+    case authorized
+}
+
 public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     static let geronimoPumpFramesPerSecond = 60.0
     static let geronimoPumpInterval = 1.0 / geronimoPumpFramesPerSecond
@@ -34,6 +40,28 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         )
     }
 
+    static func microphoneTelemetryEventName(for status: NativeNVSTMicrophoneStatus) -> String {
+        switch status {
+        case .capturerUnavailable, .setupFailed:
+            return "nvst.microphone.initialization.failed"
+        case .disabled, .permissionDenied, .available:
+            return "nvst.microphone.status"
+        }
+    }
+
+    static func microphoneTelemetryLevel(for status: NativeNVSTMicrophoneStatus) -> WebRTCMediaTelemetryLevel {
+        status == .permissionDenied ? .info : (status.isAvailable || status == .disabled ? .debug : .error)
+    }
+
+    static func microphoneTelemetryMessage(for status: NativeNVSTMicrophoneStatus) -> String {
+        switch status {
+        case .capturerUnavailable, .setupFailed:
+            return "Native NVST microphone initialization failed."
+        case .disabled, .permissionDenied, .available:
+            return "Native NVST microphone status recorded."
+        }
+    }
+
     private let bridgeConfiguration: NVSTNativeBridgeConfiguration
     private let inputEncoder: NativeNVSTInputEncoder
     private let nativeVideoSurfaceHandle: UInt?
@@ -57,6 +85,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     private var nativeLifecycleWaiters: [CheckedContinuation<Void, Never>] = []
     private var videoSurfaceNeedsRecovery = false
     private var microphoneConfiguration = NativeNVSTMicrophoneConfiguration.settings(volume: 1, mode: "disabled")
+    private var currentMicrophoneStatus: NativeNVSTMicrophoneStatus = .disabled
     private var lastDiagnosticMetadata: [String: String] = [:]
 
     public init(bridgeConfiguration: NVSTNativeBridgeConfiguration = NVSTNativeBridgeConfiguration(),
@@ -149,7 +178,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             terminationHandler: { [terminationChannel] termination in terminationChannel.send(termination) }
         )
         connectingEventSink = eventSink
-        let started: (connection: NativeNVSTTransportConnection, sessionAddress: UInt, pump: NativeNVSTGeronimoPumpDriver, runtimeHandlers: NativeNVSTRuntimeHandlers)
+        let started: (connection: NativeNVSTTransportConnection,
+                      sessionAddress: UInt,
+                      pump: NativeNVSTGeronimoPumpDriver,
+                      runtimeHandlers: NativeNVSTRuntimeHandlers)
         do {
             started = try await withTaskCancellationHandler {
                 try await Self.startGeronimoOnMainActor(
@@ -173,7 +205,14 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         guard connectingAttemptID == attemptID, !nativeLifecycleOperationInProgress, !Task.isCancelled else {
             await started.runtimeHandlers.cancel()
             await started.pump.stop()
-            await Self.destroyGeronimoOnMainActor(sessionAddress: started.sessionAddress)
+            let destroyCompleted = await Self.destroyGeronimoOnBackground(
+                sessionAddress: started.sessionAddress,
+                eventSink: eventSink,
+                runtimeHandlers: started.runtimeHandlers
+            )
+            if !destroyCompleted {
+                lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
+            }
             throw CancellationError()
         }
         let connection = started.connection
@@ -182,6 +221,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         geronimoPump = started.pump
         runtimeHandlers = started.runtimeHandlers
         activeConnection = connection
+        currentMicrophoneStatus = connection.microphoneStatus
+        lastDiagnosticMetadata["microphoneStatus"] = currentMicrophoneStatus.rawValue
         if videoSurfaceNeedsRecovery {
             await restoreVideoSurfaceAfterRecovery?()
             videoSurfaceNeedsRecovery = false
@@ -209,6 +250,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
 
     public func setMicrophoneEnabled(_ enabled: Bool) async throws {
         guard activeConnection != nil, !nativeLifecycleOperationInProgress, let sessionAddress = geronimoSessionAddress else { throw NativeNVSTError.notRunning }
+        guard enabled || currentMicrophoneStatus.isAvailable else { return }
         try await Self.setGeronimoMicrophoneEnabledOnMainActor(enabled, sessionAddress: sessionAddress)
     }
 
@@ -218,6 +260,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             try await Self.setGeronimoMicrophoneConfigurationOnMainActor(configuration, sessionAddress: sessionAddress)
         }
         microphoneConfiguration = configuration
+    }
+
+    public func microphoneStatus() async -> NativeNVSTMicrophoneStatus {
+        currentMicrophoneStatus
     }
 
     public func performanceSnapshot() async -> NativeNVSTPerformanceSnapshot? {
@@ -261,6 +307,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             geronimoEventSink = nil
             runtimeHandlers = nil
             activeConnection = nil
+            currentMicrophoneStatus = .disabled
             endNativeLifecycleOperation()
         }
         connectingEventSink?.cancel()
@@ -295,7 +342,19 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         if let pump { await pump.stop() }
         if let sessionAddress {
-            await Self.destroyGeronimoOnMainActor(sessionAddress: sessionAddress)
+            if !(await Self.destroyGeronimoOnBackground(
+                sessionAddress: sessionAddress,
+                eventSink: eventSink,
+                runtimeHandlers: runtimeHandlers
+            )) {
+                lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
+                WebRTCMediaTelemetry.capture(
+                    "nvst.geronimo.shutdown.quiescence.pending",
+                    level: .error,
+                    message: "Native NVST shutdown could not prove callback quiescence before the stop deadline.",
+                    attributes: lastDiagnosticMetadata
+                )
+            }
         }
     }
 
@@ -307,21 +366,35 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             geronimoEventSink = nil
             runtimeHandlers = nil
             activeConnection = nil
+            currentMicrophoneStatus = .disabled
             endNativeLifecycleOperation()
         }
         connectingEventSink?.cancel()
         await waitForConnectingAttemptToFinish()
         let pump = geronimoPump
         let sessionAddress = geronimoSessionAddress
+        let eventSink = geronimoEventSink
         let runtimeHandlers = self.runtimeHandlers
-        geronimoEventSink?.cancel()
+        eventSink?.cancel()
         await runtimeHandlers?.cancel()
         if sessionAddress != nil {
             videoSurfaceNeedsRecovery = true
             await prepareGeronimoVideoSurfaceForShutdown()
         }
         if let pump { await pump.stop() }
-        if let sessionAddress { await Self.destroyGeronimoOnMainActor(sessionAddress: sessionAddress) }
+        if let sessionAddress, !(await Self.destroyGeronimoOnBackground(
+            sessionAddress: sessionAddress,
+            eventSink: eventSink,
+            runtimeHandlers: runtimeHandlers
+        )) {
+            lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
+            WebRTCMediaTelemetry.capture(
+                "nvst.geronimo.shutdown.quiescence.pending",
+                level: .error,
+                message: "Native NVST recovery could not prove callback quiescence before the stop deadline.",
+                attributes: lastDiagnosticMetadata
+            )
+        }
     }
 
     public func pause() async throws {
@@ -344,7 +417,20 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         await prepareGeronimoVideoSurfaceForShutdown()
         if let pump { await pump.stop() }
         await runtimeHandlers?.cancel()
-        await Self.destroyGeronimoOnMainActor(sessionAddress: sessionAddress)
+        let destroyCompleted = await Self.destroyGeronimoOnBackground(
+            sessionAddress: sessionAddress,
+            eventSink: eventSink,
+            runtimeHandlers: runtimeHandlers
+        )
+        if !destroyCompleted {
+            lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
+            WebRTCMediaTelemetry.capture(
+                "nvst.geronimo.shutdown.quiescence.pending",
+                level: .error,
+                message: "Native NVST pause could not prove callback quiescence before the stop deadline.",
+                attributes: lastDiagnosticMetadata
+            )
+        }
         geronimoPump = nil
         geronimoSessionAddress = nil
         geronimoEventSink = nil
@@ -418,7 +504,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                                                             hapticHandler: (@MainActor @Sendable (NativeNVSTHapticCommand) -> Void)?,
                                                             hapticResetHandler: (@MainActor @Sendable () -> Void)?,
                                                             authRefreshHandler: @escaping @Sendable (UInt32) async throws -> String,
-                                                            microphoneConfiguration: NativeNVSTMicrophoneConfiguration) async throws -> (connection: NativeNVSTTransportConnection, sessionAddress: UInt, pump: NativeNVSTGeronimoPumpDriver, runtimeHandlers: NativeNVSTRuntimeHandlers) {
+                                                            microphoneConfiguration: NativeNVSTMicrophoneConfiguration) async throws -> (connection: NativeNVSTTransportConnection,
+                                                                                                                                    sessionAddress: UInt,
+                                                                                                                                    pump: NativeNVSTGeronimoPumpDriver,
+                                                                                                                                    runtimeHandlers: NativeNVSTRuntimeHandlers) {
         guard let frameworksPath = status.libraryURL.deletingLastPathComponent().path.cString(using: .utf8) else {
             throw NativeNVSTError.runtimeUnavailable("Native Geronimo frameworks path could not be encoded.")
         }
@@ -451,7 +540,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         var startAttributes = Self.geronimoStartAttributes(allocation: allocation, streamingProfileJSON: streamingProfileJSON, geronimoSessionJSON: geronimoSessionJSON)
         startAttributes.merge(launchPayload.telemetryAttributes) { _, new in new }
         let microphoneRequested = microphoneConfiguration.captureRequested
-        let microphoneAvailable = await Self.resolveMicrophoneCaptureAccess(requested: microphoneRequested)
+        let microphoneAccess = await Self.resolveMicrophoneCaptureAccess(requested: microphoneRequested)
+        let microphoneAvailable = microphoneAccess == .authorized
         let microphoneEnabled = microphoneAvailable && microphoneConfiguration.initiallyEnabled
         startAttributes["allocationMode"] = allocation.isResume ? "resume" : "fresh"
         startAttributes["operation"] = "resume"
@@ -477,7 +567,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         do {
             try setGeronimoMicrophoneConfigurationOnMainActor(microphoneConfiguration, session: session)
         } catch {
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink
+            )
             throw error
         }
         eventSink.updateTelemetryAttributes(startAttributes)
@@ -489,7 +582,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             attributes["result"] = String(callbackResult)
             attributes["error"] = message
             WebRTCMediaTelemetry.capture("nvst.geronimo.callback.failed", level: .error, message: message, attributes: attributes)
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink
+            )
             throw NativeNVSTError.privateABIUnavailable(message)
         }
         let runtimeHandlers = NativeNVSTRuntimeHandlers(
@@ -502,14 +598,22 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let authRefreshResult = OpenNOWNativeNVSTGeronimoSetAuthRefreshHandler(session, nativeNVSTGeronimoAuthRefreshCallback, runtimeHandlers.authRefreshContext)
         guard hapticResult == 0, authRefreshResult == 0 else {
             await runtimeHandlers.cancel()
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink,
+                runtimeHandlers: runtimeHandlers
+            )
             throw NativeNVSTError.privateABIUnavailable("Native Geronimo runtime handler registration failed.")
         }
         guard let nativeVideoSurfaceHandle, let nativeVideoSurface = UnsafeMutableRawPointer(bitPattern: nativeVideoSurfaceHandle) else {
             let message = "Native Geronimo requires an AppKit video surface."
             WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: startAttributes)
             await runtimeHandlers.cancel()
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink,
+                runtimeHandlers: runtimeHandlers
+            )
             throw NativeNVSTError.privateABIUnavailable(message)
         }
         let surfaceResult = OpenNOWNativeNVSTGeronimoSetVideoSurface(session, nativeVideoSurface, errorBuffer, 1024)
@@ -520,7 +624,11 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             attributes["error"] = message
             WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: attributes)
             await runtimeHandlers.cancel()
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink,
+                runtimeHandlers: runtimeHandlers
+            )
             throw NativeNVSTError.privateABIUnavailable(message)
         }
         WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.bound", level: .info, message: "Native Geronimo video surface bound for SDL window creation.", attributes: startAttributes)
@@ -577,28 +685,114 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 throw error
             }
             WebRTCMediaTelemetry.capture("nvst.geronimo.stream.connected", level: .info, message: "Geronimo reported StreamerConnected for native NVST.", attributes: attributes)
-            return (NativeNVSTTransportConnection(session: allocation.session, runtimeStatus: status), sessionAddress, activePump, runtimeHandlers)
+            let nativeMicrophone = Self.readMicrophoneStatus(session: session)
+            let resolvedMicrophoneStatus = Self.microphoneStatus(access: microphoneAccess, nativeCode: nativeMicrophone.code)
+            var microphoneAttributes = attributes
+            microphoneAttributes["microphoneStatus"] = resolvedMicrophoneStatus.rawValue
+            if let detail = nativeMicrophone.detail, !detail.isEmpty {
+                microphoneAttributes["microphoneFailure"] = detail
+            }
+            WebRTCMediaTelemetry.capture(
+                Self.microphoneTelemetryEventName(for: resolvedMicrophoneStatus),
+                level: Self.microphoneTelemetryLevel(for: resolvedMicrophoneStatus),
+                message: Self.microphoneTelemetryMessage(for: resolvedMicrophoneStatus),
+                attributes: microphoneAttributes
+            )
+            let connection = NativeNVSTTransportConnection(
+                session: allocation.session,
+                runtimeStatus: status,
+                microphoneStatus: resolvedMicrophoneStatus
+            )
+            return (connection, sessionAddress, activePump, runtimeHandlers)
         } catch {
             pump?.stop()
             await runtimeHandlers.cancel()
-            OpenNOWNativeNVSTGeronimoDestroy(session)
+            _ = await Self.destroyGeronimoOnBackground(
+                sessionAddress: UInt(bitPattern: session),
+                eventSink: eventSink,
+                runtimeHandlers: runtimeHandlers
+            )
             throw error
         }
     }
 
-    @MainActor private static func destroyGeronimoOnMainActor(sessionAddress: UInt) {
-        OpenNOWNativeNVSTGeronimoDestroy(UnsafeMutableRawPointer(bitPattern: sessionAddress))
+    private static func destroyGeronimoOnBackground(sessionAddress: UInt,
+                                                   eventSink: NativeNVSTGeronimoEventSink? = nil,
+                                                   runtimeHandlers: NativeNVSTRuntimeHandlers? = nil) async -> Bool {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let completionContext: UnsafeMutableRawPointer?
+        if let eventSink {
+            let lease = NativeNVSTDeferredShutdownLease(eventSink: eventSink, runtimeHandlers: runtimeHandlers)
+            completionContext = Unmanaged.passRetained(lease).toOpaque()
+        } else {
+            completionContext = nil
+        }
+        let result = await Task.detached(priority: .userInitiated) {
+            OpenNOWNativeNVSTGeronimoDestroyWithCompletion(
+                UnsafeMutableRawPointer(bitPattern: sessionAddress),
+                NativeNVSTDeferredShutdownLease.nativeDestroyCompletion,
+                completionContext
+            )
+        }.value
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        if elapsedNanoseconds >= 500_000_000 {
+            WebRTCMediaTelemetry.capture(
+                "nvst.geronimo.shutdown.slow",
+                level: elapsedNanoseconds >= 3_000_000_000 ? .error : .warning,
+                message: "Native NVST shutdown exceeded its expected duration.",
+                attributes: ["durationMilliseconds": String(Double(elapsedNanoseconds) / 1_000_000)]
+            )
+        }
+        return result == 0
     }
 
-    @MainActor private static func resolveMicrophoneCaptureAccess(requested: Bool) async -> Bool {
-        if let resolvedAccess = microphoneCaptureAccess(requested: requested, authorizationStatus: AVCaptureDevice.authorizationStatus(for: .audio)) {
-            return resolvedAccess
+    @MainActor private static func resolveMicrophoneCaptureAccess(requested: Bool) async -> NativeNVSTMicrophoneAccess {
+        guard requested else { return .disabled }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return .authorized
+        case .denied, .restricted:
+            return .permissionDenied
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted ? .authorized : .permissionDenied)
+                }
+            }
+        @unknown default:
+            return .permissionDenied
         }
-        return await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                continuation.resume(returning: granted)
+    }
+
+    static func microphoneStatus(access: NativeNVSTMicrophoneAccess, nativeCode: Int32) -> NativeNVSTMicrophoneStatus {
+        switch access {
+        case .disabled:
+            return .disabled
+        case .permissionDenied:
+            return .permissionDenied
+        case .authorized:
+            switch nativeCode {
+            case 1:
+                return .available
+            case 3:
+                return .setupFailed
+            default:
+                return .capturerUnavailable
             }
         }
+    }
+
+    private static func readMicrophoneStatus(session: UnsafeMutableRawPointer) -> (code: Int32, detail: String?) {
+        var errorBuffer = [CChar](repeating: 0, count: 1024)
+        let code = errorBuffer.withUnsafeMutableBufferPointer { buffer in
+            OpenNOWNativeNVSTGeronimoGetMicrophoneStatus(session, buffer.baseAddress, buffer.count)
+        }
+        let detail = errorBuffer.withUnsafeBufferPointer { buffer -> String? in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            let value = String(cString: baseAddress)
+            return value.isEmpty ? nil : value
+        }
+        return (code, detail)
     }
 
     static func microphoneCaptureAccess(requested: Bool, authorizationStatus: AVAuthorizationStatus) -> Bool? {
@@ -1521,10 +1715,22 @@ private final class NativeNVSTGeronimoPumpDriver {
 
     private func pumpOnce() {
         guard isRunning else { return }
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let result = errorBuffer.withUnsafeMutableBufferPointer { buffer -> Int32 in
             guard let baseAddress = buffer.baseAddress else { return -1 }
             baseAddress.pointee = 0
             return OpenNOWNativeNVSTGeronimoPump(UnsafeMutableRawPointer(bitPattern: sessionAddress), 0, baseAddress, buffer.count)
+        }
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+        if elapsedNanoseconds >= 20_000_000 {
+            var attributes = telemetryAttributes
+            attributes["durationMilliseconds"] = String(Double(elapsedNanoseconds) / 1_000_000)
+            WebRTCMediaTelemetry.capture(
+                "nvst.geronimo.pump.slow",
+                level: elapsedNanoseconds >= 100_000_000 ? .error : .warning,
+                message: "Native NVST event pumping exceeded its main-thread budget.",
+                attributes: attributes
+            )
         }
         guard result != 0 else { return }
         stop()
@@ -2194,6 +2400,30 @@ private final class NativeNVSTAuthRefreshRequest: @unchecked Sendable {
     }
 }
 
+private final class NativeNVSTDeferredShutdownLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var eventSink: NativeNVSTGeronimoEventSink?
+    private var runtimeHandlers: NativeNVSTRuntimeHandlers?
+
+    static let nativeDestroyCompletion: @convention(c) (UnsafeMutableRawPointer?) -> Void = { context in
+        guard let context else { return }
+        let lease = Unmanaged<NativeNVSTDeferredShutdownLease>.fromOpaque(context).takeRetainedValue()
+        lease.releaseResources()
+    }
+
+    init(eventSink: NativeNVSTGeronimoEventSink, runtimeHandlers: NativeNVSTRuntimeHandlers?) {
+        self.eventSink = eventSink
+        self.runtimeHandlers = runtimeHandlers
+    }
+
+    private func releaseResources() {
+        lock.lock()
+        eventSink = nil
+        runtimeHandlers = nil
+        lock.unlock()
+    }
+}
+
 private final class NativeNVSTHapticSink: @unchecked Sendable {
     private let lock = NSLock()
     private var handler: (@MainActor @Sendable (NativeNVSTHapticCommand) -> Void)?
@@ -2362,6 +2592,9 @@ private func OpenNOWNativeNVSTGeronimoSetVideoSurface(_ session: UnsafeMutableRa
 @_silgen_name("OpenNOWNativeNVSTGeronimoResume")
 private func OpenNOWNativeNVSTGeronimoResume(_ session: UnsafeMutableRawPointer?, _ rawSessionJSON: UnsafePointer<CChar>?, _ streamingProfileJSON: UnsafePointer<CChar>?, _ cloudSessionJSON: UnsafePointer<CChar>?, _ gameLanguage: UnsafePointer<CChar>?, _ clientAppVersion: UnsafePointer<CChar>?, _ clientLocale: UnsafePointer<CChar>?, _ traceParent: UnsafePointer<CChar>?, _ authTokenType: UnsafePointer<CChar>?, _ authToken: UnsafePointer<CChar>?, _ microphoneAvailable: Int32, _ microphoneEnabled: Int32, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> Int32
 
+@_silgen_name("OpenNOWNativeNVSTGeronimoGetMicrophoneStatus")
+private func OpenNOWNativeNVSTGeronimoGetMicrophoneStatus(_ session: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> Int32
+
 @_silgen_name("OpenNOWNativeNVSTGeronimoSetMicrophoneEnabled")
 private func OpenNOWNativeNVSTGeronimoSetMicrophoneEnabled(_ session: UnsafeMutableRawPointer?, _ enabled: Int32, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> Int32
 
@@ -2408,4 +2641,9 @@ private func OpenNOWNativeNVSTGeronimoSendText(_ session: UnsafeMutableRawPointe
 private func OpenNOWNativeNVSTGeronimoStopWithResult(_ session: UnsafeMutableRawPointer?, _ reason: UnsafePointer<CChar>?, _ code: Int32, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ errorBufferLength: Int) -> Int32
 
 @_silgen_name("OpenNOWNativeNVSTGeronimoDestroy")
-private func OpenNOWNativeNVSTGeronimoDestroy(_ session: UnsafeMutableRawPointer?)
+private func OpenNOWNativeNVSTGeronimoDestroy(_ session: UnsafeMutableRawPointer?) -> Int32
+
+private typealias NativeNVSTGeronimoDestroyCompletion = @convention(c) (UnsafeMutableRawPointer?) -> Void
+
+@_silgen_name("OpenNOWNativeNVSTGeronimoDestroyWithCompletion")
+private func OpenNOWNativeNVSTGeronimoDestroyWithCompletion(_ session: UnsafeMutableRawPointer?, _ completion: NativeNVSTGeronimoDestroyCompletion?, _ context: UnsafeMutableRawPointer?) -> Int32

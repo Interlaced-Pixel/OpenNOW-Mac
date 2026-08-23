@@ -141,7 +141,7 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
             guard !finished else { return }
             finished = true
             if discardingStaleInput {
-                let staleIndices = inputs.indices.filter { Self.isLossy(inputs[$0]) && !isProtectedAbsoluteMove(at: $0) }
+                let staleIndices = inputs.indices.filter { Self.isStaleAtShutdown(inputs[$0]) }
                 for index in staleIndices.reversed() { inputs.remove(at: index) }
             } else {
                 inputs.removeAll(keepingCapacity: false)
@@ -191,6 +191,11 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
         case .event:
             return false
         }
+    }
+
+    private static func isStaleAtShutdown(_ input: NativeNVSTInput) -> Bool {
+        guard case .event(.gamepad(let state)) = input else { return false }
+        return state.buttons.isEmpty && !isNeutralizing(input)
     }
 
     private static func isAbsoluteMove(_ input: NativeNVSTInput) -> Bool {

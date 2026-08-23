@@ -14,14 +14,31 @@ public extension NativeNVSTSessionProvider {
     }
 }
 
+public enum NativeNVSTMicrophoneStatus: String, Equatable, Sendable {
+    case disabled
+    case permissionDenied = "permission-denied"
+    case available
+    case capturerUnavailable = "capturer-unavailable"
+    case setupFailed = "setup-failed"
+
+    public var isAvailable: Bool {
+        self == .available
+    }
+}
+
 public struct NativeNVSTTransportConnection: Equatable, Sendable {
     public let session: StreamSessionDescriptor
     public let runtimeStatus: NVSTNativeBridgeStatus
+    public let microphoneStatus: NativeNVSTMicrophoneStatus
     public let startedAt: Date
 
-    public init(session: StreamSessionDescriptor, runtimeStatus: NVSTNativeBridgeStatus, startedAt: Date = Date()) {
+    public init(session: StreamSessionDescriptor,
+                runtimeStatus: NVSTNativeBridgeStatus,
+                microphoneStatus: NativeNVSTMicrophoneStatus = .disabled,
+                startedAt: Date = Date()) {
         self.session = session
         self.runtimeStatus = runtimeStatus
+        self.microphoneStatus = microphoneStatus
         self.startedAt = startedAt
     }
 }
@@ -286,6 +303,7 @@ public protocol NativeNVSTTransport: Sendable {
     func sendAbsoluteMouseMove(_ event: NativeNVSTAbsoluteMouseEvent) async throws
     func setMicrophoneEnabled(_ enabled: Bool) async throws
     func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws
+    func microphoneStatus() async -> NativeNVSTMicrophoneStatus
     func togglePerformanceOverlay() async throws
     func performanceSnapshot() async -> NativeNVSTPerformanceSnapshot?
     func setMaximumBitrateKbps(_ bitrateKbps: UInt32) async throws
@@ -313,6 +331,7 @@ public extension NativeNVSTTransport {
     func setL4SEnabled(_ enabled: Bool) async throws { throw NativeNVSTError.notRunning }
     func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws { throw NativeNVSTError.notRunning }
     func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws {}
+    func microphoneStatus() async -> NativeNVSTMicrophoneStatus { .disabled }
 
     func pause() async throws {
         throw NativeNVSTError.notRunning
@@ -495,6 +514,11 @@ public actor NativeNVSTStreamingPath {
 
     public func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws {
         try await transport.setMicrophoneConfiguration(configuration)
+    }
+
+    public func microphoneStatus() async -> NativeNVSTMicrophoneStatus {
+        guard activeSession != nil else { return .disabled }
+        return await transport.microphoneStatus()
     }
 
     public func performanceSnapshot() async -> NativeNVSTPerformanceSnapshot? {

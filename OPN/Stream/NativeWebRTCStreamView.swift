@@ -298,6 +298,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         restoreInputFocus()
         window?.acceptsMouseMovedEvents = true
         if window == nil {
+            prepareNativeNVSTRendererForShutdown()
             removeKeyEquivalentMonitor()
             gamepadMonitor.stop()
             handleFocusLoss()
@@ -377,6 +378,12 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         nativeNVSTVideoVisible = false
         nativeNVSTRendererPreparedForShutdown = true
         nativeNVSTRendererWindow.alphaValue = 0
+        if let nativeNVSTRendererParentWindow {
+            nativeNVSTRendererParentWindow.removeChildWindow(nativeNVSTRendererWindow)
+            self.nativeNVSTRendererParentWindow = nil
+        }
+        nativeNVSTRendererWindow.orderOut(nil)
+        removeNativeNVSTDisplayNotifications()
         guard let metalView = nativeNVSTMetalView,
               let rendererContentView = nativeNVSTRendererWindow.contentView else { return }
         metalView.isHidden = true

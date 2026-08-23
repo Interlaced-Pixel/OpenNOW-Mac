@@ -100,6 +100,10 @@ struct NativeNVSTMicrophoneProcessingTests {
         #expect(OpenNOWNativeNVSTGeronimoTestMicrophoneRouteCount() == baseline)
     }
 
+    @Test func concurrentRouteCallbacksDrainBeforeRouteTeardown() {
+        #expect(OpenNOWNativeNVSTGeronimoTestMicrophoneRouteDrainage() == 1)
+    }
+
     @Test func settingsPreserveDisabledPushToTalkAndVoiceActivitySemantics() {
         let disabled = NativeNVSTMicrophoneConfiguration.settings(volume: -1, mode: "disabled")
         #expect(disabled.volume == 0)
@@ -169,3 +173,6 @@ private func OpenNOWNativeNVSTGeronimoTestUnregisterMicrophoneRoute(_ route: Uns
 
 @_silgen_name("OpenNOWNativeNVSTGeronimoTestMicrophoneRouteCount")
 private func OpenNOWNativeNVSTGeronimoTestMicrophoneRouteCount() -> Int
+
+@_silgen_name("OpenNOWNativeNVSTGeronimoTestMicrophoneRouteDrainage")
+private func OpenNOWNativeNVSTGeronimoTestMicrophoneRouteDrainage() -> Int32

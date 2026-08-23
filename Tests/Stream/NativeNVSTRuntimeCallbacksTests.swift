@@ -279,6 +279,19 @@ private func decodeNativeHapticCallbackData(_ bytes: UnsafePointer<UInt8>?, _ co
     #expect(cancelResponse.string.isEmpty)
 }
 
+@Test func nativeGridAppCallbackLeasesDrainAcrossConcurrentEarlyReturns() {
+    #expect(OpenNOWNativeNVSTGeronimoTestCallbackLeaseDrainage() == 1)
+}
+
+@Test @MainActor func nativeCoreAudioTerminationDoesNotWaitOnTheMainActor() {
+    let device = OPNCoreAudioRTCDevice(owner: nil)
+    let clock = ContinuousClock()
+    let start = clock.now
+
+    #expect(device.terminateDevice())
+    #expect(start.duration(to: clock.now) < .seconds(1))
+}
+
 private extension Array where Element == UInt8 {
     mutating func write<T: FixedWidthInteger>(_ value: T, at offset: Int) {
         withUnsafeMutableBytes { bytes in
@@ -286,3 +299,6 @@ private extension Array where Element == UInt8 {
         }
     }
 }
+
+@_silgen_name("OpenNOWNativeNVSTGeronimoTestCallbackLeaseDrainage")
+private func OpenNOWNativeNVSTGeronimoTestCallbackLeaseDrainage() -> Int32

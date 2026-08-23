@@ -1264,6 +1264,11 @@ public struct WebRTCMediaStreamSurface: View {
                     onProgress?(progress)
                 }
             }
+            let shouldPresentStream = await MainActor.run { !Task.isCancelled && !didEndStream }
+            guard shouldPresentStream else {
+                _ = try? await path.stop(reason: .userRequested, message: "Stream view closed during startup.")
+                return
+            }
             await MainActor.run {
                 sessionLimit = StreamSessionSidebarLimit(session: session)
                 publishSessionLimitProgress()
@@ -1287,6 +1292,7 @@ public struct WebRTCMediaStreamSurface: View {
             if let sessionError = error as? OpenNOWStreamSessionError, case .activeSessionConflict(let conflict) = sessionError {
                 metadata.merge(conflict.reportMetadata) { current, _ in current }
             }
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
             onEnd(false, message, StreamReport(title: configuration.title, success: false, reason: .failed, message: message, durationSeconds: 0, metadata: metadata))
         }
     }
@@ -1561,10 +1567,11 @@ public struct WebRTCMediaStreamSurface: View {
         transport?.setMicrophoneEnabled(false)
         transport?.stopRecording()
         WebRTCMediaTelemetry.capture("webrtc.ui.quit_menu.quit_stream", level: .info, message: "Stream quit requested from quit menu.", attributes: ["applicationID": configuration.applicationID])
+        let shouldTerminateApplication = completion != nil
         Task {
             let report = await finishStream(reason: .userRequested, message: "Stream ended by user.")
             await MainActor.run {
-                completion?(false)
+                completion?(shouldTerminateApplication)
                 onEnd(report.success, report.message, report)
             }
         }
@@ -1574,7 +1581,7 @@ public struct WebRTCMediaStreamSurface: View {
         guard !didEndStream else { return }
         isEndingStream = true
         quitMenuVisible = false
-        pendingApplicationQuitCompletion?(false)
+        let completion = pendingApplicationQuitCompletion
         pendingApplicationQuitCompletion = nil
         nativeView?.setPointerLocked(false)
         microphoneEnabled = false
@@ -1582,7 +1589,10 @@ public struct WebRTCMediaStreamSurface: View {
         transport?.stopRecording()
         Task {
             let report = await finishStream(reason: .remoteEnded, message: message.isEmpty ? "Stream ended." : message)
-            await MainActor.run { onEnd(report.success, report.message, report) }
+            await MainActor.run {
+                completion?(completion != nil)
+                onEnd(report.success, report.message, report)
+            }
         }
     }
 
@@ -1598,24 +1608,34 @@ public struct WebRTCMediaStreamSurface: View {
         antiAFKMouseMovementTask = nil
         sessionLimitUpdateTask?.cancel()
         sessionLimitUpdateTask = nil
+        let pendingStartTask = startTask
+        pendingStartTask?.cancel()
+        await pendingStartTask?.value
         let remoteNeutralEvents = await stopRemoteCoOpSession()
         remoteNeutralEvents.forEach { transport?.sendNow($0) }
         remoteCoOpSnapshot = await remoteCoOpHostSession.snapshot()
-        guard let path else { return fallbackReport }
+        let pendingPath = path
+        guard let pendingPath else {
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+            return fallbackReport
+        }
         defer { Task { @MainActor in endStreamingPerformanceMode() } }
         do {
-            return try await path.stop(reason: reason, message: message)
+            let report = try await pendingPath.stop(reason: reason, message: message)
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+            return report
         } catch {
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
             return StreamReport(title: configuration.title, success: false, reason: .failed, message: Self.message(for: error), durationSeconds: 0, metadata: ["applicationID": configuration.applicationID])
         }
     }
 
     private func stopStream() {
         endStreamingPerformanceMode()
-        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
-        pendingApplicationQuitCompletion?(false)
+        let quitCompletion = pendingApplicationQuitCompletion
         pendingApplicationQuitCompletion = nil
-        startTask?.cancel()
+        let pendingStartTask = startTask
+        pendingStartTask?.cancel()
         startTask = nil
         statsTask?.cancel()
         statsTask = nil
@@ -1630,6 +1650,7 @@ public struct WebRTCMediaStreamSurface: View {
         transientStreamMessage = ""
         sessionLimit = nil
         nativeView?.setPointerLocked(false)
+        nativeView?.prepareNativeNVSTRendererForShutdown()
         microphoneEnabled = false
         transport?.setMicrophoneEnabled(false)
         transport?.stopRecording()
@@ -1641,7 +1662,18 @@ public struct WebRTCMediaStreamSurface: View {
         }
         guard !didEndStream else { return }
         didEndStream = true
-        if let path { Task { try? await path.stop(reason: .userRequested, message: "Stream view closed.") } }
+        let pendingPath = path
+        let shouldTerminateApplication = quitCompletion != nil
+        Task {
+            await pendingStartTask?.value
+            if let pendingPath {
+                _ = try? await pendingPath.stop(reason: .userRequested, message: "Stream view closed.")
+            }
+            await MainActor.run {
+                WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                quitCompletion?(shouldTerminateApplication)
+            }
+        }
     }
 
     private func beginStreamingPerformanceMode() {

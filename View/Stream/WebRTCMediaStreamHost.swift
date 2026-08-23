@@ -291,6 +291,7 @@ private struct NativeNVSTMediaStreamSurface: View {
     @State private var microphoneAvailable = false
     @State private var microphoneEnabled = false
     @State private var microphoneDesiredEnabled = false
+    @State private var microphoneStatus = NativeNVSTMicrophoneStatus.disabled
     @State private var microphoneMode = "disabled"
     @State private var microphonePendingStates: [Bool] = []
     @State private var microphoneUpdateTask: Task<Void, Never>?
@@ -343,11 +344,12 @@ private struct NativeNVSTMediaStreamSurface: View {
         let profile = OPNStreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: OPNStreamPreferences.loadDeviceCapabilities())
         microphoneMode = profile.microphoneMode.lowercased()
         let microphoneConfiguration = NativeNVSTMicrophoneConfiguration.settings(volume: profile.microphoneVolume, mode: microphoneMode)
-        microphoneAvailable = microphoneConfiguration.captureRequested
-        microphoneEnabled = microphoneConfiguration.initiallyEnabled
-        microphoneDesiredEnabled = microphoneEnabled
+        microphoneStatus = .disabled
+        microphoneAvailable = false
+        microphoneEnabled = false
+        microphoneDesiredEnabled = false
         microphonePendingStates.removeAll()
-        let initialMicrophoneEnabled = microphoneEnabled
+        let initialMicrophoneEnabled = microphoneConfiguration.initiallyEnabled
         antiAFKMouseMovementEnabled = profile.antiAFKMouseMovementEnabled
         networkGovernor = NativeNVSTNetworkGovernor(maximumBitrateKbps: UInt32(max(1, profile.maxBitrateMbps) * 1_000), l4sEnabled: profile.enableL4S)
         nativeStreamHealth = NativeNVSTStreamHealthMonitor()
@@ -410,14 +412,12 @@ private struct NativeNVSTMediaStreamSurface: View {
                         onProgress?(progress)
                     }
                 }
-                do {
-                    try await path.setMicrophoneEnabled(initialMicrophoneEnabled)
-                } catch {
-                    await MainActor.run {
-                        microphoneEnabled = false
-                        microphoneDesiredEnabled = false
-                        WebRTCMediaTelemetry.capture("nvst.microphone.initialization.failed", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
-                    }
+                let resolvedMicrophoneStatus = await path.microphoneStatus()
+                await MainActor.run {
+                    microphoneStatus = resolvedMicrophoneStatus
+                    microphoneAvailable = resolvedMicrophoneStatus.isAvailable
+                    microphoneEnabled = resolvedMicrophoneStatus.isAvailable && initialMicrophoneEnabled
+                    microphoneDesiredEnabled = microphoneEnabled
                 }
                 let shouldPresentStream = await MainActor.run {
                     guard !Task.isCancelled, !didEnd, !isEnding else { return false }
@@ -436,6 +436,9 @@ private struct NativeNVSTMediaStreamSurface: View {
                 }
                 if !shouldPresentStream {
                     _ = try? await path.stop(reason: .userRequested, message: "Native NVST stream view closed during startup.")
+                    await MainActor.run {
+                        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                    }
                 }
             } catch {
                 let diagnostics = await path.diagnosticMetadata()
@@ -448,6 +451,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         guard !(error is CancellationError), !Task.isCancelled else {
             loadingStepIndex = -1
             endStreamingPerformanceMode()
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
             return
         }
         let message = Self.message(for: error)
@@ -468,10 +472,10 @@ private struct NativeNVSTMediaStreamSurface: View {
     }
 
     private func stopStream() {
-        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
-        pendingApplicationQuitCompletion?(false)
+        let quitCompletion = pendingApplicationQuitCompletion
         pendingApplicationQuitCompletion = nil
-        startTask?.cancel()
+        let pendingStartTask = startTask
+        pendingStartTask?.cancel()
         startTask = nil
         endEventTask?.cancel()
         endEventTask = nil
@@ -489,6 +493,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.remoteInputEnabled = false
         let inputDispatcher = self.inputDispatcher
         self.inputDispatcher = nil
+        let shouldTerminateApplication = quitCompletion != nil
         isConnected = false
         unifiedHUDVisible = false
         streamControlsVisible = false
@@ -496,13 +501,17 @@ private struct NativeNVSTMediaStreamSurface: View {
         microphoneAvailable = false
         microphoneEnabled = false
         microphoneDesiredEnabled = false
+        microphoneStatus = .disabled
         microphoneMode = "disabled"
         microphonePendingStates.removeAll()
         antiAFKMouseMovementEnabled = false
         nativeView?.stopHaptics()
         nativeView?.setNativeNVSTVideoVisible(false)
+        nativeView?.prepareNativeNVSTRendererForShutdown()
         guard !didEnd else {
             inputDispatcher?.cancel()
+            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+            quitCompletion?(shouldTerminateApplication)
             return
         }
         didEnd = true
@@ -512,14 +521,19 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.onPointerLockChanged = nil
         nativeView?.onCommand = nil
         nativeView?.shouldHandleCommand = nil
-        if let path {
-            Task {
-                await inputDispatcher?.finish()
-                try? await path.setMicrophoneEnabled(false)
-                _ = try? await path.stop(reason: .userRequested, message: "Native NVST stream view closed.")
+        let pendingPath = path
+        Task {
+            await pendingStartTask?.value
+            await pendingPath?.cancelStart()
+            await inputDispatcher?.finish()
+            if let pendingPath {
+                try? await pendingPath.setMicrophoneEnabled(false)
+                _ = try? await pendingPath.stop(reason: .userRequested, message: "Native NVST stream view closed.")
             }
-        } else {
-            inputDispatcher?.cancel()
+            await MainActor.run {
+                WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                quitCompletion?(shouldTerminateApplication)
+            }
         }
     }
 
@@ -537,6 +551,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         guard let path else {
             await MainActor.run {
                 isEnding = false
+                WebRTCMediaStreamLifecycle.deactivate(configuration.id)
                 showStreamControls()
             }
             return false
@@ -592,6 +607,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         microphoneAvailable = false
         microphoneEnabled = false
         microphoneDesiredEnabled = false
+        microphoneStatus = .disabled
         microphoneMode = "disabled"
         microphonePendingStates.removeAll()
         antiAFKMouseMovementEnabled = false
@@ -605,10 +621,11 @@ private struct NativeNVSTMediaStreamSurface: View {
         networkPathTask = nil
         networkPathAvailable = true
         cancelNativeShortcutTasks()
-        pendingApplicationQuitCompletion?(false)
+        pendingApplicationQuitCompletion?(report.reason != .paused)
         pendingApplicationQuitCompletion = nil
         nativeView?.setPointerLocked(false)
         nativeView?.setNativeNVSTVideoVisible(false)
+        nativeView?.prepareNativeNVSTRendererForShutdown()
         endEventTask?.cancel()
         endEventTask = nil
         nativeView?.onInputEvent = nil
@@ -808,7 +825,10 @@ private struct NativeNVSTMediaStreamSurface: View {
             Task {
                 await pendingStartTask?.value
                 await pendingPath?.cancelStart()
-                completion?(true)
+                await MainActor.run {
+                    WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                    completion?(true)
+                }
             }
             return
         }
@@ -1144,7 +1164,18 @@ private struct NativeNVSTMediaStreamSurface: View {
     }
 
     private var nativeMicrophoneStatusText: String {
-        guard microphoneAvailable else { return "Disabled" }
+        switch microphoneStatus {
+        case .disabled:
+            return "Disabled"
+        case .permissionDenied:
+            return "Permission Denied"
+        case .capturerUnavailable:
+            return "Unavailable"
+        case .setupFailed:
+            return "Setup Failed"
+        case .available:
+            break
+        }
         if microphoneMode == "push-to-talk" { return microphoneEnabled ? "PTT Active" : "PTT Ready" }
         if microphoneMode == "voice-activity", microphoneEnabled { return "Voice Activity" }
         return microphoneEnabled ? "On" : "Muted"

@@ -10,14 +10,122 @@ private let audioDeviceChangedCallback: AudioObjectPropertyListenerProc = { _, _
     return noErr
 }
 
+private final class OPNCoreAudioCallbackContext: @unchecked Sendable {
+    private let condition = NSCondition()
+    private weak var device: OPNCoreAudioRTCDevice?
+    private var isTerminating = false
+    private var callbacksInFlight = 0
+
+    func activate(device: OPNCoreAudioRTCDevice) {
+        condition.lock()
+        self.device = device
+        isTerminating = false
+        condition.unlock()
+    }
+
+    func beginTermination() {
+        condition.lock()
+        isTerminating = true
+        device = nil
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func waitForCallbacks() -> Bool {
+        condition.lock()
+        var drainedWithinDeadline = true
+        let deadline = Date(timeIntervalSinceNow: 3)
+        while callbacksInFlight > 0 {
+            if condition.wait(until: deadline) {
+                continue
+            }
+            drainedWithinDeadline = false
+            while callbacksInFlight > 0 {
+                condition.wait()
+            }
+        }
+        condition.unlock()
+        return drainedWithinDeadline
+    }
+
+    func withDevice<T>(_ body: (OPNCoreAudioRTCDevice) -> T) -> T? {
+        condition.lock()
+        guard !isTerminating, let device else {
+            condition.unlock()
+            return nil
+        }
+        callbacksInFlight += 1
+        condition.unlock()
+        defer {
+            condition.lock()
+            callbacksInFlight -= 1
+            condition.broadcast()
+            condition.unlock()
+        }
+        return body(device)
+    }
+}
+
+private final class OPNCoreAudioTerminationResources: @unchecked Sendable {
+    private let callbackContext: OPNCoreAudioCallbackContext
+    private let playoutUnit: AudioUnit?
+    private let recordingUnit: AudioUnit?
+    private let wasPlaying: Bool
+    private let wasRecording: Bool
+    private let wasPlayoutInitialized: Bool
+    private let wasRecordingInitialized: Bool
+
+    init(callbackContext: OPNCoreAudioCallbackContext,
+         playoutUnit: AudioUnit?,
+         recordingUnit: AudioUnit?,
+         wasPlaying: Bool,
+         wasRecording: Bool,
+         wasPlayoutInitialized: Bool,
+         wasRecordingInitialized: Bool) {
+        self.callbackContext = callbackContext
+        self.playoutUnit = playoutUnit
+        self.recordingUnit = recordingUnit
+        self.wasPlaying = wasPlaying
+        self.wasRecording = wasRecording
+        self.wasPlayoutInitialized = wasPlayoutInitialized
+        self.wasRecordingInitialized = wasRecordingInitialized
+    }
+
+    func terminate() {
+        let drainedWithinDeadline = callbackContext.waitForCallbacks()
+        if !drainedWithinDeadline {
+            WebRTCMediaTelemetry.capture(
+                "webrtc.native.audio.callback_drain_slow",
+                level: .warning,
+                message: "CoreAudio callbacks exceeded the native termination drain deadline.",
+                attributes: ["deadlineMilliseconds": "3000"]
+            )
+        }
+        if let playoutUnit {
+            if wasPlaying { AudioOutputUnitStop(playoutUnit) }
+            if wasPlayoutInitialized { AudioUnitUninitialize(playoutUnit) }
+            AudioComponentInstanceDispose(playoutUnit)
+        }
+        if let recordingUnit {
+            if wasRecording { AudioOutputUnitStop(recordingUnit) }
+            if wasRecordingInitialized { AudioUnitUninitialize(recordingUnit) }
+            AudioComponentInstanceDispose(recordingUnit)
+        }
+    }
+}
+
 private let coreAudioPlayoutCallback: AURenderCallback = { refCon, actionFlags, timestamp, busNumber, frameCount, outputData in
-    let device = Unmanaged<OPNCoreAudioRTCDevice>.fromOpaque(refCon).takeUnretainedValue()
-    return device.renderPlayout(actionFlags: actionFlags, timestamp: timestamp, busNumber: Int(busNumber), frameCount: frameCount, outputData: outputData)
+    let context = Unmanaged<OPNCoreAudioCallbackContext>.fromOpaque(refCon).takeUnretainedValue()
+    return context.withDevice {
+        $0.renderPlayout(actionFlags: actionFlags, timestamp: timestamp, busNumber: Int(busNumber), frameCount: frameCount, outputData: outputData)
+    } ?? noErr
 }
 
 private let coreAudioRecordingCallback: AURenderCallback = { refCon, actionFlags, timestamp, busNumber, frameCount, _ in
-    let device = Unmanaged<OPNCoreAudioRTCDevice>.fromOpaque(refCon).takeUnretainedValue()
-    return device.captureRecording(actionFlags: actionFlags, timestamp: timestamp, busNumber: Int(busNumber), frameCount: frameCount)
+    let context = Unmanaged<OPNCoreAudioCallbackContext>.fromOpaque(refCon).takeUnretainedValue()
+    return context.withDevice {
+        $0.captureRecording(actionFlags: actionFlags, timestamp: timestamp, busNumber: Int(busNumber), frameCount: frameCount)
+    } ?? noErr
 }
 
 @objc(OPNCoreAudioRTCDevice)
@@ -25,6 +133,8 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     weak var owner: OPNLibWebRTCStreamSession?
 
     private let audioQueue = DispatchQueue(label: "io.opencg.opennow.webrtc.coreaudio")
+    private let audioQueueKey = DispatchSpecificKey<Void>()
+    private let callbackContext = OPNCoreAudioCallbackContext()
     private var playoutUnit: AudioUnit?
     private var recordingUnit: AudioUnit?
     private var outputDevice = AudioDeviceID(kAudioObjectUnknown)
@@ -51,15 +161,32 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     init(owner: OPNLibWebRTCStreamSession?) {
         self.owner = owner
         super.init()
+        audioQueue.setSpecific(key: audioQueueKey, value: ())
+        callbackContext.activate(device: self)
         updateDeviceParameters()
     }
 
     deinit {
-        _ = terminateDevice()
+        callbackContext.beginTermination()
+        let termination = OPNCoreAudioTerminationResources(
+            callbackContext: callbackContext,
+            playoutUnit: playoutUnit,
+            recordingUnit: recordingUnit,
+            wasPlaying: isPlaying,
+            wasRecording: isRecording,
+            wasPlayoutInitialized: isPlayoutInitialized,
+            wasRecordingInitialized: isRecordingInitialized
+        )
+        if DispatchQueue.getSpecific(key: audioQueueKey) != nil {
+            termination.terminate()
+        } else {
+            audioQueue.async { termination.terminate() }
+        }
     }
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
         audioQueue.sync {
+            callbackContext.activate(device: self)
             self.delegate = delegate
             isInitialized = true
             updateDeviceParameters()
@@ -68,17 +195,44 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     }
 
     func terminateDevice() -> Bool {
-        audioQueue.sync {
-            stopPlayoutLocked()
-            stopRecordingLocked()
-            disposePlayoutUnitLocked()
-            disposeRecordingUnitLocked()
-            delegate = nil
-            isInitialized = false
-            isPlayoutInitialized = false
-            isRecordingInitialized = false
+        if DispatchQueue.getSpecific(key: audioQueueKey) != nil {
+            terminateDeviceLocked()
+        } else if Thread.isMainThread {
+            audioQueue.async { [self] in
+                terminateDeviceLocked()
+            }
+            WebRTCMediaTelemetry.capture(
+                "webrtc.native.audio.terminate_scheduled",
+                level: .debug,
+                message: "CoreAudio RTC device termination scheduled on the audio queue."
+            )
+        } else {
+            audioQueue.sync {
+                terminateDeviceLocked()
+            }
         }
         return true
+    }
+
+    private func terminateDeviceLocked() {
+        callbackContext.beginTermination()
+        let drainedWithinDeadline = callbackContext.waitForCallbacks()
+        if !drainedWithinDeadline {
+            WebRTCMediaTelemetry.capture(
+                "webrtc.native.audio.callback_drain_slow",
+                level: .warning,
+                message: "CoreAudio callbacks exceeded the native termination drain deadline.",
+                attributes: ["deadlineMilliseconds": "3000"]
+            )
+        }
+        stopPlayoutLocked()
+        stopRecordingLocked()
+        disposePlayoutUnitLocked()
+        disposeRecordingUnitLocked()
+        delegate = nil
+        isInitialized = false
+        isPlayoutInitialized = false
+        isRecordingInitialized = false
     }
 
     func initializePlayout() -> Bool {
