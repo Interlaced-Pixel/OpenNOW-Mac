@@ -6,11 +6,11 @@ on:
       version:
         description: Release version
         required: true
-        default: "1.53"
+        default: "1.54"
       build:
         description: Release build number
         required: true
-        default: "55"
+        default: "56"
   push:
     branches:
       - main
