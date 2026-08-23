@@ -10,7 +10,7 @@ private let audioDeviceChangedCallback: AudioObjectPropertyListenerProc = { _, _
     return noErr
 }
 
-private final class OPNCoreAudioCallbackContext: @unchecked Sendable {
+final class OPNCoreAudioCallbackContext: @unchecked Sendable {
     private let condition = NSCondition()
     private weak var device: OPNCoreAudioRTCDevice?
     private var isTerminating = false
@@ -31,18 +31,16 @@ private final class OPNCoreAudioCallbackContext: @unchecked Sendable {
         condition.unlock()
     }
 
-    func waitForCallbacks() -> Bool {
+    func waitForCallbacks(timeout: TimeInterval = 3) -> Bool {
         condition.lock()
         var drainedWithinDeadline = true
-        let deadline = Date(timeIntervalSinceNow: 3)
+        let deadline = Date(timeIntervalSinceNow: timeout)
         while callbacksInFlight > 0 {
             if condition.wait(until: deadline) {
                 continue
             }
             drainedWithinDeadline = false
-            while callbacksInFlight > 0 {
-                condition.wait()
-            }
+            break
         }
         condition.unlock()
         return drainedWithinDeadline
@@ -68,6 +66,7 @@ private final class OPNCoreAudioCallbackContext: @unchecked Sendable {
 
 private final class OPNCoreAudioTerminationResources: @unchecked Sendable {
     private let callbackContext: OPNCoreAudioCallbackContext
+    private let queue: DispatchQueue
     private let playoutUnit: AudioUnit?
     private let recordingUnit: AudioUnit?
     private let wasPlaying: Bool
@@ -75,13 +74,15 @@ private final class OPNCoreAudioTerminationResources: @unchecked Sendable {
     private let wasPlayoutInitialized: Bool
     private let wasRecordingInitialized: Bool
 
-    init(callbackContext: OPNCoreAudioCallbackContext,
+    init(queue: DispatchQueue,
+         callbackContext: OPNCoreAudioCallbackContext,
          playoutUnit: AudioUnit?,
          recordingUnit: AudioUnit?,
          wasPlaying: Bool,
          wasRecording: Bool,
          wasPlayoutInitialized: Bool,
          wasRecordingInitialized: Bool) {
+        self.queue = queue
         self.callbackContext = callbackContext
         self.playoutUnit = playoutUnit
         self.recordingUnit = recordingUnit
@@ -100,6 +101,10 @@ private final class OPNCoreAudioTerminationResources: @unchecked Sendable {
                 message: "CoreAudio callbacks exceeded the native termination drain deadline.",
                 attributes: ["deadlineMilliseconds": "3000"]
             )
+            queue.asyncAfter(deadline: .now() + .milliseconds(100)) { [self] in
+                terminate()
+            }
+            return
         }
         if let playoutUnit {
             if wasPlaying { AudioOutputUnitStop(playoutUnit) }
@@ -169,6 +174,7 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     deinit {
         callbackContext.beginTermination()
         let termination = OPNCoreAudioTerminationResources(
+            queue: audioQueue,
             callbackContext: callbackContext,
             playoutUnit: playoutUnit,
             recordingUnit: recordingUnit,
@@ -224,6 +230,10 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
                 message: "CoreAudio callbacks exceeded the native termination drain deadline.",
                 attributes: ["deadlineMilliseconds": "3000"]
             )
+            audioQueue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
+                self?.terminateDeviceLocked()
+            }
+            return
         }
         stopPlayoutLocked()
         stopRecordingLocked()

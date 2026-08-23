@@ -292,6 +292,26 @@ private func decodeNativeHapticCallbackData(_ bytes: UnsafePointer<UInt8>?, _ co
     #expect(start.duration(to: clock.now) < .seconds(1))
 }
 
+@Test func nativeCoreAudioCallbackDrainIsBounded() {
+    let device = OPNCoreAudioRTCDevice(owner: nil)
+    let context = OPNCoreAudioCallbackContext()
+    context.activate(device: device)
+    let callbackStarted = DispatchSemaphore(value: 0)
+    let releaseCallback = DispatchSemaphore(value: 0)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        context.withDevice { _ in
+            callbackStarted.signal()
+            releaseCallback.wait()
+        }
+    }
+
+    #expect(callbackStarted.wait(timeout: .now() + 1) == .success)
+    #expect(!context.waitForCallbacks(timeout: 0.02))
+    releaseCallback.signal()
+    #expect(context.waitForCallbacks(timeout: 1))
+}
+
 private extension Array where Element == UInt8 {
     mutating func write<T: FixedWidthInteger>(_ value: T, at offset: Int) {
         withUnsafeMutableBytes { bytes in

@@ -1871,6 +1871,7 @@ private struct CatalogContentView: View {
     @State private var heroAutoScrollEnabled = true
     @State private var isPointerInsideDetailPanel = false
     @State private var showAllSectionId: String?
+    @State private var selectedRailScrollWorkItem: DispatchWorkItem?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let heroTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -2043,18 +2044,14 @@ private struct CatalogContentView: View {
 
     private func scrollToSelectedRail(_ anchor: String?, proxy: ScrollViewProxy) {
         guard let anchor else { return }
-        scrollToSelectedRail(anchor, proxy: proxy, remainingDeferredPasses: 2)
-    }
-
-    private func scrollToSelectedRail(_ anchor: String, proxy: ScrollViewProxy, remainingDeferredPasses: Int) {
-        DispatchQueue.main.async {
+        selectedRailScrollWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
             withAnimation(.easeInOut(duration: 0.24)) {
                 proxy.scrollTo(anchor, anchor: .top)
             }
-            if remainingDeferredPasses > 0 {
-                scrollToSelectedRail(anchor, proxy: proxy, remainingDeferredPasses: remainingDeferredPasses - 1)
-            }
         }
+        selectedRailScrollWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50), execute: workItem)
     }
 
     private func shouldShowDetail(afterSectionAt index: Int, sections: [CatalogSectionModel]) -> Bool {
@@ -2383,6 +2380,7 @@ private struct CatalogRailView: View {
     let section: CatalogSectionModel
     let onShowAll: () -> Void
     @State private var scrollIndex = 0
+    @State private var prefetchedIdentitySignature = ""
 
     private var games: [OPNCatalogGameObject] {
         var visibleGames = section.visibleGames(expanded: false)
@@ -2485,6 +2483,9 @@ private struct CatalogRailView: View {
     }
 
     private func prefetchNearVisibleImages() {
+        let identitySignature = games.map(\.catalogIdentity).joined(separator: "|")
+        guard identitySignature != prefetchedIdentitySignature else { return }
+        prefetchedIdentitySignature = identitySignature
         var urls: [URL] = []
         var seen = Set<String>()
         for game in games.prefix(8) {
