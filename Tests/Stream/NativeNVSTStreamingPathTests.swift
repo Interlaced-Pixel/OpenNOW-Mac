@@ -1488,7 +1488,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(firstObject["appLaunchMode"] as? Int == 2)
 }
 
-@Test func nativeNVSTGeronimoSessionUsesVendorWindowedCursorDefaults() throws {
+@Test func nativeNVSTGeronimoSessionUsesVendorFullscreenCursorDefaults() throws {
     let streamingProfileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
         rawSessionJSON: "{\"streamingProfile\":{\"resolution\":\"1920x1080\",\"fps\":60,\"codec\":\"H264\"}}",
         sessionInfoJSON: "{}"
@@ -1505,7 +1505,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     )
     let session = try #require(JSONSerialization.jsonObject(with: Data(sessionJSON.utf8)) as? [String: Any])
 
-    #expect(session["windowedStreaming"] as? Bool == true)
+    #expect(session["windowedStreaming"] as? Bool == false)
     #expect(session["cursorType"] as? Int == 1)
 }
 

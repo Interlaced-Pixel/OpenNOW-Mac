@@ -12,8 +12,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     static let geronimoPumpFramesPerSecond = 60.0
     static let geronimoPumpInterval = 1.0 / geronimoPumpFramesPerSecond
     static let geronimoPumpRunLoopMode = RunLoop.Mode.default
-    static let nativeWindowedStreaming = true
-    static let nativeWindowedCursorType = 1
+    static let nativeWindowedStreaming = false
+    static let nativeFullscreenCursorType = 1
 
     static let geronimoStartFailureMessage = "Native NVST streaming did not reach Geronimo readiness. Open diagnostics for the native phase and sanitized error."
     static let geronimoStopTimeoutMessage = "Native NVST stop callback timed out."
@@ -1092,7 +1092,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 OPNStreamPreferences.presentationCapability(codec: string(profile["codec"], fallback: "H264"), capabilities: $0)
             }
         )
-        modeSelection["cursorType"] = nativeWindowedCursorType
+        modeSelection["cursorType"] = nativeFullscreenCursorType
         modeSelection["windowedStreaming"] = nativeWindowedStreaming
         guard JSONSerialization.isValidJSONObject(modeSelection),
               let data = try? JSONSerialization.data(withJSONObject: modeSelection),
@@ -1137,7 +1137,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             "appId": int(requestData["appId"]) > 0 ? int(requestData["appId"]) : int(rawSession["appId"]),
             "appName": firstNonEmpty(string(requestData["appName"], fallback: ""), string(rawSession["appName"], fallback: ""), allocation.session.title),
             "appLaunchMode": geronimoAppLaunchMode(firstValue(in: requestData, rawSession, keys: ["appLaunchMode"])),
-            "cursorType": nativeWindowedCursorType,
+            "cursorType": nativeFullscreenCursorType,
             "windowedStreaming": nativeWindowedStreaming,
             "serverType": allocation.serverType > 0 ? allocation.serverType : (int(rawSession["serverType"]) > 0 ? int(rawSession["serverType"]) : int(requestData["serverType"])),
             "state": int(rawSession["state"]) > 0 ? int(rawSession["state"]) : int(rawSession["status"]),
