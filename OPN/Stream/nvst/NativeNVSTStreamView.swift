@@ -19,6 +19,7 @@ private final class NativeNVSTVideoSurfaceView: NSView {
     }
 }
 
+@MainActor
 private final class NativeNVSTRendererWindow: NSWindow {
     var hdrPresentationRequested = false
     var codecSupportsHDR = false

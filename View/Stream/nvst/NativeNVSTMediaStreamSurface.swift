@@ -1025,12 +1025,13 @@ struct NativeNVSTMediaStreamSurface: View {
     private func startNativeStatsPolling(path: NativeNVSTStreamingPath) {
         nativeStatsTask?.cancel()
         nativeStatsTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             while !Task.isCancelled {
                 let snapshot = await path.performanceSnapshot()
                 if snapshot == nil {
                     nativeStreamHealth = NativeNVSTStreamHealthMonitor()
                 }
-                if let snapshot, isConnected, !isEnding, !didEnd {
+                if let snapshot, snapshot.available, isConnected, !isEnding, !didEnd {
                     latestNativeStats = snapshot
                     recordNativeNetworkTelemetry(snapshot)
                     let adjustments = networkGovernor?.evaluate(snapshot) ?? []

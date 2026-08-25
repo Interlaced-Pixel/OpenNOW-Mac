@@ -9,9 +9,11 @@ enum NativeNVSTMicrophoneAccess: Equatable {
 }
 
 public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
-    static let geronimoPumpFramesPerSecond = 60.0
+    static let geronimoPumpFramesPerSecond = 30.0
     static let geronimoPumpInterval = 1.0 / geronimoPumpFramesPerSecond
     static let geronimoPumpRunLoopMode = RunLoop.Mode.default
+    static let geronimoPumpSlowThresholdNanoseconds: UInt64 = 20_000_000
+    static let geronimoPumpSevereThresholdNanoseconds: UInt64 = 100_000_000
     static let nativeWindowedStreaming = false
     static let nativeFullscreenCursorType = 1
 
@@ -229,7 +231,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         currentMicrophoneStatus = connection.microphoneStatus
         lastDiagnosticMetadata["microphoneStatus"] = currentMicrophoneStatus.rawValue
         if videoSurfaceNeedsRecovery {
-            await restoreVideoSurfaceAfterRecovery?()
+            await Self.invokeMainActorHandler(restoreVideoSurfaceAfterRecovery)
             videoSurfaceNeedsRecovery = false
         }
         lastDiagnosticMetadata.merge(eventSink.readinessDiagnosticAttributes()) { _, new in new }
@@ -242,7 +244,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(min(timeoutNanoseconds, UInt64(Int64.max)))))
         while ContinuousClock.now < deadline {
-            let rendererReady = await nativeRendererReady?() ?? true
+            let rendererReady = await Self.invokeMainActorHandler(nativeRendererReady, defaultValue: true)
             if rendererReady, let snapshot = await performanceSnapshot(), snapshot.available, snapshot.streamFramesPerSecond > 0 {
                 let firstFrameLatencyMilliseconds = activeConnection.map {
                     Date().timeIntervalSince($0.startedAt) * 1_000
@@ -317,7 +319,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     }
 
     public func performanceSnapshot() async -> NativeNVSTPerformanceSnapshot? {
-        guard activeConnection != nil, !nativeLifecycleOperationInProgress, let sessionAddress = geronimoSessionAddress else { return nil }
+        guard activeConnection != nil,
+              !nativeLifecycleOperationInProgress,
+              geronimoEventSink?.isStreamerConnected == true,
+              let sessionAddress = geronimoSessionAddress else { return nil }
         return Self.copyGeronimoPerformanceSnapshot(sessionAddress: sessionAddress)
     }
 
@@ -375,6 +380,9 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let eventSink = geronimoEventSink
         let runtimeHandlers = self.runtimeHandlers
         await runtimeHandlers?.cancel()
+        if let sessionAddress {
+            await disableMicrophoneCaptureIfNeeded(sessionAddress: sessionAddress)
+        }
         if let sessionAddress, let eventSink {
             if !eventSink.hasDeliveredTerminal {
                 eventSink.beginStop()
@@ -443,6 +451,9 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let runtimeHandlers = self.runtimeHandlers
         eventSink?.cancel()
         await runtimeHandlers?.cancel()
+        if let sessionAddress {
+            await disableMicrophoneCaptureIfNeeded(sessionAddress: sessionAddress)
+        }
         if let pump { await pump.stop() }
         if sessionAddress != nil {
             videoSurfaceNeedsRecovery = true
@@ -477,6 +488,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             throw error
         }
         guard geronimoSessionAddress == sessionAddress else { throw CancellationError() }
+        await disableMicrophoneCaptureIfNeeded(sessionAddress: sessionAddress)
         let pump = geronimoPump
         let runtimeHandlers = self.runtimeHandlers
         if let pump { await pump.stop() }
@@ -519,8 +531,30 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     }
 
     private func prepareGeronimoVideoSurfaceForShutdown() async {
-        guard let prepareVideoSurfaceForShutdown else { return }
-        await prepareVideoSurfaceForShutdown()
+        await Self.invokeMainActorHandler(prepareVideoSurfaceForShutdown)
+    }
+
+    private func disableMicrophoneCaptureIfNeeded(sessionAddress: UInt) async {
+        guard currentMicrophoneStatus.isAvailable else { return }
+        do {
+            try await Self.setGeronimoMicrophoneEnabledOnMainActor(false, sessionAddress: sessionAddress)
+            currentMicrophoneStatus = .available
+        } catch {
+            NativeNVSTMediaTelemetry.capture(
+                "nvst.microphone.shutdown.failed",
+                level: .warning,
+                message: Self.message(for: error),
+                attributes: lastDiagnosticMetadata
+            )
+        }
+    }
+
+    @MainActor private static func invokeMainActorHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+        handler?()
+    }
+
+    @MainActor private static func invokeMainActorHandler<T>(_ handler: (@MainActor @Sendable () -> T)?, defaultValue: T) -> T {
+        handler?() ?? defaultValue
     }
 
     private func beginNativeLifecycleOperation() async {
@@ -1814,6 +1848,9 @@ private final class NativeNVSTGeronimoPumpDriver {
     private var errorBuffer = [CChar](repeating: 0, count: 1024)
     private var timer: Timer?
     private var isRunning = false
+    private var pumpInFlight = false
+    private var consecutiveSlowPumps = 0
+    private var activePumpInterval = NativeNVSTBifrostTransport.geronimoPumpInterval
 
     init(sessionAddress: UInt, eventSink: NativeNVSTGeronimoEventSink, telemetryAttributes: [String: String]) {
         self.sessionAddress = sessionAddress
@@ -1828,25 +1865,54 @@ private final class NativeNVSTGeronimoPumpDriver {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        scheduleTimer(interval: activePumpInterval)
         pumpOnce()
-        guard isRunning else { return }
-        let interval = NativeNVSTBifrostTransport.geronimoPumpInterval
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pumpOnce() }
-        }
-        timer.tolerance = interval * 0.1
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: NativeNVSTBifrostTransport.geronimoPumpRunLoopMode)
     }
 
     func stop() {
         isRunning = false
         timer?.invalidate()
         timer = nil
+        pumpInFlight = false
+        consecutiveSlowPumps = 0
+        activePumpInterval = NativeNVSTBifrostTransport.geronimoPumpInterval
+    }
+
+    private func scheduleTimer(interval: TimeInterval) {
+        timer?.invalidate()
+        guard isRunning else { return }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pumpOnce() }
+        }
+        timer.tolerance = interval * 0.2
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: NativeNVSTBifrostTransport.geronimoPumpRunLoopMode)
+    }
+
+    private func shouldDeferPump() -> Bool {
+        if pumpInFlight { return true }
+        guard let mode = RunLoop.current.currentMode else { return false }
+        return mode == .eventTracking || mode == .modalPanel
+    }
+
+    private func adaptPumpInterval(elapsedNanoseconds: UInt64) {
+        let baseInterval = NativeNVSTBifrostTransport.geronimoPumpInterval
+        if elapsedNanoseconds >= NativeNVSTBifrostTransport.geronimoPumpSlowThresholdNanoseconds {
+            consecutiveSlowPumps = min(consecutiveSlowPumps + 1, 4)
+        } else if consecutiveSlowPumps > 0 {
+            consecutiveSlowPumps -= 1
+        }
+        let backoffMultiplier = 1.0 + (Double(consecutiveSlowPumps) * 0.5)
+        let targetInterval = min(0.1, baseInterval * backoffMultiplier)
+        guard abs(targetInterval - activePumpInterval) > 0.000_1 else { return }
+        activePumpInterval = targetInterval
+        scheduleTimer(interval: activePumpInterval)
     }
 
     private func pumpOnce() {
-        guard isRunning else { return }
+        guard isRunning, !shouldDeferPump() else { return }
+        pumpInFlight = true
+        defer { pumpInFlight = false }
         let startedAt = DispatchTime.now().uptimeNanoseconds
         let result = errorBuffer.withUnsafeMutableBufferPointer { buffer -> Int32 in
             guard let baseAddress = buffer.baseAddress else { return -1 }
@@ -1854,12 +1920,14 @@ private final class NativeNVSTGeronimoPumpDriver {
             return OpenNOWNativeNVSTGeronimoPump(UnsafeMutableRawPointer(bitPattern: sessionAddress), 0, baseAddress, buffer.count)
         }
         let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
-        if elapsedNanoseconds >= 20_000_000 {
+        adaptPumpInterval(elapsedNanoseconds: elapsedNanoseconds)
+        if elapsedNanoseconds >= NativeNVSTBifrostTransport.geronimoPumpSlowThresholdNanoseconds {
             var attributes = telemetryAttributes
             attributes["durationMilliseconds"] = String(Double(elapsedNanoseconds) / 1_000_000)
+            attributes["pumpIntervalMilliseconds"] = String(activePumpInterval * 1_000)
             NativeNVSTMediaTelemetry.capture(
                 "nvst.geronimo.pump.slow",
-                level: elapsedNanoseconds >= 100_000_000 ? .error : .warning,
+                level: elapsedNanoseconds >= NativeNVSTBifrostTransport.geronimoPumpSevereThresholdNanoseconds ? .error : .warning,
                 message: "Native NVST event pumping exceeded its main-thread budget.",
                 attributes: attributes
             )
@@ -2303,6 +2371,10 @@ final class NativeNVSTGeronimoEventSink: @unchecked Sendable {
 
     func failStop(_ error: Error) {
         resolveStop(.failure(error))
+    }
+
+    var isStreamerConnected: Bool {
+        hasReachedReadiness
     }
 
     private var hasReachedReadiness: Bool {

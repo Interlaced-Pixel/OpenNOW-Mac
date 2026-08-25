@@ -453,11 +453,15 @@ final class OPNLibWebRTCStreamSession: NSObject, @unchecked Sendable {
 
     func handleConnectionState(_ connected: Bool, error: String) {
         if connected {
-            statsLock.withLock {
-                latestStats.available = true
-                latestStats.videoPipelineMode = "libwebrtc connected"
+            if let peerConnection = impl?.peerConnection,
+               peerConnection.connectionState == .connected,
+               peerConnection.iceConnectionState == .connected || peerConnection.iceConnectionState == .completed {
+                statsLock.withLock {
+                    latestStats.available = true
+                    latestStats.videoPipelineMode = "libwebrtc connected"
+                }
+                statsController.startPolling(sessionImpl: impl, queue: statsQueue)
             }
-            statsController.startPolling(sessionImpl: impl, queue: statsQueue)
         } else {
             statsController.stopPolling()
         }

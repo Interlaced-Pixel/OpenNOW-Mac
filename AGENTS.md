@@ -3,6 +3,17 @@ description: Language-agnostic production standards for all code generation and 
 applyTo: '**'
 ---
 
+# Instruction Compliance (Highest Priority)
+
+These rules override speed, scope reduction, and momentum. They apply to every task.
+
+1. **Complete means complete.** When the user says resolve, fix all, finish, or complete, every stated requirement must be done before the task is considered finished.
+2. **No partial shipping.** Do not commit, push, or report success while any stated requirement remains open. If a requirement cannot be completed, stop and report the blocker before shipping partial work.
+3. **Requirement traceability.** Before any commit, push, or completion report, include a requirement-by-requirement status table: Requirement | Status | Evidence.
+4. **Explicit gates only.** Do not commit or push unless the user explicitly asked for it in that task, except where this file's commit standards apply to completed work the user already requested be finished end-to-end.
+5. **Verify, do not assume.** A green build is not proof that every requirement is satisfied. Re-check the original instruction list before declaring done.
+6. **Follow instructions to the letter.** User instructions are mandatory constraints, not suggestions. Do not reinterpret them into a smaller task without explicit approval.
+
 # Operational Protocol
 Execute every task in this order:
 
