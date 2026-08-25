@@ -1509,6 +1509,28 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(session["cursorType"] as? Int == 1)
 }
 
+@Test func nativeNVSTStreamingProfilePreservesMouseNegotiationFields() throws {
+    let profileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
+        rawSessionJSON: """
+        {
+          "streamingProfile": { "resolution": "1920x1080", "fps": 60, "codec": "H264" },
+          "finalizedStreamingFeatures": {
+            "mouseMovementFlags": 3,
+            "qosPolicy": 2,
+            "touchSupport": true
+          }
+        }
+        """,
+        sessionInfoJSON: "{}"
+    )
+    let profile = try #require(JSONSerialization.jsonObject(with: Data(profileJSON.utf8)) as? [String: Any])
+    let selectedFeatures = try #require(profile["selectedFeatures"] as? [String: Any])
+
+    #expect(selectedFeatures["mouseMovementFlags"] as? Int == 3)
+    #expect(selectedFeatures["qosPolicy"] as? Int == 2)
+    #expect(selectedFeatures["touchSupport"] as? Bool == true)
+}
+
 @Test func nativeNVSTGeronimoSessionJSONGeneratesMissingMonitorSettings() throws {
     let streamingProfileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
         rawSessionJSON: """
