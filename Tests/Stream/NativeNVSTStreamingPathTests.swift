@@ -1488,6 +1488,27 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(firstObject["appLaunchMode"] as? Int == 2)
 }
 
+@Test func nativeNVSTGeronimoSessionUsesVendorWindowedCursorDefaults() throws {
+    let streamingProfileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
+        rawSessionJSON: "{\"streamingProfile\":{\"resolution\":\"1920x1080\",\"fps\":60,\"codec\":\"H264\"}}",
+        sessionInfoJSON: "{}"
+    )
+    let sessionJSON = try NativeNVSTBifrostTransport.geronimoSessionJSON(
+        allocation: nativeAllocation(rawSessionJSON: """
+        {
+          "sessionId": "native-session",
+          "sessionRequestData": { "appId": 123 },
+          "sessionControlInfo": { "ip": "control.example.test" }
+        }
+        """),
+        streamingProfileJSON: streamingProfileJSON
+    )
+    let session = try #require(JSONSerialization.jsonObject(with: Data(sessionJSON.utf8)) as? [String: Any])
+
+    #expect(session["windowedStreaming"] as? Bool == true)
+    #expect(session["cursorType"] as? Int == 1)
+}
+
 @Test func nativeNVSTGeronimoSessionJSONGeneratesMissingMonitorSettings() throws {
     let streamingProfileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
         rawSessionJSON: """

@@ -12,6 +12,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     static let geronimoPumpFramesPerSecond = 60.0
     static let geronimoPumpInterval = 1.0 / geronimoPumpFramesPerSecond
     static let geronimoPumpRunLoopMode = RunLoop.Mode.default
+    static let nativeWindowedStreaming = true
+    static let nativeWindowedCursorType = 1
 
     static let geronimoStartFailureMessage = "Native NVST streaming did not reach Geronimo readiness. Open diagnostics for the native phase and sanitized error."
     static let geronimoStopTimeoutMessage = "Native NVST stop callback timed out."
@@ -1133,6 +1135,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             "appId": int(requestData["appId"]) > 0 ? int(requestData["appId"]) : int(rawSession["appId"]),
             "appName": firstNonEmpty(string(requestData["appName"], fallback: ""), string(rawSession["appName"], fallback: ""), allocation.session.title),
             "appLaunchMode": geronimoAppLaunchMode(firstValue(in: requestData, rawSession, keys: ["appLaunchMode"])),
+            "cursorType": nativeWindowedCursorType,
+            "windowedStreaming": nativeWindowedStreaming,
             "serverType": allocation.serverType > 0 ? allocation.serverType : (int(rawSession["serverType"]) > 0 ? int(rawSession["serverType"]) : int(requestData["serverType"])),
             "state": int(rawSession["state"]) > 0 ? int(rawSession["state"]) : int(rawSession["status"]),
             "frameStatsEnabled": bool(firstValue(in: rawSession, requestData, keys: ["frameStatsEnabled"])),
