@@ -438,7 +438,9 @@ private struct NativeNVSTMediaStreamSurface: View {
         let transport = NativeNVSTBifrostTransport(
             nativeVideoSurfaceHandle: nativeVideoSurfaceHandle,
             nativeRendererReady: { [weak nativeView] in
-                nativeView?.nativeNVSTRendererSurfaceReady == true
+                guard let nativeView else { return false }
+                nativeView.setNativeNVSTVideoVisible(true)
+                return nativeView.nativeNVSTRendererSurfaceReady
             },
             cursorVisibilityHandler: { [weak nativeView] visible in
                 guard let nativeView else { return }

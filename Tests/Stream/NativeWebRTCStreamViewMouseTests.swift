@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import Testing
 @testable import OpenNOW
 
@@ -136,6 +137,26 @@ private struct MouseButtonTransition: Equatable {
 
     #expect(window.childWindows?.contains { $0 === rendererWindow } != true)
     #expect(!view.nativeNVSTRendererSurfaceReady)
+}
+
+@Test @MainActor func nativeRendererCanBecomeReadyWhileStreamStartupIsPending() throws {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720), styleMask: .borderless, backing: .buffered, defer: false)
+    let view = NativeWebRTCStreamView(frame: window.contentView?.bounds ?? .zero)
+    window.contentView = view
+    let rendererWindow = try #require(view.nativeNVSTVideoWindow())
+    let rendererContentView = try #require(rendererWindow.contentView)
+    let metalView = NSView(frame: rendererContentView.bounds)
+    metalView.wantsLayer = true
+    metalView.layer = CAMetalLayer()
+    rendererContentView.addSubview(metalView)
+
+    view.setNativeNVSTVideoVisible(false)
+    #expect(!view.nativeNVSTRendererSurfaceReady)
+
+    view.setNativeNVSTVideoVisible(true)
+
+    #expect(view.nativeNVSTRendererSurfaceReady)
+    #expect(metalView.superview === view.nativeVideoView())
 }
 
 @Test @MainActor func streamShortcutContractMatchesWebRTCControls() {
