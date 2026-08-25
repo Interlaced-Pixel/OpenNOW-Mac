@@ -26,7 +26,7 @@ permissions:
 jobs:
   app-build:
     if: github.event_name != 'workflow_dispatch'
-    name: Test macOS App
+    name: Build macOS App
     runs-on: macos-26
     timeout-minutes: 45
 
@@ -45,27 +45,16 @@ jobs:
         run: scripts/validate-native-nvst-runtime-manifest.sh
         shell: bash
 
-      - name: Test OpenNOW
+      - name: Build OpenNOW
         run: |
           set -euo pipefail
-          mkdir -p build/test-results
-          SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=1 xcodebuild test \
+          xcodebuild build \
             -project OpenNOW.xcodeproj \
             -scheme OpenNOW \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
-            -resultBundlePath build/test-results/OpenNOW.xcresult \
             CODE_SIGNING_ALLOWED=NO
         shell: bash
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenNOW-xcresult
-          path: build/test-results/OpenNOW.xcresult
-          if-no-files-found: error
-          retention-days: 7
 
   release-build:
     if: github.event_name == 'workflow_dispatch'

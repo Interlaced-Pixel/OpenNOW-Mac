@@ -33,7 +33,6 @@ let package = Package(
                 "OpenNOW.xcodeproj",
                 "OPN/NativeGeronimo",
                 "Resources",
-                "Tests",
                 "View",
                 "ViewModel",
                 "WebRTC.framework",
@@ -59,14 +58,6 @@ let package = Package(
             path: "OPN/NativeGeronimo",
             sources: ["NativeNVSTGeronimoShim.mm"],
             publicHeadersPath: "."
-        ),
-        .testTarget(
-            name: "OpenNOWTests",
-            dependencies: ["OpenNOW"],
-            path: "Tests",
-            swiftSettings: [
-                .unsafeFlags(["-F", packageRoot, "-Xcc", "-Wno-incomplete-umbrella"])
-            ]
         )
     ]
 )

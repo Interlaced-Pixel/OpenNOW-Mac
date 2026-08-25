@@ -181,7 +181,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             if mouseInputMode == .absolute {
                 disablePointerLock()
             } else if directMouseInputEnabled {
-                restoreInputFocus()
+                synchronizeRelativePointerCapture()
             }
         }
     }
@@ -390,9 +390,26 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     }
 
     public func restoreInputFocus() {
-        guard remoteInputEnabled, NSApplication.shared.isActive, window?.isKeyWindow == true else { return }
+        guard remoteInputEnabled, NSApplication.shared.isActive else { return }
         window?.makeFirstResponder(self)
-        if locksPointerWhenRelativeModeSelected, mouseInputMode == .relative, directMouseInputEnabled { setPointerLocked(true) }
+        if locksPointerWhenRelativeModeSelected, mouseInputMode == .relative, directMouseInputEnabled {
+            synchronizeRelativePointerCapture()
+        }
+    }
+
+    public func applyServerCursorVisibility(_ visible: Bool) {
+        mouseInputMode = visible || !directMouseInputEnabled ? .absolute : .relative
+        if mouseInputMode == .relative {
+            synchronizeRelativePointerCapture()
+        } else {
+            setPointerLocked(false)
+        }
+    }
+
+    public func synchronizeRelativePointerCapture() {
+        guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative else { return }
+        window?.makeFirstResponder(self)
+        setPointerLocked(true)
     }
 
     public override func layout() {
@@ -650,6 +667,9 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     }
 
     private func emitMouseMove(_ event: NSEvent) {
+        if mouseInputMode == .relative, directMouseInputEnabled, !isPointerLocked {
+            synchronizeRelativePointerCapture()
+        }
         if !isPointerLocked, mouseInputMode == .absolute {
             emitAbsoluteMousePosition(event)
             return

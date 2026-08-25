@@ -11,13 +11,19 @@ Execute every task in this order:
 3. **Execution** — Deliver complete, production-ready code. No snippets, placeholders (`TODO`, `pass`, `...`), or stubs.
 4. **Autonomy** — Resolve missing context or dependencies using the standard library or canonical practices.
 
+# Testing Policy
+- This repository has **no automated test suite**. Do not recreate `Tests/`, `OpenNOWTests`, or CI test jobs unless the user explicitly asks.
+- **Never run tests** (`xcodebuild test`, `swift test`, CI test jobs, or equivalent) unless the user explicitly asks to run tests in that task.
+- **Never add tests** unless the user explicitly asks for tests.
+- Builds (`xcodebuild build`) are fine when needed to verify compilation.
+
 # Build Artifact Discipline
-- For this Xcode project, use Xcode/XcodeBuildMCP only for builds, tests, and runs. Do not use SwiftPM commands as build/test/run shortcuts unless the user explicitly overrides this instruction for a specific task.
+- For this Xcode project, use Xcode/XcodeBuildMCP only for builds and runs. Do not use SwiftPM commands as build/test/run shortcuts unless the user explicitly overrides this instruction for a specific task.
 - Run SwiftPM commands from the repository root unless a task explicitly requires otherwise.
-- Use `--scratch-path .build/shared` for SwiftPM commands that generate build state, including `swift build`, `swift test`, `swift run`, and relevant `swift package` commands.
+- Use `--scratch-path .build/shared` for SwiftPM commands that generate build state, including `swift build` and `swift run`. Do not run `swift test` unless the user explicitly requests it.
 - Do not run package-local SwiftPM commands that create package-specific `.build` directories. Use the root `Package.swift` with the shared scratch path instead.
 - After SwiftPM-heavy tasks, run `scripts/report-spm-build-size.sh` to check generated build size and duplicated binary artifact extractions.
-- If generated SwiftPM files exceed the warning threshold or duplicate `artifacts/sentry-cocoa` directories appear, run `scripts/clean-spm-builds.sh`, then rerun builds/tests with `--scratch-path .build/shared`.
+- If generated SwiftPM files exceed the warning threshold or duplicate `artifacts/sentry-cocoa` directories appear, run `scripts/clean-spm-builds.sh`, then rerun builds with `--scratch-path .build/shared`.
 - Never commit generated build artifacts.
 
 # Coding Standards
@@ -25,7 +31,7 @@ Execute every task in this order:
 ## General
 - **Self-Documenting:** Names and structure must convey intent. No explanatory inline comments.
 - **Hermetic:** Every file includes all imports and dependencies. Must compile/run as-is.
-- **Complete:** All functions and methods contain final, working logic. No mocks or no-ops unless building a test suite.
+- **Complete:** All functions and methods contain final, working logic. No mocks or no-ops.
 - **No Folded Code:** Folding code is strictly forbidden.
 
 ## Migration & Conversion

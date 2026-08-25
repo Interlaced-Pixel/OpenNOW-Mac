@@ -309,6 +309,7 @@ using SDLEventProcessorProcessEvents = bool (*)(void *, int);
 using SDLWindowInitialize = bool (*)(void *, void *, const SDLWindowInitParams &);
 using SDLWindowAsyncRenderer = const std::shared_ptr<AsyncVideoFrameRenderer> &(*)(const void *);
 using SDLWindowConvertPointToVideoFrame = void (*)(const void *, SDLPoint, SDLPoint *, SDLRect *);
+using SDLWindowGetNativeWindow = void *(*)(const void *);
 using PlatformCreateVideoDecoder = void *(*)(PlatformDecoderCreationSettings &, uint32_t);
 using PlatformCreateAudioObject = void *(*)();
 using VideoDecoderInitialize = int32_t (*)(void *, void *, const PlatformDecoderSettings &, const std::shared_ptr<AsyncVideoFrameRenderer> &);
@@ -426,6 +427,7 @@ struct GeronimoFunctions {
     SDLWindowInitialize windowInitialize = nullptr;
     SDLWindowAsyncRenderer windowAsyncRenderer = nullptr;
     SDLWindowConvertPointToVideoFrame windowConvertPointToVideoFrame = nullptr;
+    SDLWindowGetNativeWindow windowGetNativeWindow = nullptr;
     PlatformCreateVideoDecoder createVideoDecoder = nullptr;
     PlatformCreateAudioObject createAudioRenderer = nullptr;
     PlatformCreateAudioObject createAudioCapturer = nullptr;
@@ -1305,6 +1307,51 @@ void openNOWGridAppStreamingTerminated(void *gridApp, const void *terminationInf
     }
 }
 
+struct SDLHostCursorAPI {
+    int (*setRelativeMouseMode)(int) = nullptr;
+    int (*captureMouse)(int) = nullptr;
+    int (*showCursor)(int) = nullptr;
+    int (*setWindowGrab)(void *, int) = nullptr;
+    int (*setWindowMouseRect)(void *, const void *) = nullptr;
+    bool resolved = false;
+};
+
+SDLHostCursorAPI &sharedSDLHostCursorAPI() {
+    static SDLHostCursorAPI api;
+    if (api.resolved) { return api; }
+    api.resolved = true;
+    api.setRelativeMouseMode = reinterpret_cast<int (*)(int)>(dlsym(RTLD_DEFAULT, "SDL_SetRelativeMouseMode"));
+    api.captureMouse = reinterpret_cast<int (*)(int)>(dlsym(RTLD_DEFAULT, "SDL_CaptureMouse"));
+    api.showCursor = reinterpret_cast<int (*)(int)>(dlsym(RTLD_DEFAULT, "SDL_ShowCursor"));
+    api.setWindowGrab = reinterpret_cast<int (*)(void *, int)>(dlsym(RTLD_DEFAULT, "SDL_SetWindowGrab"));
+    api.setWindowMouseRect = reinterpret_cast<int (*)(void *, const void *)>(dlsym(RTLD_DEFAULT, "SDL_SetWindowMouseRect"));
+    return api;
+}
+
+void *nativeSDLWindow(OpenNOWNativeNVSTGeronimoSession *session) {
+    if (session == nullptr || session->window == nullptr) { return nullptr; }
+    if (session->functions.windowGetNativeWindow != nullptr) {
+        return session->functions.windowGetNativeWindow(session->window);
+    }
+    return loadUnaligned<void *>(session->window, 0x20);
+}
+
+void reconcileHostPointerCaptureAfterCursorUpdate(OpenNOWNativeNVSTGeronimoSession *session, uint32_t cursorState) {
+    SDLHostCursorAPI &api = sharedSDLHostCursorAPI();
+    void *sdlWindow = nullptr;
+    {
+        std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
+        sdlWindow = nativeSDLWindow(session);
+    }
+    if (sdlWindow != nullptr && api.setWindowGrab != nullptr && api.setWindowMouseRect != nullptr) {
+        api.setWindowGrab(sdlWindow, 0);
+        api.setWindowMouseRect(sdlWindow, nullptr);
+    }
+    if (api.setRelativeMouseMode != nullptr) { api.setRelativeMouseMode(0); }
+    if (api.captureMouse != nullptr) { api.captureMouse(0); }
+    if (cursorState == 2 && api.showCursor != nullptr) { api.showCursor(0); }
+}
+
 void openNOWGridAppCursorInfoUpdate(void *gridApp, const void *cursorInfo) {
     OpenNOWNativeNVSTGeronimoSession *session = beginGridAppCallback(gridApp);
     if (session == nullptr) { return; }
@@ -1314,6 +1361,7 @@ void openNOWGridAppCursorInfoUpdate(void *gridApp, const void *cursorInfo) {
         if (cursorInfo == nullptr) { return; }
         const uint32_t cursorState = loadUnaligned<uint32_t>(cursorInfo, 0x0c);
         if (cursorState != 1 && cursorState != 2) { return; }
+        reconcileHostPointerCaptureAfterCursorUpdate(session, cursorState);
         emitEvent(session,
                   80,
                   0,
@@ -1714,6 +1762,7 @@ bool resolveGeronimoFunctions(void *handle, GeronimoFunctions &functions, char *
     functions.windowInitialize = reinterpret_cast<SDLWindowInitialize>(resolve(handle, "_ZN9SDLWindow10initializeEP11IOInterfaceRKNS_10InitParamsE", errorBuffer, errorBufferLength));
     functions.windowAsyncRenderer = reinterpret_cast<SDLWindowAsyncRenderer>(resolve(handle, "_ZNK9SDLWindow13asyncRendererEv", errorBuffer, errorBufferLength));
     functions.windowConvertPointToVideoFrame = reinterpret_cast<SDLWindowConvertPointToVideoFrame>(resolve(handle, "_ZNK9SDLWindow24convertPointToVideoFrameE9SDL_PointPS0_P8SDL_Rect", errorBuffer, errorBufferLength));
+    functions.windowGetNativeWindow = reinterpret_cast<SDLWindowGetNativeWindow>(resolve(handle, "_ZNK9SDLWindow15getNativeWindowEv", errorBuffer, errorBufferLength));
     functions.createVideoDecoder = reinterpret_cast<PlatformCreateVideoDecoder>(resolve(handle, "_Z26platformCreateVideoDecoderR31PlatformDecoderCreationSettingsj", errorBuffer, errorBufferLength));
     functions.createAudioRenderer = reinterpret_cast<PlatformCreateAudioObject>(resolve(handle, "_Z27platformCreateAudioRendererv", errorBuffer, errorBufferLength));
     functions.createAudioCapturer = reinterpret_cast<PlatformCreateAudioObject>(resolve(handle, "_Z27platformCreateAudioCapturerv", errorBuffer, errorBufferLength));
@@ -2133,6 +2182,7 @@ bool setupPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
 }
 
 void teardownPlatformMedia(OpenNOWNativeNVSTGeronimoSession *session) {
+    reconcileHostPointerCaptureAfterCursorUpdate(session, 1);
     std::lock_guard<std::mutex> mediaLock(session->mediaMutex);
     stopAndDestroyPolymorphicObject(session->videoDecoder, 0x60, "video decoder");
     session->videoRenderer.reset();

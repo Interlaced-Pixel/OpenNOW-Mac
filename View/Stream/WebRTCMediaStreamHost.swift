@@ -444,7 +444,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             },
             cursorVisibilityHandler: { [weak nativeView] visible in
                 guard let nativeView else { return }
-                nativeView.mouseInputMode = visible || !nativeView.directMouseInputEnabled ? .absolute : .relative
+                nativeView.applyServerCursorVisibility(visible)
             },
             prepareVideoSurfaceForShutdown: {
                 nativeView.prepareNativeNVSTRendererForShutdown()

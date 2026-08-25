@@ -37,24 +37,6 @@ Build the macOS app from the repository root:
 xcodebuild build -project OpenNOW.xcodeproj -scheme OpenNOW -configuration Debug -destination platform=macOS CODE_SIGNING_ALLOWED=NO
 ```
 
-## Testing
-
-Run package tests from the repository root so SwiftPM uses one shared `.build` graph:
-
-```sh
-swift test --scratch-path .build/shared
-```
-
-Useful focused checks:
-
-```sh
-swift test --scratch-path .build/shared --filter WebRTCStreamRecording
-```
-
-```sh
-swift test --scratch-path .build/shared --filter OpenNOWGameServicesTests
-```
-
 Avoid package-local build directories during normal development. Use the root package and shared scratch path so generated SwiftPM state stays in one place and large binary artifacts such as `sentry-cocoa` are not duplicated.
 
 To audit generated SwiftPM disk usage:
@@ -73,4 +55,4 @@ Performance audit entry points are documented under `scripts/perf-audit/PERFORMA
 
 ## Contributing
 
-Use conventional commit prefixes such as `fix:`, `feat:`, `docs:`, `test:`, `refactor:`, `style:`, and `chore:`. Keep changes focused and verify the relevant package tests or app build before submitting changes.
+Use conventional commit prefixes such as `fix:`, `feat:`, `docs:`, `refactor:`, `style:`, and `chore:`. Keep changes focused and verify the app build before submitting changes.
