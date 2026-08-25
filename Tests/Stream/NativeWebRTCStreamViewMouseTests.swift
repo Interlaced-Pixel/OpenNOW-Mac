@@ -292,7 +292,7 @@ private struct MouseButtonTransition: Equatable {
     #expect(remainder == 727)
 }
 
-@Test func relativeMouseDeltaUsesVendorTowardZeroConversion() {
+@Test @MainActor func relativeMouseDeltaUsesVendorTowardZeroConversion() {
     #expect(NativeWebRTCStreamView.truncatedMouseDelta(1.9) == 1)
     #expect(NativeWebRTCStreamView.truncatedMouseDelta(-1.9) == -1)
     #expect(NativeWebRTCStreamView.truncatedMouseDelta(0.9) == 0)
