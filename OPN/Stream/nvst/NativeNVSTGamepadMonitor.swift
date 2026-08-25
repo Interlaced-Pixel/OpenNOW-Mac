@@ -2,7 +2,7 @@
 import GameController
 import CoreHaptics
 
-public struct NativeWebRTCGamepadTopology: Equatable, Sendable {
+public struct NativeNVSTGamepadTopology: Equatable, Sendable {
     public let playerIndices: [Int]
     public let hapticPlayerIndices: [Int]
     public let registrationBitmap: UInt16
@@ -23,30 +23,30 @@ public struct NativeWebRTCGamepadTopology: Equatable, Sendable {
     }
 }
 
-enum WebRTCHapticLocality: Equatable, Sendable {
+enum NativeNVSTHapticLocality: Equatable, Sendable {
     case leftHandle
     case rightHandle
     case `default`
 }
 
-struct WebRTCHapticRoute: Equatable, Sendable {
-    let locality: WebRTCHapticLocality
+struct NativeNVSTHapticRoute: Equatable, Sendable {
+    let locality: NativeNVSTHapticLocality
     let intensity: UInt16
 }
 
-enum WebRTCHapticRouter {
-    static func routes(for command: WebRTCHapticCommand, supportsHandles: Bool) -> [WebRTCHapticRoute] {
+enum NativeNVSTHapticRouter {
+    static func routes(for command: NativeNVSTHapticCommand, supportsHandles: Bool) -> [NativeNVSTHapticRoute] {
         if supportsHandles {
             return [
-                WebRTCHapticRoute(locality: .leftHandle, intensity: command.lowFrequency),
-                WebRTCHapticRoute(locality: .rightHandle, intensity: command.highFrequency),
+                NativeNVSTHapticRoute(locality: .leftHandle, intensity: command.lowFrequency),
+                NativeNVSTHapticRoute(locality: .rightHandle, intensity: command.highFrequency),
             ]
         }
-        return [WebRTCHapticRoute(locality: .default, intensity: max(command.lowFrequency, command.highFrequency))]
+        return [NativeNVSTHapticRoute(locality: .default, intensity: max(command.lowFrequency, command.highFrequency))]
     }
 }
 
-struct NativeWebRTCGamepadSlotMap<Identifier: Hashable> {
+struct NativeNVSTGamepadSlotMap<Identifier: Hashable> {
     private(set) var slots: [Identifier: Int] = [:]
 
     mutating func update(identifiers: [Identifier], maximumSlots: Int = 4) -> [(identifier: Identifier, playerIndex: Int)] {
@@ -64,20 +64,20 @@ struct NativeWebRTCGamepadSlotMap<Identifier: Hashable> {
 }
 
 @MainActor
-public final class NativeWebRTCGamepadMonitor {
+public final class NativeNVSTGamepadMonitor {
     public var onInputEvent: ((UserInputEvent) -> Void)?
-    public var onTopologyChanged: ((NativeWebRTCGamepadTopology) -> Void)? {
+    public var onTopologyChanged: ((NativeNVSTGamepadTopology) -> Void)? {
         didSet { onTopologyChanged?(topology) }
     }
     nonisolated(unsafe) private var timer: Timer?
     nonisolated(unsafe) private var observerTokens: [NSObjectProtocol] = []
-    private var controllerSlots = NativeWebRTCGamepadSlotMap<ObjectIdentifier>()
+    private var controllerSlots = NativeNVSTGamepadSlotMap<ObjectIdentifier>()
     private var cachedControllers: [GCController] = []
     private var lastStates: [ObjectIdentifier: GamepadControlSnapshot] = [:]
     private var lastGamepadStates: [ObjectIdentifier: GamepadState] = [:]
     private var hapticStates: [ObjectIdentifier: ControllerHapticState] = [:]
     private var pollingAllowed = false
-    public private(set) var topology = NativeWebRTCGamepadTopology(playerIndices: [])
+    public private(set) var topology = NativeNVSTGamepadTopology(playerIndices: [])
 
     public init() {
         observerTokens = [
@@ -103,17 +103,17 @@ public final class NativeWebRTCGamepadMonitor {
     public func start() {
         pollingAllowed = true
         if Self.connectedGamepadCount() > 0 { startPollingTimer() }
-        WebRTCMediaTelemetry.capture("webrtc.input.gamepad.monitor.start", level: .info, message: "Gamepad monitor started.", attributes: ["connected": String(Self.connectedGamepadCount())])
+        NativeNVSTMediaTelemetry.capture("webrtc.input.gamepad.monitor.start", level: .info, message: "Gamepad monitor started.", attributes: ["connected": String(Self.connectedGamepadCount())])
     }
 
     public func stop() {
         pollingAllowed = false
         stopPollingTimer()
         stopHaptics()
-        WebRTCMediaTelemetry.capture("webrtc.input.gamepad.monitor.stop", level: .info, message: "Gamepad monitor stopped.")
+        NativeNVSTMediaTelemetry.capture("webrtc.input.gamepad.monitor.stop", level: .info, message: "Gamepad monitor stopped.")
     }
 
-    public func playHaptic(_ command: WebRTCHapticCommand) {
+    public func playHaptic(_ command: NativeNVSTHapticCommand) {
         guard let controller = cachedControllers.first(where: { controllerSlots.slots[ObjectIdentifier($0)] == command.playerIndex }),
               controller.haptics != nil else { return }
         let identifier = ObjectIdentifier(controller)
@@ -161,7 +161,7 @@ public final class NativeWebRTCGamepadMonitor {
         let hapticPlayerIndices = cachedControllers.compactMap { controller in
             controller.haptics == nil ? nil : controllerSlots.slots[ObjectIdentifier(controller)]
         }
-        let newTopology = NativeWebRTCGamepadTopology(playerIndices: Array(controllerSlots.slots.values), hapticPlayerIndices: hapticPlayerIndices)
+        let newTopology = NativeNVSTGamepadTopology(playerIndices: Array(controllerSlots.slots.values), hapticPlayerIndices: hapticPlayerIndices)
         if topology != newTopology {
             topology = newTopology
             onTopologyChanged?(newTopology)
@@ -169,7 +169,7 @@ public final class NativeWebRTCGamepadMonitor {
         if pollingAllowed {
             controllerSlots.slots.isEmpty ? stopPollingTimer() : startPollingTimer()
         }
-        WebRTCMediaTelemetry.capture("webrtc.input.gamepad.controllers", level: .info, message: "Detected \(controllerSlots.slots.count) controller(s).", attributes: ["connected": String(controllerSlots.slots.count), "slots": topology.playerIndices.map(String.init).joined(separator: ",")])
+        NativeNVSTMediaTelemetry.capture("webrtc.input.gamepad.controllers", level: .info, message: "Detected \(controllerSlots.slots.count) controller(s).", attributes: ["connected": String(controllerSlots.slots.count), "slots": topology.playerIndices.map(String.init).joined(separator: ",")])
     }
 
     private func startPollingTimer() {
@@ -252,10 +252,10 @@ private final class ControllerHapticState {
         self.controller = controller
     }
 
-    func play(_ command: WebRTCHapticCommand) throws {
+    func play(_ command: NativeNVSTHapticCommand) throws {
         guard let haptics = controller.haptics else { return }
         let supportsHandles = haptics.supportedLocalities.contains(.leftHandle) && haptics.supportedLocalities.contains(.rightHandle)
-        for route in WebRTCHapticRouter.routes(for: command, supportsHandles: supportsHandles) {
+        for route in NativeNVSTHapticRouter.routes(for: command, supportsHandles: supportsHandles) {
             let locality: GCHapticsLocality = switch route.locality {
             case .leftHandle: .leftHandle
             case .rightHandle: .rightHandle

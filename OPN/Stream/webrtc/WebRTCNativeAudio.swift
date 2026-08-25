@@ -400,7 +400,7 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
         if status != noErr { WebRTCMediaTelemetry.capture("webrtc.native.audio.output_device.error", level: .warning, message: "CoreAudio set output device failed.", attributes: ["status": String(status), "device": String(outputDevice)]) }
         var format = streamFormat(sampleRate: deviceOutputSampleRate, channels: UInt32(outputNumberOfChannels))
         AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
-        var callback = AURenderCallbackStruct(inputProc: coreAudioPlayoutCallback, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
+        var callback = AURenderCallbackStruct(inputProc: coreAudioPlayoutCallback, inputProcRefCon: Unmanaged.passUnretained(callbackContext).toOpaque())
         AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, UInt32(MemoryLayout<AURenderCallbackStruct>.size))
         status = AudioUnitInitialize(unit)
         guard status == noErr else {
@@ -426,7 +426,7 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
         if status != noErr { WebRTCMediaTelemetry.capture("webrtc.native.audio.input_device.error", level: .warning, message: "CoreAudio set input device failed.", attributes: ["status": String(status), "device": String(inputDevice)]) }
         var format = streamFormat(sampleRate: deviceInputSampleRate, channels: UInt32(inputNumberOfChannels))
         AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &format, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
-        var callback = AURenderCallbackStruct(inputProc: coreAudioRecordingCallback, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
+        var callback = AURenderCallbackStruct(inputProc: coreAudioRecordingCallback, inputProcRefCon: Unmanaged.passUnretained(callbackContext).toOpaque())
         AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callback, UInt32(MemoryLayout<AURenderCallbackStruct>.size))
         status = AudioUnitInitialize(unit)
         guard status == noErr else {

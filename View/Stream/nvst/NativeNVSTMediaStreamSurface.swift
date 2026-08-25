@@ -1,13 +1,213 @@
-//  OpenNOW
-//
-//  Created by OpenCode on 6/16/26.
-//
-
 import Foundation
 import SwiftUI
 
-typealias WebRTCMediaStreamCompletion = WebRTCMediaStreamEndCallback
-typealias WebRTCMediaStreamProgressHandler = WebRTCMediaStreamProgressCallback
+public typealias NativeNVSTMediaStreamProgressCallback = @MainActor @Sendable (_ progress: StreamProgress) -> Void
+public typealias NativeNVSTMediaStreamEndCallback = @MainActor @Sendable (_ success: Bool, _ message: String, _ report: StreamReport?) -> Void
+
+enum NativeNVSTMediaStreamTheme {
+    static let accent = Color(red: 0.46, green: 0.90, blue: 0.10)
+    static let accentSoft = Color(red: 0.67, green: 1.0, blue: 0.36)
+    static let appBar = Color(red: 45 / 255, green: 45 / 255, blue: 45 / 255)
+    static let surface = Color(red: 25 / 255, green: 25 / 255, blue: 25 / 255)
+    static let panel = Color(red: 23 / 255, green: 23 / 255, blue: 23 / 255)
+    static let surfaceRaised = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
+    static let divider = Color.white.opacity(0.10)
+    static let textPrimary = Color.white.opacity(0.96)
+    static let textSecondary = Color.white.opacity(0.72)
+    static let textTertiary = Color.white.opacity(0.52)
+    static let warning = Color.orange
+    static let danger = Color.red
+
+    static func dockWidth(for width: CGFloat) -> CGFloat {
+        min(344, max(268, width * 0.72))
+    }
+}
+
+extension Font {
+    static func nativeNVSTStreamNvidia(size: CGFloat, weight: OpenNOWNVIDIAFont.Weight = .regular) -> Font {
+        OpenNOWNVIDIAFont.font(size: size, weight: weight)
+    }
+}
+
+struct NativeNVSTStreamHUDActionRow: View {
+    let title: String
+    let subtitle: String
+    let systemName: String
+    let isActive: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.nativeNVSTStreamNvidia(size: 15, weight: .bold))
+                .foregroundStyle(iconColor)
+                .frame(width: 42, height: 38)
+                .background(rowBackground)
+                .overlay {
+                    Rectangle()
+                        .stroke(isActive ? NativeNVSTMediaStreamTheme.accent.opacity(0.86) : NativeNVSTMediaStreamTheme.divider, lineWidth: 1)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.46 : 1)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
+        .help(subtitle.isEmpty ? title : "\(title): \(subtitle)")
+    }
+
+    private var rowBackground: Color {
+        if isActive { return NativeNVSTMediaStreamTheme.accent }
+        return Color.white.opacity(isHovering ? 0.14 : 0.075)
+    }
+
+    private var iconColor: Color {
+        isActive ? .black.opacity(0.86) : .white.opacity(isHovering ? 0.94 : 0.72)
+    }
+}
+
+struct NativeNVSTStreamUnifiedSidebar<Content: View>: View {
+    let title: String
+    let closeAction: () -> Void
+    let content: Content
+
+    init(title: String, closeAction: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.closeAction = closeAction
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    Text(title)
+                        .font(.nativeNVSTStreamNvidia(size: 12, weight: .bold))
+                        .foregroundStyle(NativeNVSTMediaStreamTheme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    Button(action: closeAction) {
+                        Image(systemName: "xmark")
+                            .font(.nativeNVSTStreamNvidia(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .frame(width: 28, height: 28)
+                            .background(Color.white.opacity(0.08))
+                            .overlay { Rectangle().stroke(Color.white.opacity(0.14), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close stream HUD")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(NativeNVSTMediaStreamTheme.appBar)
+                Rectangle().fill(NativeNVSTMediaStreamTheme.divider).frame(height: 1)
+                ScrollView(.vertical, showsIndicators: false) {
+                    content
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                }
+                Rectangle().fill(NativeNVSTMediaStreamTheme.divider).frame(height: 1)
+                Text(NativeNVSTMediaStreamCommand.shortcutGuide)
+                    .font(.nativeNVSTStreamNvidia(size: 10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+            }
+            .frame(width: NativeNVSTMediaStreamTheme.dockWidth(for: proxy.size.width), height: proxy.size.height, alignment: .topLeading)
+            .background(NativeNVSTMediaStreamTheme.panel.opacity(0.985))
+            .overlay(alignment: .trailing) { Rectangle().fill(NativeNVSTMediaStreamTheme.divider).frame(width: 1) }
+            .overlay(alignment: .top) { Rectangle().fill(NativeNVSTMediaStreamTheme.accent).frame(height: 2) }
+            .shadow(color: .black.opacity(0.58), radius: 28, x: 14, y: 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+    }
+}
+
+struct NativeNVSTStreamHUDSection<Content: View>: View {
+    let label: String
+    let spacing: CGFloat
+    let content: Content
+
+    init(label: String, spacing: CGFloat = 10, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            Text(label)
+                .font(.nativeNVSTStreamNvidia(size: 10, weight: .bold))
+                .tracking(1.1)
+                .foregroundStyle(NativeNVSTMediaStreamTheme.textTertiary)
+            content
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.055))
+        .overlay { Rectangle().stroke(NativeNVSTMediaStreamTheme.divider, lineWidth: 1) }
+    }
+}
+
+struct NativeNVSTStreamHUDMetricCard: View {
+    let title: String
+    let value: String
+    let positive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle().fill(positive ? NativeNVSTMediaStreamTheme.accent : NativeNVSTMediaStreamTheme.warning).frame(width: 6, height: 6)
+                Text(title.uppercased())
+                    .font(.nativeNVSTStreamNvidia(size: 9, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(.white.opacity(0.46))
+            }
+            Text(value)
+                .font(.nativeNVSTStreamNvidia(size: 12, weight: .bold))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .background(Color.white.opacity(0.055))
+        .overlay { Rectangle().stroke(NativeNVSTMediaStreamTheme.divider, lineWidth: 1) }
+    }
+}
+
+struct NativeNVSTStreamSessionSidebarLimit: Equatable {
+    let startedAt: Date
+    let durationSeconds: Int
+
+    init?(session: StreamSessionDescriptor, fallbackStartedAt: Date = Date()) {
+        guard let duration = Int(session.metadata["sessionLimitSeconds"] ?? ""), duration > 0 else { return nil }
+        let startedAtEpoch = Double(session.metadata["startedAtEpochSeconds"] ?? "")
+        let startedAt = startedAtEpoch.map { Date(timeIntervalSince1970: $0) } ?? fallbackStartedAt
+        self.startedAt = startedAt
+        self.durationSeconds = duration
+    }
+
+    init?(update: StreamSessionLimitUpdate, receivedAt: Date = Date()) {
+        let durationSeconds = max(3600, update.remainingSeconds)
+        self.startedAt = receivedAt.addingTimeInterval(-Double(durationSeconds - update.remainingSeconds))
+        self.durationSeconds = durationSeconds
+    }
+
+    func remainingSeconds(at now: Date) -> Int {
+        max(0, durationSeconds - Int(now.timeIntervalSince(startedAt)))
+    }
+}
 
 private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
     private let lock = NSLock()
@@ -41,7 +241,7 @@ private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
         if suppressedCount > 0 {
             attributes["suppressedCount"] = String(suppressedCount)
         }
-        WebRTCMediaTelemetry.capture(
+        NativeNVSTMediaTelemetry.capture(
             "nvst.input.send_failed",
             level: isExpectedDuringTeardown ? .debug : .error,
             message: isExpectedDuringTeardown ? "Native NVST input arrived after teardown began." : "Native NVST input send failed.",
@@ -65,263 +265,8 @@ private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
     }
 }
 
-enum StreamLaunchLoadingStage {
-    static func label(stepIndex: Int, queuePosition: Int? = nil) -> String {
-        if let queuePosition, queuePosition > 0 { return "Waiting in queue" }
-        switch stepIndex {
-        case StreamLaunchStep.checkNetworkRoute.rawValue: return "Checking connection"
-        case StreamLaunchStep.allocateCloudSession.rawValue: return "Finding a server"
-        case StreamLaunchStep.receiveStreamOffer.rawValue: return "Preparing stream"
-        case StreamLaunchStep.negotiateWebRTC.rawValue: return "Connecting"
-        case StreamLaunchStep.connected.rawValue: return "Ready"
-        default: return "Starting"
-        }
-    }
-}
 
-extension StreamLaunchConfiguration {
-    var loadingArtworkURL: URL? {
-        let urls = (metadata["loadingScreenshotUrls"] ?? "")
-            .split(separator: "\n")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !urls.isEmpty else { return nil }
-        let seed = id.uuidString.utf8.reduce(UInt(0)) { ($0 &* 31) &+ UInt($1) }
-        return URL(string: urls[Int(seed % UInt(urls.count))])
-    }
-}
-
-struct StreamLaunchLoadingScreen<Accessory: View>: View {
-    let title: String
-    let stage: String
-    let artworkURL: URL?
-    let queuePosition: Int?
-    let accessoryPresented: Bool
-    let cancelAction: (() -> Void)?
-    private let accessory: Accessory
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    init(title: String,
-         stage: String,
-         artworkURL: URL?,
-         queuePosition: Int? = nil,
-         accessoryPresented: Bool = false,
-         cancelAction: (() -> Void)? = nil,
-         @ViewBuilder accessory: () -> Accessory) {
-        self.title = title.isEmpty ? "GeForce NOW" : title
-        self.stage = stage
-        self.artworkURL = artworkURL
-        self.queuePosition = queuePosition
-        self.accessoryPresented = accessoryPresented
-        self.cancelAction = cancelAction
-        self.accessory = accessory()
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            let compact = min(proxy.size.width, proxy.size.height) < 620
-            ZStack {
-                Color.black
-
-                if let artworkURL {
-                    AsyncImage(url: artworkURL) { phase in
-                        if case .success(let image) = phase {
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: proxy.size.width, height: proxy.size.height)
-                                .clipped()
-                        }
-                    }
-                }
-
-                LinearGradient(
-                    stops: [
-                        .init(color: .black.opacity(0.54), location: 0),
-                        .init(color: .black.opacity(0.20), location: 0.42),
-                        .init(color: .black.opacity(0.78), location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                RadialGradient(
-                    colors: [Color.openNowGreen.opacity(0.18), .clear],
-                    center: .center,
-                    startRadius: 12,
-                    endRadius: compact ? 260 : 480
-                )
-                .blendMode(.screen)
-
-                VStack(spacing: compact ? 16 : 22) {
-                    Spacer(minLength: 24)
-
-                    if accessoryPresented {
-                        accessory
-                            .aspectRatio(16 / 9, contentMode: .fit)
-                            .frame(maxWidth: 920, maxHeight: compact ? 300 : 520)
-                    } else {
-                        StreamLaunchSignal(reduceMotion: reduceMotion)
-                            .frame(width: compact ? 68 : 84, height: compact ? 68 : 84)
-                    }
-
-                    VStack(spacing: 8) {
-                        Text(title)
-                            .font(.nvidia(size: compact ? 24 : 32, weight: .bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(Color.openNowGreen)
-                                .frame(width: 6, height: 6)
-                                .shadow(color: Color.openNowGreen, radius: 6)
-                            Text(stage.uppercased())
-                                .font(.nvidia(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundStyle(.white.opacity(0.72))
-                        }
-                    }
-
-                    if let queuePosition, queuePosition > 0 {
-                        Text("Position \(queuePosition)")
-                            .font(.nvidia(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .frame(height: 32)
-                            .background(.black.opacity(0.48), in: Capsule())
-                            .overlay(Capsule().stroke(Color.openNowGreen.opacity(0.38), lineWidth: 1))
-                    }
-
-                    if let cancelAction {
-                        Button("Cancel", action: cancelAction)
-                            .font(.nvidia(size: 12, weight: .bold))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.white.opacity(0.68))
-                            .padding(.horizontal, 18)
-                            .frame(height: 34)
-                            .overlay(Capsule().stroke(.white.opacity(0.20), lineWidth: 1))
-                            .accessibilityLabel("Cancel stream launch")
-                    }
-
-                    Spacer(minLength: 24)
-
-                    if !accessoryPresented {
-                        VendorIndeterminateProgressBar()
-                            .frame(width: compact ? 190 : 280, height: 3)
-                            .padding(.bottom, compact ? 22 : 34)
-                    }
-                }
-                .padding(.horizontal, compact ? 22 : 40)
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
-        }
-        .background(.black)
-    }
-}
-
-private struct StreamLaunchSignal: View {
-    let reduceMotion: Bool
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let cycle = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4
-            let rotation = reduceMotion ? 0 : cycle * 360
-            ZStack {
-                Circle()
-                    .fill(Color.openNowGreen.opacity(0.12))
-                    .blur(radius: 14)
-                Circle()
-                    .stroke(.white.opacity(0.15), lineWidth: 1)
-                Circle()
-                    .trim(from: 0.06, to: 0.70)
-                    .stroke(Color.openNowGreen, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(rotation))
-                Circle()
-                    .trim(from: 0.12, to: 0.42)
-                    .stroke(.white.opacity(0.64), style: StrokeStyle(lineWidth: 1, lineCap: .round))
-                    .padding(9)
-                    .rotationEffect(.degrees(-rotation * 0.72))
-                Circle()
-                    .fill(Color.openNowGreen)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: Color.openNowGreen, radius: 8)
-            }
-        }
-    }
-}
-
-struct WebRTCMediaStreamView: View {
-    let configuration: StreamLaunchConfiguration
-    let onProgress: WebRTCMediaStreamProgressHandler?
-    let onRequiredSessionAd: (@Sendable (StreamSessionAdPresentation) async throws -> Int)?
-    let onEnd: WebRTCMediaStreamCompletion
-    private let coordinator: OpenNOWStreamSessionCoordinator
-
-    init(configuration: StreamLaunchConfiguration,
-         onProgress: WebRTCMediaStreamProgressHandler?,
-         onRequiredSessionAd: (@Sendable (StreamSessionAdPresentation) async throws -> Int)? = nil,
-         onEnd: @escaping WebRTCMediaStreamCompletion) {
-        self.configuration = configuration
-        self.onProgress = onProgress
-        self.onRequiredSessionAd = onRequiredSessionAd
-        self.onEnd = onEnd
-        coordinator = OpenNOWStreamSessionCoordinator(
-            adPresenter: InlineStreamSessionAdPresenter(handler: onRequiredSessionAd),
-            progressHandler: { progress in
-                Task { @MainActor in onProgress?(progress) }
-            }
-        )
-    }
-
-    var body: some View {
-        switch Self.selectedTransport(applicationID: configuration.applicationID) {
-        case .webRTC:
-            WebRTCMediaStreamSurface(
-                configuration: configuration,
-                sessionProvider: coordinator,
-                signaling: coordinator,
-                onAntiAFKStateChange: { enabled in OPNStreamPreferences.saveAntiAFKMouseMovementEnabled(enabled) },
-                onVideoEnhancementChange: { mode, sharpness, denoise in
-                    OPNStreamPreferences.saveUpscalingSettings(mode: mode, sharpness: sharpness, denoise: denoise, forGame: configuration.applicationID)
-                },
-                preventDisplaySleep: Self.preventDisplaySleepWhileStreaming(applicationID: configuration.applicationID),
-                onProgress: { progress in
-                    onProgress?(progress)
-                },
-                onEnd: { success, message, report in
-                    onEnd(success, message, report)
-                }
-            )
-        case .nativeNVST:
-            NativeNVSTMediaStreamSurface(
-                configuration: configuration,
-                sessionProvider: coordinator,
-                preventDisplaySleep: Self.preventDisplaySleepWhileStreaming(applicationID: configuration.applicationID),
-                onProgress: { progress in
-                    onProgress?(progress)
-                },
-                onEnd: { success, message, report in
-                    onEnd(success, message, report)
-                }
-            )
-        }
-    }
-
-    private static func selectedTransport(applicationID: String) -> OPNSelectedStreamTransport {
-        OPNStreamTransportSelector.selectedTransport(forGame: applicationID)
-    }
-
-    private static func preventDisplaySleepWhileStreaming(applicationID: String) -> Bool {
-        let profile = OPNStreamPreferences.launchProfile(forGame: applicationID, capabilities: OPNStreamPreferences.loadDeviceCapabilities())
-        return profile.preventDisplaySleepWhileStreaming
-    }
-}
-
-private struct NativeNVSTMediaStreamSurface: View {
+struct NativeNVSTMediaStreamSurface: View {
     private struct FailurePresentation: Identifiable {
         let id = UUID()
         let message: String
@@ -331,14 +276,14 @@ private struct NativeNVSTMediaStreamSurface: View {
     let configuration: StreamLaunchConfiguration
     let sessionProvider: any NativeNVSTSessionProvider
     let preventDisplaySleep: Bool
-    let onProgress: WebRTCMediaStreamProgressHandler?
-    let onEnd: WebRTCMediaStreamCompletion
-    private let sidebarCapabilities = StreamSidebarCapabilities.nativeNVST
+    let onProgress: NativeNVSTMediaStreamProgressHandler?
+    let onEnd: NativeNVSTMediaStreamCompletion
+    private let sidebarCapabilities = NativeNVSTStreamSidebarCapabilities.standard
 
     @State private var path: NativeNVSTStreamingPath?
     @State private var startTask: Task<Void, Never>?
     @State private var endEventTask: Task<Void, Never>?
-    @State private var nativeView: NativeWebRTCStreamView?
+    @State private var nativeView: NativeNVSTStreamView?
     @State private var loadingStepIndex = -1
     @State private var isConnected = false
     @State private var isEnding = false
@@ -362,9 +307,9 @@ private struct NativeNVSTMediaStreamSurface: View {
     @State private var lastAcceptedStreamInputAt = Date()
     @State private var transientStreamMessage = ""
     @State private var transientStreamMessageTask: Task<Void, Never>?
-    @State private var pendingApplicationQuitCompletion: WebRTCMediaStreamQuitDecisionHandler?
+    @State private var pendingApplicationQuitCompletion: NativeNVSTMediaStreamQuitDecisionHandler?
     @State private var streamingPerformanceActivity: (any NSObjectProtocol)?
-    @State private var sessionLimit: StreamSessionSidebarLimit?
+    @State private var sessionLimit: NativeNVSTStreamSessionSidebarLimit?
     @State private var remoteCoOpPreferences = OPNRemoteCoOpPreferencesStore.load()
     @State private var networkGovernor: NativeNVSTNetworkGovernor?
     @State private var networkPathTask: Task<Void, Never>?
@@ -387,15 +332,15 @@ private struct NativeNVSTMediaStreamSurface: View {
             if let nativeFailure {
                 nativeFailureOverlay(nativeFailure)
             } else if !isConnected {
-                StreamLaunchLoadingScreen(
+                NativeNVSTStreamLaunchLoadingScreen(
                     title: configuration.title,
-                    stage: StreamLaunchLoadingStage.label(stepIndex: loadingStepIndex),
-                    artworkURL: configuration.loadingArtworkURL
+                    stage: NativeNVSTStreamLaunchLoadingStage.label(stepIndex: loadingStepIndex),
+                    artworkURL: configuration.nativeNVSTLoadingArtworkURL
                 ) { EmptyView() }
             }
         }
         .onAppear {
-            WebRTCMediaTelemetry.configure(sink: OpenNOWWebRTCMediaTelemetrySink())
+            NativeNVSTMediaTelemetry.configure(sink: OpenNOWNativeNVSTMediaTelemetrySink())
             startIfNeeded()
         }
         .onDisappear { stopStream() }
@@ -426,7 +371,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         beginStreamingPerformanceMode()
         startNetworkPathMonitoring()
         let audioDeviceMonitor = NativeNVSTAudioDeviceMonitor {
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.audio.device_changed",
                 level: .info,
                 message: "Default audio device changed while native NVST was active.",
@@ -487,7 +432,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             }
         }
         configureInput(for: nativeView)
-        WebRTCMediaStreamLifecycle.activate(
+        NativeNVSTMediaStreamLifecycle.activate(
             configuration.id,
             quitRequestHandler: { completion in
                 showStreamControls(completion: completion)
@@ -514,7 +459,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                 let shouldPresentStream = await MainActor.run {
                     guard !Task.isCancelled, !didEnd, !isEnding else { return false }
                     isConnected = true
-                    sessionLimit = StreamSessionSidebarLimit(session: session)
+                    sessionLimit = NativeNVSTStreamSessionSidebarLimit(session: session)
                     nativeView.remoteInputEnabled = !unifiedHUDVisible && !streamControlsVisible
                     nativeView.setNativeNVSTVideoVisible(true)
                     nativeView.restoreInputFocus()
@@ -523,13 +468,13 @@ private struct NativeNVSTMediaStreamSurface: View {
                     startNativeStatsPolling(path: path)
                     refreshAntiAFKMouseMovementTask()
                     onProgress?(StreamProgress(configuration: configuration, step: .connected, message: "Connected over native NVST.", isReady: true))
-                    WebRTCMediaTelemetry.capture("nvst.ui.connected", level: .info, message: "Native NVST stream connected.", attributes: ["sessionId": session.id])
+                    NativeNVSTMediaTelemetry.capture("nvst.ui.connected", level: .info, message: "Native NVST stream connected.", attributes: ["sessionId": session.id])
                     return true
                 }
                 if !shouldPresentStream {
                     _ = try? await path.stop(reason: .userRequested, message: "Native NVST stream view closed during startup.")
                     await MainActor.run {
-                        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                        NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
                     }
                 }
             } catch {
@@ -546,7 +491,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         guard !(error is CancellationError), !Task.isCancelled else {
             loadingStepIndex = -1
             endStreamingPerformanceMode()
-            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+            NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
             return
         }
         let message = Self.message(for: error)
@@ -570,7 +515,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         path = nil
         endEventTask?.cancel()
         endEventTask = nil
-        WebRTCMediaStreamLifecycle.activate(
+        NativeNVSTMediaStreamLifecycle.activate(
             configuration.id,
             quitRequestHandler: { completion in
                 completion(true)
@@ -585,16 +530,16 @@ private struct NativeNVSTMediaStreamSurface: View {
             Color.black.opacity(0.88).ignoresSafeArea(.container, edges: [.horizontal, .bottom])
             VStack(alignment: .leading, spacing: 18) {
                 Text("NATIVE NVST UNAVAILABLE")
-                    .font(.streamNvidia(size: 16, weight: .bold))
+                    .font(.nativeNVSTStreamNvidia(size: 16, weight: .bold))
                     .tracking(1.4)
-                    .foregroundStyle(WebRTCMediaStreamTheme.accent)
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.accent)
                 Text(failure.message)
-                    .font(.streamNvidia(size: 13, weight: .medium))
-                    .foregroundStyle(WebRTCMediaStreamTheme.textPrimary)
+                    .font(.nativeNVSTStreamNvidia(size: 13, weight: .medium))
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Phase: \(failure.diagnostics["failurePhase"] ?? "unknown")")
-                    .font(.streamNvidia(size: 11, weight: .medium))
-                    .foregroundStyle(WebRTCMediaStreamTheme.textSecondary)
+                    .font(.nativeNVSTStreamNvidia(size: 11, weight: .medium))
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.textSecondary)
                 HStack(spacing: 10) {
                     Button("Retry Native", action: retryNativeFailure)
                     Button("Switch to WebRTC", action: switchToWebRTCFromFailure)
@@ -605,8 +550,8 @@ private struct NativeNVSTMediaStreamSurface: View {
             }
             .padding(28)
             .frame(maxWidth: 620)
-            .background(WebRTCMediaStreamTheme.panel)
-            .overlay(Rectangle().stroke(WebRTCMediaStreamTheme.accent.opacity(0.4), lineWidth: 1))
+            .background(NativeNVSTMediaStreamTheme.panel)
+            .overlay(Rectangle().stroke(NativeNVSTMediaStreamTheme.accent.opacity(0.4), lineWidth: 1))
         }
     }
 
@@ -624,7 +569,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         OPNStreamPreferences.saveNVSTTransportEnabled(false)
         nativeFailure = nil
         didEnd = true
-        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+        NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
         onEnd(false, "Native NVST failed; WebRTC transport selected.", nil)
     }
 
@@ -679,7 +624,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.prepareNativeNVSTRendererForShutdown()
         guard !didEnd else {
             inputDispatcher?.cancel()
-            WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+            NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
             quitCompletion?(shouldTerminateApplication)
             return
         }
@@ -700,7 +645,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                 _ = try? await pendingPath.stop(reason: .userRequested, message: "Native NVST stream view closed.")
             }
             await MainActor.run {
-                WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
                 quitCompletion?(shouldTerminateApplication)
             }
         }
@@ -722,7 +667,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         guard let path else {
             await MainActor.run {
                 isEnding = false
-                WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
                 showStreamControls()
             }
             return false
@@ -731,7 +676,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             do {
                 try await path.setMicrophoneEnabled(false)
             } catch {
-                WebRTCMediaTelemetry.capture(
+                NativeNVSTMediaTelemetry.capture(
                     "nvst.microphone.shutdown.failed",
                     level: .warning,
                     message: Self.message(for: error),
@@ -768,7 +713,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                         }
                     }
                     streamControlsVisible = true
-                    WebRTCMediaTelemetry.capture("nvst.ui.pause.failed", level: .error, message: failureMessage, attributes: ["applicationID": configuration.applicationID])
+                    NativeNVSTMediaTelemetry.capture("nvst.ui.pause.failed", level: .error, message: failureMessage, attributes: ["applicationID": configuration.applicationID])
                 }
                 return false
             }
@@ -817,11 +762,11 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.onPointerLockChanged = nil
         nativeView?.onCommand = nil
         nativeView?.shouldHandleCommand = nil
-        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+        NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
         onEnd(report.success, report.message, report)
     }
 
-    private func enterStreamFullScreenIfNeeded(for view: NativeWebRTCStreamView) {
+    private func enterStreamFullScreenIfNeeded(for view: NativeNVSTStreamView) {
         guard streamingFullScreenWindow == nil, let window = view.window, !window.styleMask.contains(.fullScreen) else { return }
         streamingFullScreenWindow = window
         window.toggleFullScreen(nil)
@@ -834,7 +779,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         window.toggleFullScreen(nil)
     }
 
-    private func configureNativeView(_ view: NativeWebRTCStreamView) {
+    private func configureNativeView(_ view: NativeNVSTStreamView) {
         guard !didEnd, !isEnding else {
             view.remoteInputEnabled = false
             view.setNativeNVSTVideoVisible(false)
@@ -857,12 +802,12 @@ private struct NativeNVSTMediaStreamSurface: View {
         configureInput(for: view)
     }
 
-    private func configureInput(for view: NativeWebRTCStreamView) {
+    private func configureInput(for view: NativeNVSTStreamView) {
         view.onInputEvent = { [weak view] event in
             guard path != nil, let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd else { return }
             if view.remoteInputEnabled && !NativeNVSTInputDispatcher.isNeutralizing(event) {
                 guard NSApplication.shared.isActive, view.streamWindowHasInputFocus else {
-                    WebRTCMediaTelemetry.capture(
+                    NativeNVSTMediaTelemetry.capture(
                         "nvst.input.focus_lost",
                         level: .debug,
                         message: "Native NVST input was withheld because the stream window was not focused.",
@@ -899,7 +844,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         }
     }
 
-    private func handleNativeCommand(_ command: WebRTCMediaStreamCommand) {
+    private func handleNativeCommand(_ command: NativeNVSTMediaStreamCommand) {
         switch command {
         case .toggleStatsHUD:
             toggleNativeStatsHUD()
@@ -910,7 +855,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             toggleNativeMicrophone()
         case .toggleRecording:
             showNativeTransientStreamMessage("Recording is unavailable with native NVST.")
-            WebRTCMediaTelemetry.capture("nvst.ui.recording.unavailable", level: .warning, message: "Native NVST recording shortcut requested without a registered recorder pipeline.", attributes: ["applicationID": configuration.applicationID])
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.unavailable", level: .warning, message: "Native NVST recording shortcut requested without a registered recorder pipeline.", attributes: ["applicationID": configuration.applicationID])
         case .toggleAntiAFK:
             toggleNativeAntiAFKMouseMovement()
         case .showQuitMenu:
@@ -949,14 +894,14 @@ private struct NativeNVSTMediaStreamSurface: View {
                     microphoneEnabled = target
                     let enabledMessage = microphoneMode == "voice-activity" ? "Voice Activity On" : "Microphone On"
                     showNativeTransientStreamMessage(target ? enabledMessage : "Microphone Muted")
-                    WebRTCMediaTelemetry.capture("nvst.ui.microphone.update", level: .info, message: target ? "Native NVST microphone enabled." : "Native NVST microphone muted.", attributes: ["applicationID": configuration.applicationID, "enabled": String(target), "source": source])
+                    NativeNVSTMediaTelemetry.capture("nvst.ui.microphone.update", level: .info, message: target ? "Native NVST microphone enabled." : "Native NVST microphone muted.", attributes: ["applicationID": configuration.applicationID, "enabled": String(target), "source": source])
                 } catch {
                     guard !Task.isCancelled, !didEnd else { return }
                     microphoneDesiredEnabled = microphoneEnabled
                     microphonePendingStates.removeAll()
                     let message = Self.message(for: error)
                     showNativeTransientStreamMessage(message)
-                    WebRTCMediaTelemetry.capture("nvst.ui.microphone.failed", level: .error, message: message, attributes: ["applicationID": configuration.applicationID, "source": source])
+                    NativeNVSTMediaTelemetry.capture("nvst.ui.microphone.failed", level: .error, message: message, attributes: ["applicationID": configuration.applicationID, "source": source])
                 }
             }
         }
@@ -968,7 +913,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         OPNStreamPreferences.saveAntiAFKMouseMovementEnabled(antiAFKMouseMovementEnabled)
         refreshAntiAFKMouseMovementTask()
         showNativeTransientStreamMessage(antiAFKMouseMovementEnabled ? "Anti-AFK On" : "Anti-AFK Off")
-        WebRTCMediaTelemetry.capture("nvst.ui.anti_afk.toggle", level: .info, message: antiAFKMouseMovementEnabled ? "Native NVST Anti-AFK mouse movement enabled." : "Native NVST Anti-AFK mouse movement disabled.", attributes: ["applicationID": configuration.applicationID, "enabled": String(antiAFKMouseMovementEnabled)])
+        NativeNVSTMediaTelemetry.capture("nvst.ui.anti_afk.toggle", level: .info, message: antiAFKMouseMovementEnabled ? "Native NVST Anti-AFK mouse movement enabled." : "Native NVST Anti-AFK mouse movement disabled.", attributes: ["applicationID": configuration.applicationID, "enabled": String(antiAFKMouseMovementEnabled)])
     }
 
     private func refreshAntiAFKMouseMovementTask() {
@@ -980,7 +925,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         guard antiAFKMouseMovementTask == nil else { return }
         antiAFKMouseMovementTask = Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(for: StreamAntiAFKInputPolicy.pollInterval)
+                try? await Task.sleep(for: NativeNVSTAntiAFKInputPolicy.pollInterval)
                 guard !Task.isCancelled else { return }
                 sendNativeAntiAFKMouseMovement()
             }
@@ -989,14 +934,14 @@ private struct NativeNVSTMediaStreamSurface: View {
 
     private func sendNativeAntiAFKMouseMovement() {
         guard isConnected, antiAFKMouseMovementEnabled, !isEnding, !didEnd, !unifiedHUDVisible, !streamControlsVisible, inputDispatcher != nil else { return }
-        guard Date().timeIntervalSince(lastAcceptedStreamInputAt) >= StreamAntiAFKInputPolicy.idleThresholdSeconds else { return }
-        let delta = StreamAntiAFKInputPolicy.randomMouseDelta()
-        inputDispatcher?.enqueue(StreamAntiAFKInputPolicy.mouseMove(deltaX: delta.x, deltaY: delta.y))
+        guard Date().timeIntervalSince(lastAcceptedStreamInputAt) >= NativeNVSTAntiAFKInputPolicy.idleThresholdSeconds else { return }
+        let delta = NativeNVSTAntiAFKInputPolicy.randomMouseDelta()
+        inputDispatcher?.enqueue(NativeNVSTAntiAFKInputPolicy.mouseMove(deltaX: delta.x, deltaY: delta.y))
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(150))
             guard isConnected, antiAFKMouseMovementEnabled, !isEnding, !didEnd, !unifiedHUDVisible, !streamControlsVisible else { return }
-            guard Date().timeIntervalSince(lastAcceptedStreamInputAt) >= StreamAntiAFKInputPolicy.idleThresholdSeconds else { return }
-            inputDispatcher?.enqueue(StreamAntiAFKInputPolicy.mouseMove(deltaX: -delta.x, deltaY: -delta.y))
+            guard Date().timeIntervalSince(lastAcceptedStreamInputAt) >= NativeNVSTAntiAFKInputPolicy.idleThresholdSeconds else { return }
+            inputDispatcher?.enqueue(NativeNVSTAntiAFKInputPolicy.mouseMove(deltaX: -delta.x, deltaY: -delta.y))
         }
     }
 
@@ -1021,7 +966,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         transientStreamMessage = ""
     }
 
-    private func showStreamControls(completion: WebRTCMediaStreamQuitDecisionHandler? = nil) {
+    private func showStreamControls(completion: NativeNVSTMediaStreamQuitDecisionHandler? = nil) {
         guard isConnected else {
             let pendingStartTask = startTask
             let pendingPath = path
@@ -1030,7 +975,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                 await pendingStartTask?.value
                 await pendingPath?.cancelStart()
                 await MainActor.run {
-                    WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+                    NativeNVSTMediaStreamLifecycle.deactivate(configuration.id)
                     completion?(true)
                 }
             }
@@ -1042,7 +987,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.remoteInputEnabled = false
         nativeView?.setNativeNVSTVideoVisible(isConnected)
         streamControlsVisible = true
-        WebRTCMediaTelemetry.capture("nvst.ui.controls.show", level: .info, message: "Native NVST stream controls shown.", attributes: ["applicationID": configuration.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.ui.controls.show", level: .info, message: "Native NVST stream controls shown.", attributes: ["applicationID": configuration.applicationID])
     }
 
     private func dismissStreamControls() {
@@ -1054,7 +999,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.setNativeNVSTVideoVisible(isConnected)
         nativeView?.restoreInputFocus()
         completion?(false)
-        WebRTCMediaTelemetry.capture("nvst.ui.controls.dismiss", level: .info, message: "Native NVST stream controls dismissed.", attributes: ["applicationID": configuration.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.ui.controls.dismiss", level: .info, message: "Native NVST stream controls dismissed.", attributes: ["applicationID": configuration.applicationID])
     }
 
     private func setUnifiedHUDVisible(_ visible: Bool) {
@@ -1067,13 +1012,13 @@ private struct NativeNVSTMediaStreamSurface: View {
             nativeView?.remoteInputEnabled = true
             nativeView?.restoreInputFocus()
         }
-        WebRTCMediaTelemetry.capture("nvst.ui.hud.toggle", level: .info, message: visible ? "Native NVST HUD shown." : "Native NVST HUD hidden.", attributes: ["applicationID": configuration.applicationID, "visible": String(visible)])
+        NativeNVSTMediaTelemetry.capture("nvst.ui.hud.toggle", level: .info, message: visible ? "Native NVST HUD shown." : "Native NVST HUD hidden.", attributes: ["applicationID": configuration.applicationID, "visible": String(visible)])
     }
 
     private func toggleNativeStatsHUD() {
         guard isConnected, !isEnding, !didEnd else { return }
         nativeStatsVisible.toggle()
-        WebRTCMediaTelemetry.capture("nvst.ui.stats.toggle", level: .info, message: nativeStatsVisible ? "OpenNOW NVST stats shown." : "OpenNOW NVST stats hidden.", attributes: ["applicationID": configuration.applicationID, "visible": String(nativeStatsVisible)])
+        NativeNVSTMediaTelemetry.capture("nvst.ui.stats.toggle", level: .info, message: nativeStatsVisible ? "OpenNOW NVST stats shown." : "OpenNOW NVST stats hidden.", attributes: ["applicationID": configuration.applicationID, "visible": String(nativeStatsVisible)])
     }
 
     private func startNativeStatsPolling(path: NativeNVSTStreamingPath) {
@@ -1092,7 +1037,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                 }
                 if isConnected, !isEnding, !didEnd,
                    let failure = nativeStreamHealth.observe(snapshot: snapshot, rendererReady: nativeView?.nativeNVSTRendererSurfaceReady == true) {
-                    WebRTCMediaTelemetry.capture("nvst.stream.health.failed", level: .error, message: failure.message, attributes: ["applicationID": configuration.applicationID])
+                    NativeNVSTMediaTelemetry.capture("nvst.stream.health.failed", level: .error, message: failure.message, attributes: ["applicationID": configuration.applicationID])
                     _ = await finish(reason: .failed, message: failure.message)
                     return
                 }
@@ -1108,14 +1053,14 @@ private struct NativeNVSTMediaStreamSurface: View {
     private func recordNativeNetworkTelemetry(_ snapshot: NativeNVSTPerformanceSnapshot) {
         let attributes = ["transport": "nvst", "applicationID": configuration.applicationID]
         if let droppedInputCount = inputDispatcher?.droppedInputCount, droppedInputCount > 0 {
-            WebRTCMediaTelemetry.record("nvst.input.dropped", kind: .counter, value: Double(droppedInputCount), unit: "event", attributes: attributes)
+            NativeNVSTMediaTelemetry.record("nvst.input.dropped", kind: .counter, value: Double(droppedInputCount), unit: "event", attributes: attributes)
         }
-        if snapshot.latencyMilliseconds >= 0 { WebRTCMediaTelemetry.record("nvst.network.latency_ms", kind: .gauge, value: snapshot.latencyMilliseconds, unit: "millisecond", attributes: attributes) }
-        if snapshot.jitterMilliseconds >= 0 { WebRTCMediaTelemetry.record("nvst.network.jitter_ms", kind: .gauge, value: snapshot.jitterMilliseconds, unit: "millisecond", attributes: attributes) }
-        if snapshot.bitrateMegabitsPerSecond >= 0 { WebRTCMediaTelemetry.record("nvst.network.bitrate_mbps", kind: .gauge, value: snapshot.bitrateMegabitsPerSecond, unit: "megabit/second", attributes: attributes) }
-        if snapshot.bandwidthUtilizationPercent >= 0 { WebRTCMediaTelemetry.record("nvst.network.bandwidth_utilization_percent", kind: .gauge, value: snapshot.bandwidthUtilizationPercent, unit: "percent", attributes: attributes) }
-        WebRTCMediaTelemetry.record("nvst.network.packet_loss", kind: .gauge, value: Double(snapshot.packetLoss), unit: "packet", attributes: attributes)
-        WebRTCMediaTelemetry.record("nvst.network.frame_loss", kind: .gauge, value: Double(snapshot.frameLoss), unit: "frame", attributes: attributes)
+        if snapshot.latencyMilliseconds >= 0 { NativeNVSTMediaTelemetry.record("nvst.network.latency_ms", kind: .gauge, value: snapshot.latencyMilliseconds, unit: "millisecond", attributes: attributes) }
+        if snapshot.jitterMilliseconds >= 0 { NativeNVSTMediaTelemetry.record("nvst.network.jitter_ms", kind: .gauge, value: snapshot.jitterMilliseconds, unit: "millisecond", attributes: attributes) }
+        if snapshot.bitrateMegabitsPerSecond >= 0 { NativeNVSTMediaTelemetry.record("nvst.network.bitrate_mbps", kind: .gauge, value: snapshot.bitrateMegabitsPerSecond, unit: "megabit/second", attributes: attributes) }
+        if snapshot.bandwidthUtilizationPercent >= 0 { NativeNVSTMediaTelemetry.record("nvst.network.bandwidth_utilization_percent", kind: .gauge, value: snapshot.bandwidthUtilizationPercent, unit: "percent", attributes: attributes) }
+        NativeNVSTMediaTelemetry.record("nvst.network.packet_loss", kind: .gauge, value: Double(snapshot.packetLoss), unit: "packet", attributes: attributes)
+        NativeNVSTMediaTelemetry.record("nvst.network.frame_loss", kind: .gauge, value: Double(snapshot.frameLoss), unit: "frame", attributes: attributes)
     }
 
     private func startNetworkPathMonitoring() {
@@ -1127,12 +1072,12 @@ private struct NativeNVSTMediaStreamSurface: View {
                 if networkPath.isSatisfied {
                     networkPathAvailable = true
                     if isConnected, !unifiedHUDVisible, !streamControlsVisible { nativeView?.remoteInputEnabled = true }
-                    WebRTCMediaTelemetry.capture("nvst.network.path.available", level: .info, message: "Native NVST network path is available.", attributes: ["wifi": String(networkPath.usesWiFi), "ethernet": String(networkPath.usesWiredEthernet), "expensive": String(networkPath.isExpensive), "constrained": String(networkPath.isConstrained)])
+                    NativeNVSTMediaTelemetry.capture("nvst.network.path.available", level: .info, message: "Native NVST network path is available.", attributes: ["wifi": String(networkPath.usesWiFi), "ethernet": String(networkPath.usesWiredEthernet), "expensive": String(networkPath.isExpensive), "constrained": String(networkPath.isConstrained)])
                 } else {
                     networkPathAvailable = false
                     nativeView?.remoteInputEnabled = false
                     showNativeTransientStreamMessage("Network interrupted - waiting to reconnect")
-                    WebRTCMediaTelemetry.capture("nvst.network.path.unavailable", level: .warning, message: "Native NVST network path is unavailable.")
+                    NativeNVSTMediaTelemetry.capture("nvst.network.path.unavailable", level: .warning, message: "Native NVST network path is unavailable.")
                 }
             }
         }
@@ -1145,9 +1090,9 @@ private struct NativeNVSTMediaStreamSurface: View {
             case .dynamicStreamingMode(let mode): try await path.setDynamicStreamingMode(mode)
             case .l4sEnabled(let enabled): try await path.setL4SEnabled(enabled)
             }
-            WebRTCMediaTelemetry.capture("nvst.network.adjustment", level: .info, message: "Applied native NVST network adjustment.", attributes: ["adjustment": String(describing: adjustment)])
+            NativeNVSTMediaTelemetry.capture("nvst.network.adjustment", level: .info, message: "Applied native NVST network adjustment.", attributes: ["adjustment": String(describing: adjustment)])
         } catch {
-            WebRTCMediaTelemetry.capture("nvst.network.adjustment.failed", level: .warning, message: Self.message(for: error), attributes: ["adjustment": String(describing: adjustment)])
+            NativeNVSTMediaTelemetry.capture("nvst.network.adjustment.failed", level: .warning, message: Self.message(for: error), attributes: ["adjustment": String(describing: adjustment)])
         }
     }
 
@@ -1197,33 +1142,33 @@ private struct NativeNVSTMediaStreamSurface: View {
         ZStack {
             Color.black.opacity(0.72).ignoresSafeArea(.container, edges: [.horizontal, .bottom])
             VStack(spacing: 14) {
-                ProgressView().controlSize(.large).tint(WebRTCMediaStreamTheme.accent)
+                ProgressView().controlSize(.large).tint(NativeNVSTMediaStreamTheme.accent)
                 Text("CONNECTION INTERRUPTED")
-                    .font(.streamNvidia(size: 16, weight: .bold))
+                    .font(.nativeNVSTStreamNvidia(size: 16, weight: .bold))
                     .tracking(1.4)
-                    .foregroundStyle(WebRTCMediaStreamTheme.accent)
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.accent)
                 Text("Waiting for a usable network path. OpenNOW will resume the same GeForce NOW session automatically.")
-                    .font(.streamNvidia(size: 12, weight: .medium))
-                    .foregroundStyle(WebRTCMediaStreamTheme.textSecondary)
+                    .font(.nativeNVSTStreamNvidia(size: 12, weight: .medium))
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
                 Button("End Stream", action: endFromStreamControls)
                     .buttonStyle(.bordered)
             }
             .padding(30)
-            .background(WebRTCMediaStreamTheme.panel.opacity(0.96))
-            .overlay(Rectangle().stroke(WebRTCMediaStreamTheme.accent.opacity(0.4), lineWidth: 1))
+            .background(NativeNVSTMediaStreamTheme.panel.opacity(0.96))
+            .overlay(Rectangle().stroke(NativeNVSTMediaStreamTheme.accent.opacity(0.4), lineWidth: 1))
         }
     }
 
     private var nativeTransientStreamMessageOverlay: some View {
         Text(transientStreamMessage)
-            .font(.streamNvidia(size: 12, weight: .bold))
-            .foregroundStyle(WebRTCMediaStreamTheme.textPrimary)
+            .font(.nativeNVSTStreamNvidia(size: 12, weight: .bold))
+            .foregroundStyle(NativeNVSTMediaStreamTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(Color.black.opacity(0.86))
-            .overlay(Rectangle().stroke(WebRTCMediaStreamTheme.accent.opacity(0.55), lineWidth: 1))
+            .overlay(Rectangle().stroke(NativeNVSTMediaStreamTheme.accent.opacity(0.55), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.top, 24)
@@ -1239,7 +1184,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             HStack(spacing: 0) {
                 nativeStatsCompactBox(value: nativeLiveStatsWholeNumber(latestNativeStats?.gameFramesPerSecond), label: "GAME FPS", color: nativeGameFPSColor(target: streamFramesPerSecond))
                 nativeStatsVerticalDivider
-                nativeStatsCompactBox(value: nativeStatsWholeNumber(streamFramesPerSecond), label: "STREAM FPS", color: WebRTCMediaStreamTheme.textPrimary)
+                nativeStatsCompactBox(value: nativeStatsWholeNumber(streamFramesPerSecond), label: "STREAM FPS", color: NativeNVSTMediaStreamTheme.textPrimary)
                 nativeStatsVerticalDivider
                 nativeStatsCompactBox(value: nativeLiveStatsWholeNumber(latestNativeStats?.latencyMilliseconds), label: "MS", color: nativeLatencyColor)
             }
@@ -1250,10 +1195,10 @@ private struct NativeNVSTMediaStreamSurface: View {
             VStack(alignment: .leading, spacing: 5) {
                 nativeStatsStandardRow(label: "Frame Loss", value: nativeStatsCount(latestNativeStats?.frameLoss), detail: nativeStatsTotal(latestNativeStats?.totalFrameLoss), color: nativeFrameLossColor)
                 nativeStatsStandardRow(label: "Packet Loss", value: nativeStatsCount(latestNativeStats?.packetLoss), detail: nativeStatsTotal(latestNativeStats?.totalPacketLoss), color: nativePacketLossColor)
-                nativeStatsStandardRow(label: "Bandwidth Used", value: nativeStatsMegabits(latestNativeStats?.bitrateMegabitsPerSecond), detail: "Mbps", color: WebRTCMediaStreamTheme.textPrimary)
-                nativeStatsStandardRow(label: "Resolution", value: resolution, detail: nil, color: WebRTCMediaStreamTheme.textPrimary)
-                nativeStatsStandardRow(label: "Codec", value: codec, detail: nil, color: WebRTCMediaStreamTheme.textPrimary)
-                nativeStatsStandardRow(label: "Server Location", value: nonEmptyNativeStat(latestNativeStats?.serverLocation, fallback: "--"), detail: nil, color: WebRTCMediaStreamTheme.textPrimary)
+                nativeStatsStandardRow(label: "Bandwidth Used", value: nativeStatsMegabits(latestNativeStats?.bitrateMegabitsPerSecond), detail: "Mbps", color: NativeNVSTMediaStreamTheme.textPrimary)
+                nativeStatsStandardRow(label: "Resolution", value: resolution, detail: nil, color: NativeNVSTMediaStreamTheme.textPrimary)
+                nativeStatsStandardRow(label: "Codec", value: codec, detail: nil, color: NativeNVSTMediaStreamTheme.textPrimary)
+                nativeStatsStandardRow(label: "Server Location", value: nonEmptyNativeStat(latestNativeStats?.serverLocation, fallback: "--"), detail: nil, color: NativeNVSTMediaStreamTheme.textPrimary)
             }
         }
         .padding(10)
@@ -1261,7 +1206,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         .background(Color.black.opacity(0.90))
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(WebRTCMediaStreamTheme.accent)
+                .fill(NativeNVSTMediaStreamTheme.accent)
                 .frame(height: 2)
         }
         .overlay(Rectangle().stroke(.white.opacity(0.16), lineWidth: 1))
@@ -1275,15 +1220,15 @@ private struct NativeNVSTMediaStreamSurface: View {
     private func nativeStatsCompactBox(value: String, label: String, color: Color) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.streamNvidia(size: 22, weight: .bold))
+                .font(.nativeNVSTStreamNvidia(size: 22, weight: .bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity)
             Text(label)
-                .font(.streamNvidia(size: 9, weight: .bold))
+                .font(.nativeNVSTStreamNvidia(size: 9, weight: .bold))
                 .tracking(0.8)
-                .foregroundStyle(WebRTCMediaStreamTheme.textSecondary)
+                .foregroundStyle(NativeNVSTMediaStreamTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white.opacity(0.055))
@@ -1305,43 +1250,43 @@ private struct NativeNVSTMediaStreamSurface: View {
     private func nativeStatsStandardRow(label: String, value: String, detail: String?, color: Color) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .font(.streamNvidia(size: 10, weight: .medium))
-                .foregroundStyle(WebRTCMediaStreamTheme.textSecondary)
+                .font(.nativeNVSTStreamNvidia(size: 10, weight: .medium))
+                .foregroundStyle(NativeNVSTMediaStreamTheme.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(value)
-                .font(.streamNvidia(size: 10, weight: .bold))
+                .font(.nativeNVSTStreamNvidia(size: 10, weight: .bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
             if let detail {
                 Text(detail)
-                    .font(.streamNvidia(size: 10, weight: .medium))
-                    .foregroundStyle(WebRTCMediaStreamTheme.textTertiary)
+                    .font(.nativeNVSTStreamNvidia(size: 10, weight: .medium))
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.textTertiary)
                     .lineLimit(1)
             }
         }
     }
 
     private func nativeGameFPSColor(target: Double) -> Color {
-        guard let latestNativeStats, latestNativeStats.available, latestNativeStats.gameFramesPerSecond >= 0 else { return WebRTCMediaStreamTheme.textTertiary }
-        return latestNativeStats.gameFramesPerSecond >= max(1, target * 0.9) ? WebRTCMediaStreamTheme.accent : WebRTCMediaStreamTheme.warning
+        guard let latestNativeStats, latestNativeStats.available, latestNativeStats.gameFramesPerSecond >= 0 else { return NativeNVSTMediaStreamTheme.textTertiary }
+        return latestNativeStats.gameFramesPerSecond >= max(1, target * 0.9) ? NativeNVSTMediaStreamTheme.accent : NativeNVSTMediaStreamTheme.warning
     }
 
     private var nativeLatencyColor: Color {
-        guard let latestNativeStats, latestNativeStats.available, latestNativeStats.latencyMilliseconds >= 0 else { return WebRTCMediaStreamTheme.textTertiary }
-        if latestNativeStats.latencyMilliseconds >= 120 { return WebRTCMediaStreamTheme.danger }
-        if latestNativeStats.latencyMilliseconds >= 90 { return WebRTCMediaStreamTheme.warning }
-        return WebRTCMediaStreamTheme.accent
+        guard let latestNativeStats, latestNativeStats.available, latestNativeStats.latencyMilliseconds >= 0 else { return NativeNVSTMediaStreamTheme.textTertiary }
+        if latestNativeStats.latencyMilliseconds >= 120 { return NativeNVSTMediaStreamTheme.danger }
+        if latestNativeStats.latencyMilliseconds >= 90 { return NativeNVSTMediaStreamTheme.warning }
+        return NativeNVSTMediaStreamTheme.accent
     }
 
     private var nativeFrameLossColor: Color {
-        guard let latestNativeStats, latestNativeStats.available else { return WebRTCMediaStreamTheme.textTertiary }
-        return latestNativeStats.frameLoss == 0 ? WebRTCMediaStreamTheme.accent : WebRTCMediaStreamTheme.warning
+        guard let latestNativeStats, latestNativeStats.available else { return NativeNVSTMediaStreamTheme.textTertiary }
+        return latestNativeStats.frameLoss == 0 ? NativeNVSTMediaStreamTheme.accent : NativeNVSTMediaStreamTheme.warning
     }
 
     private var nativePacketLossColor: Color {
-        guard let latestNativeStats, latestNativeStats.available else { return WebRTCMediaStreamTheme.textTertiary }
-        return latestNativeStats.packetLoss == 0 ? WebRTCMediaStreamTheme.accent : WebRTCMediaStreamTheme.warning
+        guard let latestNativeStats, latestNativeStats.available else { return NativeNVSTMediaStreamTheme.textTertiary }
+        return latestNativeStats.packetLoss == 0 ? NativeNVSTMediaStreamTheme.accent : NativeNVSTMediaStreamTheme.warning
     }
 
     private func nativeStatsWholeNumber(_ value: Double?) -> String {
@@ -1434,7 +1379,7 @@ private struct NativeNVSTMediaStreamSurface: View {
     }
 
     private var nativeUnifiedHUD: some View {
-        StreamUnifiedSidebar(title: configuration.title.isEmpty ? "GeForce NOW" : configuration.title, closeAction: { setUnifiedHUDVisible(false) }) {
+        NativeNVSTStreamUnifiedSidebar(title: configuration.title.isEmpty ? "GeForce NOW" : configuration.title, closeAction: { setUnifiedHUDVisible(false) }) {
             VStack(alignment: .leading, spacing: 14) {
                 nativeHUDStatusPanel
                 nativeHUDControlsPanel
@@ -1449,24 +1394,24 @@ private struct NativeNVSTMediaStreamSurface: View {
 
     private var nativeHUDStatusPanel: some View {
         HStack(spacing: 8) {
-            StreamHUDMetricCard(title: "Mic", value: nativeMicrophoneStatusText, positive: microphoneEnabled && microphoneAvailable)
-            StreamHUDMetricCard(title: "Rec", value: "Unavailable", positive: false)
-            StreamHUDMetricCard(title: "AFK", value: antiAFKMouseMovementEnabled ? "On" : "Off", positive: antiAFKMouseMovementEnabled)
+            NativeNVSTStreamHUDMetricCard(title: "Mic", value: nativeMicrophoneStatusText, positive: microphoneEnabled && microphoneAvailable)
+            NativeNVSTStreamHUDMetricCard(title: "Rec", value: "Unavailable", positive: false)
+            NativeNVSTStreamHUDMetricCard(title: "AFK", value: antiAFKMouseMovementEnabled ? "On" : "Off", positive: antiAFKMouseMovementEnabled)
             if sessionLimit != nil {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    StreamHUDMetricCard(title: "Session", value: nativeSessionLimitText(at: context.date), positive: nativeSessionLimitIsHealthy(at: context.date))
+                    NativeNVSTStreamHUDMetricCard(title: "Session", value: nativeSessionLimitText(at: context.date), positive: nativeSessionLimitIsHealthy(at: context.date))
                 }
             }
             if remoteCoOpPreferences.isAlphaOptedIn {
-                StreamHUDMetricCard(title: "Co-Op", value: "Unavailable", positive: false)
+                NativeNVSTStreamHUDMetricCard(title: "Co-Op", value: "Unavailable", positive: false)
             }
         }
     }
 
     private var nativeHUDControlsPanel: some View {
-        StreamHUDSection(label: "CONTROLS", spacing: 8) {
+        NativeNVSTStreamHUDSection(label: "CONTROLS", spacing: 8) {
             HStack(spacing: 8) {
-                StreamHUDActionRow(
+                NativeNVSTStreamHUDActionRow(
                     title: microphoneEnabled ? "Mute microphone" : "Unmute microphone",
                     subtitle: nativeMicrophoneStatusText,
                     systemName: microphoneEnabled ? "mic.slash.fill" : "mic.fill",
@@ -1474,7 +1419,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                     isDisabled: !sidebarCapabilities.supports(.microphone) || !microphoneAvailable || microphoneUpdateTask != nil,
                     action: toggleNativeMicrophone
                 )
-                StreamHUDActionRow(
+                NativeNVSTStreamHUDActionRow(
                     title: "Record",
                     subtitle: "Unavailable with native NVST",
                     systemName: "record.circle",
@@ -1482,7 +1427,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                     isDisabled: !sidebarCapabilities.supports(.recording),
                     action: {}
                 )
-                StreamHUDActionRow(
+                NativeNVSTStreamHUDActionRow(
                     title: antiAFKMouseMovementEnabled ? "Disable Anti-AFK" : "Enable Anti-AFK",
                     subtitle: antiAFKMouseMovementEnabled ? "Active" : "Idle",
                     systemName: "cursorarrow.motionlines",
@@ -1490,7 +1435,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                     isDisabled: !sidebarCapabilities.supports(.antiAFK) || !isConnected,
                     action: toggleNativeAntiAFKMouseMovement
                 )
-                StreamHUDActionRow(
+                NativeNVSTStreamHUDActionRow(
                     title: nativeStatsVisible ? "Hide Floating Stats" : "Show Floating Stats",
                     subtitle: "Detailed overlay",
                     systemName: "chart.line.uptrend.xyaxis",
@@ -1503,45 +1448,45 @@ private struct NativeNVSTMediaStreamSurface: View {
     }
 
     private var nativeHUDNetworkPanel: some View {
-        StreamHUDSection(label: "NETWORK", spacing: 8) {
+        NativeNVSTStreamHUDSection(label: "NETWORK", spacing: 8) {
             HStack(spacing: 8) {
-                StreamHUDMetricCard(title: "Health", value: nativeNetworkHealthText, positive: nativeNetworkHealthIsGood)
-                StreamHUDMetricCard(title: "Latency", value: nativeLatencyText, positive: (latestNativeStats?.latencyMilliseconds ?? 0) < 90)
-                StreamHUDMetricCard(title: "Loss", value: nativePacketLossText, positive: (latestNativeStats?.packetLoss ?? 0) == 0)
+                NativeNVSTStreamHUDMetricCard(title: "Health", value: nativeNetworkHealthText, positive: nativeNetworkHealthIsGood)
+                NativeNVSTStreamHUDMetricCard(title: "Latency", value: nativeLatencyText, positive: (latestNativeStats?.latencyMilliseconds ?? 0) < 90)
+                NativeNVSTStreamHUDMetricCard(title: "Loss", value: nativePacketLossText, positive: (latestNativeStats?.packetLoss ?? 0) == 0)
             }
             if !nativeNetworkWarningText.isEmpty {
                 Text(nativeNetworkWarningText)
-                    .font(.streamNvidia(size: 11, weight: .medium))
-                    .foregroundStyle(WebRTCMediaStreamTheme.warning)
+                    .font(.nativeNVSTStreamNvidia(size: 11, weight: .medium))
+                    .foregroundStyle(NativeNVSTMediaStreamTheme.warning)
                     .lineLimit(2)
             }
         }
     }
 
     private var nativeHUDRemoteCoOpPanel: some View {
-        StreamHUDSection(label: "CO-OP", spacing: 8) {
+        NativeNVSTStreamHUDSection(label: "CO-OP", spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Remote Co-Op")
-                            .font(.streamNvidia(size: 14, weight: .bold))
-                            .foregroundStyle(WebRTCMediaStreamTheme.textPrimary)
+                            .font(.nativeNVSTStreamNvidia(size: 14, weight: .bold))
+                            .foregroundStyle(NativeNVSTMediaStreamTheme.textPrimary)
                         Text("Video and audio relay require WebRTC transport.")
-                            .font(.streamNvidia(size: 11, weight: .medium))
-                            .foregroundStyle(WebRTCMediaStreamTheme.textTertiary)
+                            .font(.nativeNVSTStreamNvidia(size: 11, weight: .medium))
+                            .foregroundStyle(NativeNVSTMediaStreamTheme.textTertiary)
                             .lineLimit(2)
                     }
                     Spacer(minLength: 8)
                     Text("NVST")
-                        .font(.streamNvidia(size: 9, weight: .bold))
+                        .font(.nativeNVSTStreamNvidia(size: 9, weight: .bold))
                         .tracking(0.7)
-                        .foregroundStyle(WebRTCMediaStreamTheme.warning)
+                        .foregroundStyle(NativeNVSTMediaStreamTheme.warning)
                         .padding(.horizontal, 8)
                         .frame(height: 24)
                         .background(Color.white.opacity(0.07))
-                        .overlay { Rectangle().stroke(WebRTCMediaStreamTheme.divider, lineWidth: 1) }
+                        .overlay { Rectangle().stroke(NativeNVSTMediaStreamTheme.divider, lineWidth: 1) }
                 }
-                StreamHUDActionRow(
+                NativeNVSTStreamHUDActionRow(
                     title: "Create Invite",
                     subtitle: "Unavailable with native NVST",
                     systemName: "person.badge.plus",
@@ -1558,15 +1503,15 @@ private struct NativeNVSTMediaStreamSurface: View {
 
     private var nativeHUDVideoPanel: some View {
         let profile = OPNStreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: OPNStreamPreferences.loadDeviceCapabilities())
-        return StreamHUDSection(label: "VIDEO") {
+        return NativeNVSTStreamHUDSection(label: "VIDEO") {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("MetalFX Upscaling", selection: Binding.constant(0)) {
                     Text("Off").tag(0)
                     Text("MetalFX").tag(3)
                 }
-                .font(.streamNvidia(size: 12, weight: .medium))
+                .font(.nativeNVSTStreamNvidia(size: 12, weight: .medium))
                 .pickerStyle(.segmented)
-                .tint(WebRTCMediaStreamTheme.accent)
+                .tint(NativeNVSTMediaStreamTheme.accent)
                 .disabled(!sidebarCapabilities.supports(.videoEnhancement))
                 nativeHUDDetailRow(label: "Active", value: "Native")
                 nativeHUDDetailRow(label: "Target", value: "Native")
@@ -1580,12 +1525,12 @@ private struct NativeNVSTMediaStreamSurface: View {
     private func nativeHUDDetailRow(label: String, value: String) -> some View {
         HStack(spacing: 12) {
             Text(label)
-                .font(.streamNvidia(size: 10, weight: .medium))
-                .foregroundStyle(WebRTCMediaStreamTheme.textTertiary)
+                .font(.nativeNVSTStreamNvidia(size: 10, weight: .medium))
+                .foregroundStyle(NativeNVSTMediaStreamTheme.textTertiary)
             Spacer(minLength: 8)
             Text(value)
-                .font(.streamNvidia(size: 10, weight: .bold))
-                .foregroundStyle(WebRTCMediaStreamTheme.textPrimary)
+                .font(.nativeNVSTStreamNvidia(size: 10, weight: .bold))
+                .foregroundStyle(NativeNVSTMediaStreamTheme.textPrimary)
                 .lineLimit(1)
         }
     }
@@ -1620,7 +1565,7 @@ private struct NativeNVSTMediaStreamSurface: View {
                 }
                 .controlSize(.large)
                 .disabled(isEnding)
-                Text("\(WebRTCMediaStreamCommand.shortcutGuide)   Esc Resume")
+                Text("\(NativeNVSTMediaStreamCommand.shortcutGuide)   Esc Resume")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.36))
             }
@@ -1630,7 +1575,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         }
     }
 
-    private static func nativeVideoSurfaceHandle(for view: NativeWebRTCStreamView) -> UInt? {
+    private static func nativeVideoSurfaceHandle(for view: NativeNVSTStreamView) -> UInt? {
         guard let videoWindow = view.nativeNVSTVideoWindow() else { return nil }
         return UInt(bitPattern: Unmanaged.passUnretained(videoWindow).toOpaque())
     }
@@ -1640,14 +1585,14 @@ private struct NativeNVSTMediaStreamSurface: View {
         var options: ProcessInfo.ActivityOptions = [.userInitiated, .latencyCritical, .idleSystemSleepDisabled]
         if preventDisplaySleep { options.insert(.idleDisplaySleepDisabled) }
         streamingPerformanceActivity = ProcessInfo.processInfo.beginActivity(options: options, reason: "OpenNOW active native NVST stream")
-        WebRTCMediaTelemetry.capture("nvst.stream.performance_mode.begin", level: .info, message: "Native NVST performance mode enabled.", attributes: ["applicationID": configuration.applicationID, "preventDisplaySleep": String(preventDisplaySleep)])
+        NativeNVSTMediaTelemetry.capture("nvst.stream.performance_mode.begin", level: .info, message: "Native NVST performance mode enabled.", attributes: ["applicationID": configuration.applicationID, "preventDisplaySleep": String(preventDisplaySleep)])
     }
 
     private func endStreamingPerformanceMode() {
         guard let streamingPerformanceActivity else { return }
         ProcessInfo.processInfo.endActivity(streamingPerformanceActivity)
         self.streamingPerformanceActivity = nil
-        WebRTCMediaTelemetry.capture("nvst.stream.performance_mode.end", level: .info, message: "Native NVST performance mode disabled.", attributes: ["applicationID": configuration.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.stream.performance_mode.end", level: .info, message: "Native NVST performance mode disabled.", attributes: ["applicationID": configuration.applicationID])
     }
 
     private static func message(for error: Error) -> String {
@@ -1656,8 +1601,8 @@ private struct NativeNVSTMediaStreamSurface: View {
     }
 }
 
-private struct NativeNVSTStreamHostView: NSViewRepresentable {
-    let onResolve: @MainActor (NativeWebRTCStreamView) -> Void
+struct NativeNVSTStreamHostView: NSViewRepresentable {
+    let onResolve: @MainActor (NativeNVSTStreamView) -> Void
 
     func makeNSView(context: Context) -> NativeNVSTSurfaceContainerView {
         let view = NativeNVSTSurfaceContainerView(frame: .zero)
@@ -1683,8 +1628,8 @@ private struct NativeNVSTStreamHostView: NSViewRepresentable {
     }
 
     final class NativeNVSTSurfaceContainerView: NSView {
-        let streamView = NativeWebRTCStreamView(frame: .zero)
-        var onResolve: (@MainActor (NativeWebRTCStreamView) -> Void)?
+        let streamView = NativeNVSTStreamView(frame: .zero)
+        var onResolve: (@MainActor (NativeNVSTStreamView) -> Void)?
         private var didResolve = false
 
         override init(frame frameRect: NSRect) {
@@ -1719,13 +1664,3 @@ private struct NativeNVSTStreamHostView: NSViewRepresentable {
     }
 }
 
-private struct InlineStreamSessionAdPresenter: StreamSessionAdPresenter {
-    let handler: (@Sendable (StreamSessionAdPresentation) async throws -> Int)?
-
-    func playRequiredSessionAd(_ ad: StreamSessionAdPresentation) async throws -> Int {
-        guard let handler else {
-            throw OpenNOWStreamSessionError.sessionAllocationFailed("Required ad playback is not available.")
-        }
-        return try await handler(ad)
-    }
-}

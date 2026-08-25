@@ -29,9 +29,9 @@ let package = Package(
                 "LICENSE",
                 "README.md",
                 "OpenNOWApp.swift",
-                "OPN/Stream/WebRTCMediaStreamSurface.swift",
+                "OPN/Stream/webrtc/WebRTCMediaStreamSurface.swift",
                 "OpenNOW.xcodeproj",
-                "OPN/NativeGeronimo",
+                "OPN/Stream/nvst/NativeGeronimo",
                 "Resources",
                 "View",
                 "ViewModel",
@@ -55,7 +55,7 @@ let package = Package(
         ),
         .target(
             name: "OpenNOWNativeGeronimoShim",
-            path: "OPN/NativeGeronimo",
+            path: "OPN/Stream/nvst/NativeGeronimo",
             sources: ["NativeNVSTGeronimoShim.mm"],
             publicHeadersPath: "."
         )

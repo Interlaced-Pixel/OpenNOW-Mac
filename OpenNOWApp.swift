@@ -143,15 +143,15 @@ struct OpenNOWApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Stream") {
                 Button("Toggle Microphone") {
-                    _ = WebRTCMediaStreamLifecycle.sendCommand(.toggleMicrophone)
+                    OpenNOWAppDelegate.sendActiveStreamCommand(.toggleMicrophone)
                 }
                 .keyboardShortcut("m", modifiers: .command)
                 Button("Toggle Recording") {
-                    _ = WebRTCMediaStreamLifecycle.sendCommand(.toggleRecording)
+                    OpenNOWAppDelegate.sendActiveStreamCommand(.toggleRecording)
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 Button("Toggle Anti-AFK") {
-                    _ = WebRTCMediaStreamLifecycle.sendCommand(.toggleAntiAFK)
+                    OpenNOWAppDelegate.sendActiveStreamCommand(.toggleAntiAFK)
                 }
                 .keyboardShortcut("k", modifiers: .command)
             }
@@ -204,12 +204,12 @@ final class OpenNOWAppDelegate: NSObject, NSApplicationDelegate {
             OpenNOWLog.info(.app, "Completing user-approved application termination")
             return .terminateNow
         }
-        guard WebRTCMediaStreamLifecycle.hasActiveStream else {
+        guard hasActiveStream else {
             OpenNOWLog.info(.app, "Application termination allowed with no active stream")
             return .terminateNow
         }
         OpenNOWLog.warning(.app, "Application termination requested while a stream is active")
-        guard WebRTCMediaStreamLifecycle.requestApplicationQuitDecision(completion: { [weak self, sender] shouldTerminateApplication in
+        guard requestActiveStreamQuitDecision(completion: { [weak self, sender] shouldTerminateApplication in
             if shouldTerminateApplication {
                 self?.isCompletingUserApprovedTermination = true
                 OpenNOWLog.info(.app, "User approved application termination with active stream")
@@ -232,10 +232,10 @@ final class OpenNOWAppDelegate: NSObject, NSApplicationDelegate {
 
     private func installStreamShortcutMonitor() {
         guard streamShortcutMonitor == nil else { return }
-        streamShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard NSApplication.shared.isActive, WebRTCMediaStreamLifecycle.hasActiveStream else { return event }
+        streamShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, NSApplication.shared.isActive, self.hasActiveStream else { return event }
             guard let command = Self.streamCommand(for: event) else { return event }
-            guard WebRTCMediaStreamLifecycle.sendCommand(command) else { return event }
+            guard self.dispatchActiveStreamCommand(command) else { return event }
             return nil
         }
     }
@@ -246,13 +246,75 @@ final class OpenNOWAppDelegate: NSObject, NSApplicationDelegate {
         self.streamShortcutMonitor = nil
     }
 
-    private static func streamCommand(for event: NSEvent) -> WebRTCMediaStreamCommand? {
-        guard let command = WebRTCMediaStreamCommand.shortcutCommand(keyCode: UInt16(event.keyCode), modifierFlags: event.modifierFlags) else { return nil }
-        switch command {
-        case .toggleMicrophone, .toggleRecording, .toggleAntiAFK:
-            return command
-        default: return nil
+    private var hasActiveStream: Bool {
+        WebRTCMediaStreamLifecycle.hasActiveStream || NativeNVSTMediaStreamLifecycle.hasActiveStream
+    }
+
+    enum ActiveStreamShortcutCommand {
+        case toggleMicrophone
+        case toggleRecording
+        case toggleAntiAFK
+    }
+
+    static func sendActiveStreamCommand(_ command: ActiveStreamShortcutCommand) -> Bool {
+        guard let delegate = NSApp.delegate as? OpenNOWAppDelegate else { return false }
+        return delegate.dispatchActiveStreamCommand(command)
+    }
+
+    private func dispatchActiveStreamCommand(_ command: ActiveStreamShortcutCommand) -> Bool {
+        if WebRTCMediaStreamLifecycle.hasActiveStream {
+            return WebRTCMediaStreamLifecycle.sendCommand(webRTCCommand(for: command))
         }
+        if NativeNVSTMediaStreamLifecycle.hasActiveStream {
+            return NativeNVSTMediaStreamLifecycle.sendCommand(nvstCommand(for: command))
+        }
+        return false
+    }
+
+    private func requestActiveStreamQuitDecision(completion: @escaping WebRTCMediaStreamQuitDecisionHandler) -> Bool {
+        if WebRTCMediaStreamLifecycle.hasActiveStream {
+            return WebRTCMediaStreamLifecycle.requestApplicationQuitDecision(completion: completion)
+        }
+        if NativeNVSTMediaStreamLifecycle.hasActiveStream {
+            return NativeNVSTMediaStreamLifecycle.requestApplicationQuitDecision(completion: completion)
+        }
+        return false
+    }
+
+    private func webRTCCommand(for command: ActiveStreamShortcutCommand) -> WebRTCMediaStreamCommand {
+        switch command {
+        case .toggleMicrophone: return .toggleMicrophone
+        case .toggleRecording: return .toggleRecording
+        case .toggleAntiAFK: return .toggleAntiAFK
+        }
+    }
+
+    private func nvstCommand(for command: ActiveStreamShortcutCommand) -> NativeNVSTMediaStreamCommand {
+        switch command {
+        case .toggleMicrophone: return .toggleMicrophone
+        case .toggleRecording: return .toggleRecording
+        case .toggleAntiAFK: return .toggleAntiAFK
+        }
+    }
+
+    private static func streamCommand(for event: NSEvent) -> ActiveStreamShortcutCommand? {
+        if let command = WebRTCMediaStreamCommand.shortcutCommand(keyCode: UInt16(event.keyCode), modifierFlags: event.modifierFlags) {
+            switch command {
+            case .toggleMicrophone: return .toggleMicrophone
+            case .toggleRecording: return .toggleRecording
+            case .toggleAntiAFK: return .toggleAntiAFK
+            default: return nil
+            }
+        }
+        if let command = NativeNVSTMediaStreamCommand.shortcutCommand(keyCode: UInt16(event.keyCode), modifierFlags: event.modifierFlags) {
+            switch command {
+            case .toggleMicrophone: return .toggleMicrophone
+            case .toggleRecording: return .toggleRecording
+            case .toggleAntiAFK: return .toggleAntiAFK
+            default: return nil
+            }
+        }
+        return nil
     }
 
     static func requestApplicationUpdateCheck() {

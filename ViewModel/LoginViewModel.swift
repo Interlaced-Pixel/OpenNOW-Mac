@@ -216,7 +216,7 @@ final class LoginViewModel: ObservableObject {
     }
 
     private var isAccountLifecycleBlocked: Bool {
-        WebRTCMediaStreamLifecycle.hasActiveStream
+        WebRTCMediaStreamLifecycle.hasActiveStream || NativeNVSTMediaStreamLifecycle.hasActiveStream
     }
 
     private func beginOAuth(preservingCurrentAccount: Bool) async {

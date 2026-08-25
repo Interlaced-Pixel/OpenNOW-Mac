@@ -18,142 +18,11 @@ private final class NativeWebRTCVideoSurfaceView: NSView {
     }
 }
 
-private final class NativeNVSTRendererWindow: NSWindow {
-    var hdrPresentationRequested = false
-    var codecSupportsHDR = false
-    var keyboardFocusEnabled = false
 
-    override var canBecomeKey: Bool { keyboardFocusEnabled }
-    override var canBecomeMain: Bool { false }
-}
-
-public enum WebRTCMediaStreamCommand: Equatable, Sendable {
-    case toggleStatsHUD
-    case toggleUnifiedHUD
-    case toggleMicrophone
-    case toggleRecording
-    case toggleAntiAFK
-    case showQuitMenu
-
-    static let shortcutGuide = "⌘G HUD   ⌘N Stats   ⌘M Mic   ⌘R Rec   ⌘K AFK   ⌘Q Quit"
-
-    static func shortcutCommand(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> WebRTCMediaStreamCommand? {
-        let modifiers = modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad])
-        guard modifiers == .command else { return nil }
-        switch keyCode {
-        case 46: return .toggleMicrophone
-        case 15: return .toggleRecording
-        case 40: return .toggleAntiAFK
-        case 45: return .toggleStatsHUD
-        case 5: return .toggleUnifiedHUD
-        case 12: return .showQuitMenu
-        default: return nil
-        }
-    }
-}
-
-public enum NativeStreamMouseInputMode: Equatable, Sendable {
-    case absolute
-    case relative
-}
-
-struct NativeNVSTTextInputState {
-    private(set) var markedText = NSAttributedString()
-    private(set) var selection = NSRange(location: 0, length: 0)
-
-    var hasMarkedText: Bool { markedText.length > 0 }
-    var markedRange: NSRange { hasMarkedText ? NSRange(location: 0, length: markedText.length) : NSRange(location: NSNotFound, length: 0) }
-
-    mutating func setMarkedText(_ text: NSAttributedString, selectedRange: NSRange, replacementRange: NSRange) {
-        if replacementRange.location != NSNotFound,
-           NSMaxRange(replacementRange) <= markedText.length {
-            let mutableText = NSMutableAttributedString(attributedString: markedText)
-            mutableText.replaceCharacters(in: replacementRange, with: text)
-            markedText = mutableText
-        } else {
-            markedText = text
-        }
-        selection = Self.clamped(selectedRange, length: markedText.length)
-    }
-
-    mutating func commit(_ text: String) -> String? {
-        markedText = NSAttributedString()
-        selection = NSRange(location: 0, length: 0)
-        return text.isEmpty ? nil : text
-    }
-
-    mutating func unmark() -> String? {
-        commit(markedText.string)
-    }
-
-    mutating func cancel() {
-        markedText = NSAttributedString()
-        selection = NSRange(location: 0, length: 0)
-    }
-
-    func attributedSubstring(for range: NSRange) -> (NSAttributedString, NSRange)? {
-        guard hasMarkedText, range.location != NSNotFound else { return nil }
-        let intersection = NSIntersectionRange(range, markedRange)
-        guard intersection.length > 0 else { return nil }
-        return (markedText.attributedSubstring(from: intersection), intersection)
-    }
-
-    private static func clamped(_ range: NSRange, length: Int) -> NSRange {
-        guard range.location != NSNotFound else { return NSRange(location: length, length: 0) }
-        let location = min(range.location, length)
-        return NSRange(location: location, length: min(range.length, length - location))
-    }
-}
-
-final class NativeNVSTPushToTalkState {
-    private let keyCode: UInt16
-    private let modifierMask: UInt16
-    private var onChange: (Bool) -> Void
-    private(set) var isPressed = false
-
-    init(keyCode: Int, modifierMask: Int, onChange: @escaping (Bool) -> Void) {
-        self.keyCode = UInt16(clamping: keyCode)
-        self.modifierMask = UInt16(truncatingIfNeeded: modifierMask) & Self.supportedModifiers
-        self.onChange = onChange
-    }
-
-    func handle(_ event: KeyboardEvent) -> Bool {
-        guard event.keyCode == keyCode else { return false }
-        if event.isPressed {
-            guard event.modifiers.rawValue & Self.supportedModifiers == modifierMask else { return false }
-            guard !isPressed else { return true }
-            isPressed = true
-            onChange(true)
-            return true
-        }
-        guard isPressed else { return false }
-        isPressed = false
-        onChange(false)
-        return true
-    }
-
-    func release() {
-        guard isPressed else { return }
-        isPressed = false
-        onChange(false)
-    }
-
-    func update(keyCode: Int, modifierMask: Int, onChange: @escaping (Bool) -> Void) -> Bool {
-        let normalizedKeyCode = UInt16(clamping: keyCode)
-        let normalizedModifierMask = UInt16(truncatingIfNeeded: modifierMask) & Self.supportedModifiers
-        guard self.keyCode == normalizedKeyCode, self.modifierMask == normalizedModifierMask else { return false }
-        self.onChange = onChange
-        return true
-    }
-
-    private static let supportedModifiers = KeyboardModifiers.shift.rawValue |
-        KeyboardModifiers.control.rawValue | KeyboardModifiers.option.rawValue |
-        KeyboardModifiers.command.rawValue | KeyboardModifiers.capsLock.rawValue
-}
 
 public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     public var onInputEvent: ((UserInputEvent) -> Void)?
-    public var onAbsoluteMouseMove: ((NativeNVSTAbsoluteMouseEvent) -> Void)?
+    public var onAbsoluteMouseMove: ((WebRTCAbsoluteMouseEvent) -> Void)?
     public var onGamepadTopologyChanged: ((NativeWebRTCGamepadTopology) -> Void)?
     public var onPointerLockChanged: ((Bool) -> Void)?
     public var onCommand: ((WebRTCMediaStreamCommand) -> Void)?
@@ -168,7 +37,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     public private(set) var isEmittingNeutralizingAbsolutePosition = false
     public var isCursorCaptured: Bool { isPointerLocked }
     public var locksPointerWhenRelativeModeSelected = false
-    public var mouseInputMode: NativeStreamMouseInputMode = .relative {
+    public var mouseInputMode: WebRTCStreamMouseInputMode = .relative {
         willSet {
             guard newValue != mouseInputMode else { return }
             if mouseInputMode == .absolute, !pressedMouseButtons.isEmpty {
@@ -182,7 +51,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             if mouseInputMode == .absolute {
                 disablePointerLock()
             } else if directMouseInputEnabled {
-                synchronizeRelativePointerCapture()
+                restoreInputFocus()
             }
         }
     }
@@ -220,25 +89,13 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     private var cursorAssociationGeneration: UInt = 0
     private var preciseScrollRemainder = 0.0
     private var pressedKeyboardEvents: [UInt16: KeyboardEvent] = [:]
-    private var textInputState = NativeNVSTTextInputState()
+    private var textInputState = WebRTCStreamTextInputState()
     private var textInputKeyCodes: Set<UInt16> = []
-    private var pushToTalkState: NativeNVSTPushToTalkState?
+    private var pushToTalkState: WebRTCStreamPushToTalkState?
     private var pressedMouseButtons: Set<MouseButton> = []
     private var activeGamepadStates: [Int: GamepadState] = [:]
     private var streamContentSize = CGSize.zero
     private let videoSurface = NativeWebRTCVideoSurfaceView(frame: .zero)
-    private let nativeNVSTRendererWindow = NativeNVSTRendererWindow(
-        contentRect: .zero,
-        styleMask: .borderless,
-        backing: .buffered,
-        defer: false
-    )
-    private weak var nativeNVSTRendererParentWindow: NSWindow?
-    private weak var nativeNVSTMetalView: NSView?
-    private var nativeNVSTDisplayNotificationTokens: [NSObjectProtocol] = []
-    private var nativeNVSTRendererEnabled = false
-    private var nativeNVSTRendererPreparedForShutdown = false
-    private var nativeNVSTVideoVisible = false
     private let gamepadMonitor = NativeWebRTCGamepadMonitor()
 
     public override init(frame frameRect: NSRect) {
@@ -246,13 +103,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
         addSubview(videoSurface)
-        nativeNVSTRendererWindow.backgroundColor = .clear
-        nativeNVSTRendererWindow.contentView = NativeWebRTCVideoSurfaceView(frame: .zero)
-        nativeNVSTRendererWindow.hasShadow = false
-        nativeNVSTRendererWindow.ignoresMouseEvents = true
-        nativeNVSTRendererWindow.isOpaque = false
-        nativeNVSTRendererWindow.alphaValue = 0
-        nativeNVSTRendererWindow.collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle]
         gamepadMonitor.onInputEvent = { [weak self] event in
             guard let self, self.remoteInputEnabled else { return }
             guard case .gamepad(let state) = event else { return }
@@ -276,7 +126,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     public func configurePushToTalk(keyCode: Int?, modifierMask: Int = 0, onChange: @escaping (Bool) -> Void) {
         if let keyCode, pushToTalkState?.update(keyCode: keyCode, modifierMask: modifierMask, onChange: onChange) == true { return }
         pushToTalkState?.release()
-        pushToTalkState = keyCode.map { NativeNVSTPushToTalkState(keyCode: $0, modifierMask: modifierMask, onChange: onChange) }
+        pushToTalkState = keyCode.map { WebRTCStreamPushToTalkState(keyCode: $0, modifierMask: modifierMask, onChange: onChange) }
     }
 
     public override func hitTest(_ point: NSPoint) -> NSView? {
@@ -286,15 +136,9 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if nativeNVSTRendererEnabled {
-            updateNativeNVSTRendererWindowParent()
-            updateNativeNVSTPresentation()
-        }
-        installNativeNVSTDisplayNotifications()
         restoreInputFocus()
         window?.acceptsMouseMovedEvents = true
         if window == nil {
-            prepareNativeNVSTRendererForShutdown()
             removeKeyEquivalentMonitor()
             gamepadMonitor.stop()
             handleFocusLoss()
@@ -317,7 +161,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         gamepadMonitor.topology
     }
 
-    public func playHaptic(_ command: NativeNVSTHapticCommand) {
+    public func playHaptic(_ command: WebRTCHapticCommand) {
         gamepadMonitor.playHaptic(command)
     }
 
@@ -329,243 +173,22 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         videoSurface
     }
 
-    public func nativeNVSTVideoWindow() -> NSWindow? {
-        guard window != nil else { return nil }
-        layoutSubtreeIfNeeded()
-        guard videoSurface.bounds.width >= 1, videoSurface.bounds.height >= 1 else { return nil }
-        nativeNVSTRendererEnabled = true
-        nativeNVSTRendererPreparedForShutdown = false
-        updateNativeNVSTRendererWindowParent()
-        updateNativeNVSTRendererWindowFrame()
-        updateNativeNVSTPresentation()
-        synchronizeSDLKeyboardFocus()
-        return nativeNVSTRendererWindow
-    }
-
-    static func configureNativeNVSTPresentation(window: NSWindow, requestedHDR: Bool, codecSupportsHDR: Bool) {
-        guard let rendererWindow = window as? NativeNVSTRendererWindow else { return }
-        rendererWindow.hdrPresentationRequested = requestedHDR
-        rendererWindow.codecSupportsHDR = codecSupportsHDR
-        let screenSupportsEDR = rendererWindow.parent?.screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? rendererWindow.screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
-        let usesEDR = nativeNVSTPresentationUsesEDR(requestedHDR: requestedHDR, codecSupportsHDR: codecSupportsHDR, screenSupportsEDR: screenSupportsEDR > 1)
-        rendererWindow.colorSpace = usesEDR ? nil : .sRGB
-        rendererWindow.contentView?.layer?.wantsExtendedDynamicRangeContent = usesEDR
-    }
-
-    static func nativeNVSTPresentationUsesEDR(requestedHDR: Bool, codecSupportsHDR: Bool, screenSupportsEDR: Bool) -> Bool {
-        requestedHDR && codecSupportsHDR && screenSupportsEDR
-    }
-
-    public func setNativeNVSTVideoVisible(_ visible: Bool) {
-        nativeNVSTVideoVisible = visible
-        if visible { nativeNVSTRendererPreparedForShutdown = false }
-        if !nativeNVSTRendererPreparedForShutdown { _ = embedNativeNVSTMetalViewIfAvailable() }
-        nativeNVSTMetalView?.isHidden = !visible
-        nativeNVSTRendererWindow.alphaValue = 0
-    }
-
-    public var nativeNVSTRendererSurfaceReady: Bool {
-        guard nativeNVSTRendererEnabled, nativeNVSTVideoVisible, !nativeNVSTRendererPreparedForShutdown,
-              let metalView = nativeNVSTMetalView, metalView.superview === videoSurface,
-              let metalLayer = metalView.layer as? CAMetalLayer else { return false }
-        return metalLayer.drawableSize.width >= 1 && metalLayer.drawableSize.height >= 1
-    }
-
-    public func prepareNativeNVSTRendererForShutdown() {
-        removePointerLockNotifications()
-        if isPointerLocked {
-            disablePointerLock()
-        } else {
-            removePointerLockMonitor()
-        }
-        nativeNVSTVideoVisible = false
-        nativeNVSTRendererPreparedForShutdown = true
-        nativeNVSTRendererWindow.keyboardFocusEnabled = false
-        if nativeNVSTRendererWindow.isKeyWindow {
-            window?.makeKeyAndOrderFront(nil)
-        }
-        nativeNVSTRendererWindow.alphaValue = 0
-        if let nativeNVSTRendererParentWindow {
-            nativeNVSTRendererParentWindow.removeChildWindow(nativeNVSTRendererWindow)
-            self.nativeNVSTRendererParentWindow = nil
-        }
-        nativeNVSTRendererWindow.orderOut(nil)
-        removeNativeNVSTDisplayNotifications()
-        guard let metalView = nativeNVSTMetalView,
-              let rendererContentView = nativeNVSTRendererWindow.contentView else { return }
-        metalView.isHidden = true
-        metalView.removeFromSuperview()
-        metalView.frame = rendererContentView.bounds
-        metalView.autoresizingMask = [.width, .height]
-        rendererContentView.addSubview(metalView)
-        nativeNVSTMetalView = nil
-    }
-
     public var streamWindowHasInputFocus: Bool {
         guard NSApplication.shared.isActive, let window else { return false }
-        let keyWindow = NSApplication.shared.keyWindow
-        if keyWindow === window { return true }
-        return nativeNVSTRendererEnabled && keyWindow === nativeNVSTRendererWindow
+        return NSApplication.shared.keyWindow === window
     }
 
     public func restoreInputFocus() {
-        guard remoteInputEnabled, NSApplication.shared.isActive else { return }
-        synchronizeSDLKeyboardFocus()
+        guard remoteInputEnabled, NSApplication.shared.isActive, window?.isKeyWindow == true else { return }
         window?.makeFirstResponder(self)
         if locksPointerWhenRelativeModeSelected, mouseInputMode == .relative, directMouseInputEnabled {
-            synchronizeRelativePointerCapture()
-        }
-    }
-
-    public func applyServerCursorVisibility(_ visible: Bool) {
-        mouseInputMode = visible || !directMouseInputEnabled ? .absolute : .relative
-        if mouseInputMode == .relative {
-            synchronizeSDLKeyboardFocus()
-            synchronizeRelativePointerCapture()
-        } else {
-            synchronizeSDLKeyboardFocus()
-            setPointerLocked(false)
-        }
-    }
-
-    public func synchronizeRelativePointerCapture() {
-        guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative else { return }
-        synchronizeSDLKeyboardFocus()
-        window?.makeFirstResponder(self)
-        setPointerLocked(true)
-    }
-
-    private func synchronizeSDLKeyboardFocus() {
-        guard !nativeNVSTRendererPreparedForShutdown else {
-            nativeNVSTRendererWindow.keyboardFocusEnabled = false
-            return
-        }
-        let wantsProxyFocus = nativeNVSTRendererEnabled
-            && !nativeNVSTRendererPreparedForShutdown
-            && remoteInputEnabled
-            && directMouseInputEnabled
-            && mouseInputMode == .relative
-        nativeNVSTRendererWindow.keyboardFocusEnabled = wantsProxyFocus
-        guard window != nil else { return }
-        if wantsProxyFocus {
-            if !nativeNVSTRendererWindow.isKeyWindow {
-                nativeNVSTRendererWindow.makeKeyAndOrderFront(nil)
-            }
-        } else {
-            nativeNVSTRendererWindow.keyboardFocusEnabled = false
-            if nativeNVSTRendererWindow.isKeyWindow {
-                window?.makeKeyAndOrderFront(nil)
-            }
+            setPointerLocked(true)
         }
     }
 
     public override func layout() {
         super.layout()
         videoSurface.frame = videoContentFrame()
-        nativeNVSTMetalView?.frame = videoSurface.bounds
-        if nativeNVSTRendererEnabled {
-            updateNativeNVSTRendererWindowFrame()
-            updateNativeNVSTPresentation()
-            if !nativeNVSTRendererPreparedForShutdown { _ = embedNativeNVSTMetalViewIfAvailable() }
-        }
-    }
-
-    private func updateNativeNVSTRendererWindowParent() {
-        guard nativeNVSTRendererParentWindow !== window else { return }
-        if let nativeNVSTRendererParentWindow {
-            nativeNVSTRendererParentWindow.removeChildWindow(nativeNVSTRendererWindow)
-        }
-        nativeNVSTRendererParentWindow = window
-        guard let window else {
-            nativeNVSTRendererWindow.orderOut(nil)
-            return
-        }
-        window.addChildWindow(nativeNVSTRendererWindow, ordered: .above)
-        nativeNVSTRendererWindow.orderFront(nil)
-        updateNativeNVSTRendererWindowFrame()
-    }
-
-    private func updateNativeNVSTRendererWindowFrame() {
-        guard let window else { return }
-        let rendererFrameInWindow = videoSurface.convert(videoSurface.bounds, to: nil)
-        nativeNVSTRendererWindow.setFrame(window.convertToScreen(rendererFrameInWindow), display: true)
-    }
-
-    private func installNativeNVSTDisplayNotifications() {
-        removeNativeNVSTDisplayNotifications()
-        guard let window else { return }
-        let center = NotificationCenter.default
-        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshNativeNVSTDisplayState() }
-        }
-        for observedWindow in [window, nativeNVSTRendererWindow] {
-            nativeNVSTDisplayNotificationTokens.append(center.addObserver(forName: NSWindow.didChangeScreenNotification, object: observedWindow, queue: .main, using: refresh))
-            nativeNVSTDisplayNotificationTokens.append(center.addObserver(forName: NSWindow.didChangeBackingPropertiesNotification, object: observedWindow, queue: .main, using: refresh))
-            nativeNVSTDisplayNotificationTokens.append(center.addObserver(forName: NSWindow.didChangeScreenProfileNotification, object: observedWindow, queue: .main, using: refresh))
-        }
-        nativeNVSTDisplayNotificationTokens.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: NSApplication.shared, queue: .main, using: refresh))
-    }
-
-    private func removeNativeNVSTDisplayNotifications() {
-        let center = NotificationCenter.default
-        nativeNVSTDisplayNotificationTokens.forEach { center.removeObserver($0) }
-        nativeNVSTDisplayNotificationTokens.removeAll()
-    }
-
-    private func refreshNativeNVSTDisplayState() {
-        guard nativeNVSTRendererEnabled else { return }
-        updateNativeNVSTRendererWindowFrame()
-        if let nativeNVSTMetalView { updateNativeNVSTMetalDrawableSize(nativeNVSTMetalView) }
-        updateNativeNVSTPresentation()
-    }
-
-    private func updateNativeNVSTPresentation() {
-        let screenSupportsEDR = window?.screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
-        let usesEDR = Self.nativeNVSTPresentationUsesEDR(
-            requestedHDR: nativeNVSTRendererWindow.hdrPresentationRequested,
-            codecSupportsHDR: nativeNVSTRendererWindow.codecSupportsHDR,
-            screenSupportsEDR: screenSupportsEDR > 1
-        )
-        nativeNVSTRendererWindow.colorSpace = usesEDR ? nil : .sRGB
-        nativeNVSTRendererWindow.contentView?.layer?.wantsExtendedDynamicRangeContent = usesEDR
-        videoSurface.layer?.wantsExtendedDynamicRangeContent = usesEDR
-        nativeNVSTMetalView?.layer?.wantsExtendedDynamicRangeContent = usesEDR
-    }
-
-    @discardableResult
-    private func embedNativeNVSTMetalViewIfAvailable() -> Bool {
-        if let nativeNVSTMetalView {
-            nativeNVSTMetalView.frame = videoSurface.bounds
-            nativeNVSTMetalView.isHidden = !nativeNVSTVideoVisible
-            updateNativeNVSTMetalDrawableSize(nativeNVSTMetalView)
-            updateNativeNVSTPresentation()
-            return true
-        }
-        guard nativeNVSTVideoVisible,
-              let metalView = nativeNVSTRendererWindow.contentView?.subviews.first(where: { $0.layer is CAMetalLayer }) else { return false }
-        metalView.removeFromSuperview()
-        metalView.frame = videoSurface.bounds
-        metalView.autoresizingMask = [.width, .height]
-        metalView.isHidden = !nativeNVSTVideoVisible
-        videoSurface.addSubview(metalView)
-        nativeNVSTMetalView = metalView
-        updateNativeNVSTMetalDrawableSize(metalView)
-        updateNativeNVSTPresentation()
-        return true
-    }
-
-    private func updateNativeNVSTMetalDrawableSize(_ metalView: NSView) {
-        guard let metalLayer = metalView.layer as? CAMetalLayer else { return }
-        let scale = max(1, metalView.window?.backingScaleFactor ?? window?.backingScaleFactor ?? 1)
-        guard let drawableSize = Self.nativeNVSTDrawableSize(boundsSize: metalView.bounds.size, backingScaleFactor: scale) else { return }
-        metalLayer.contentsScale = scale
-        metalLayer.drawableSize = drawableSize
-    }
-
-    static func nativeNVSTDrawableSize(boundsSize: CGSize, backingScaleFactor: CGFloat) -> CGSize? {
-        guard boundsSize.width.isFinite, boundsSize.height.isFinite, backingScaleFactor.isFinite,
-              boundsSize.width >= 1, boundsSize.height >= 1, backingScaleFactor > 0 else { return nil }
-        return CGSize(width: floor(boundsSize.width * backingScaleFactor), height: floor(boundsSize.height * backingScaleFactor))
     }
 
     public func setPointerLocked(_ locked: Bool) {
@@ -714,9 +337,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     }
 
     private func emitMouseMove(_ event: NSEvent) {
-        if mouseInputMode == .relative, directMouseInputEnabled, !isPointerLocked {
-            synchronizeRelativePointerCapture()
-        }
         if !isPointerLocked, mouseInputMode == .absolute {
             emitAbsoluteMousePosition(event)
             return
@@ -844,24 +464,12 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
         let windowToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, !self.nativeNVSTRendererWindow.isKeyWindow else { return }
-                self.handleFocusLoss()
-            }
+            MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
         let becameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restoreInputFocus() }
         }
-        let rendererResignToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.window?.isKeyWindow != true else { return }
-                self.handleFocusLoss()
-            }
-        }
-        let rendererBecameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.synchronizeRelativePointerCapture() }
-        }
-        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken, rendererResignToken, rendererBecameKeyToken]
+        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken]
     }
 
     private func removePointerLockNotifications() {
@@ -883,7 +491,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     private func capturePointerForMouseDown() -> Bool {
         guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative, !isPointerLocked else { return false }
-        synchronizeSDLKeyboardFocus()
         setPointerLocked(true)
         return isPointerLocked
     }
@@ -913,12 +520,12 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         onAbsoluteMouseMove?(absoluteEvent)
     }
 
-    func absoluteMouseEvent(at point: CGPoint, timestamp: MediaTimestamp) -> NativeNVSTAbsoluteMouseEvent? {
+    func absoluteMouseEvent(at point: CGPoint, timestamp: MediaTimestamp) -> WebRTCAbsoluteMouseEvent? {
         let contentFrame = videoContentFrame()
         guard contentFrame.width > 0, contentFrame.height > 0, point.x.isFinite, point.y.isFinite else { return nil }
         let x = floor(point.x - contentFrame.minX)
         let y = floor(contentFrame.maxY - point.y)
-        return NativeNVSTAbsoluteMouseEvent(
+        return WebRTCAbsoluteMouseEvent(
             x: Int32(clamping: Int(min(max(0, x), contentFrame.width - 1))),
             y: Int32(clamping: Int(min(max(0, y), contentFrame.height - 1))),
             timestamp: timestamp

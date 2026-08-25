@@ -222,7 +222,7 @@ public struct WebRTCMediaStreamSurface: View {
     private let preventDisplaySleep: Bool
     private let onProgress: WebRTCMediaStreamProgressCallback?
     private let onEnd: WebRTCMediaStreamEndCallback
-    private let sidebarCapabilities = StreamSidebarCapabilities.webRTC
+    private let sidebarCapabilities = WebRTCStreamSidebarCapabilities.standard
 
     @State private var path: WebRTCStreamingPath?
     @State private var transport: NativeWebRTCTransport?
@@ -687,10 +687,10 @@ public struct WebRTCMediaStreamSurface: View {
     }
 
     private var launchOverlay: some View {
-        StreamLaunchLoadingScreen(
+        WebRTCStreamLaunchLoadingScreen(
             title: configuration.title,
-            stage: StreamLaunchLoadingStage.label(stepIndex: loadingStepIndex),
-            artworkURL: configuration.loadingArtworkURL
+            stage: WebRTCStreamLaunchLoadingStage.label(stepIndex: loadingStepIndex),
+            artworkURL: configuration.webRTCLoadingArtworkURL
         ) { EmptyView() }
     }
 
@@ -1650,7 +1650,6 @@ public struct WebRTCMediaStreamSurface: View {
         transientStreamMessage = ""
         sessionLimit = nil
         nativeView?.setPointerLocked(false)
-        nativeView?.prepareNativeNVSTRendererForShutdown()
         microphoneEnabled = false
         transport?.setMicrophoneEnabled(false)
         transport?.stopRecording()

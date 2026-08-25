@@ -51,7 +51,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
     }
 
-    static func microphoneTelemetryLevel(for status: NativeNVSTMicrophoneStatus) -> WebRTCMediaTelemetryLevel {
+    static func microphoneTelemetryLevel(for status: NativeNVSTMicrophoneStatus) -> NativeNVSTMediaTelemetryLevel {
         status == .permissionDenied ? .info : (status.isAvailable || status == .disabled ? .debug : .error)
     }
 
@@ -118,7 +118,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         do {
             let bridge = try NVSTNativeBridge(configuration: bridgeConfiguration)
             self.bridge = bridge
-            WebRTCMediaTelemetry.capture("nvst.bifrost.runtime.ready", level: .info, message: "Bundled Bifrost runtime loaded.", attributes: ["library": bridge.status.libraryURL.lastPathComponent, "symbols": String(bridge.status.resolvedSymbols.count)])
+            NativeNVSTMediaTelemetry.capture("nvst.bifrost.runtime.ready", level: .info, message: "Bundled Bifrost runtime loaded.", attributes: ["library": bridge.status.libraryURL.lastPathComponent, "symbols": String(bridge.status.resolvedSymbols.count)])
             return bridge.status
         } catch let error as NVSTNativeBridgeError {
             throw NativeNVSTError.runtimeUnavailable(error.errorDescription ?? "Bundled native NVST runtime is unavailable.")
@@ -174,7 +174,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 "videoConfigBytes": String(videoConfig.nonZeroByteCount),
                 "audioConfigBytes": String(audioConfig.nonZeroByteCount),
             ]) { _, new in new }
-            WebRTCMediaTelemetry.capture("nvst.bifrost.abi_probe.ready", level: .info, message: "Verified Bifrost endpoint, stream config initialization ABI, and native session payload fields.", attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.bifrost.abi_probe.ready", level: .info, message: "Verified Bifrost endpoint, stream config initialization ABI, and native session payload fields.", attributes: attributes)
         }
         let eventSink = NativeNVSTGeronimoEventSink(
             sessionId: allocation.session.id,
@@ -259,7 +259,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 lastDiagnosticMetadata["nvstReadinessResolution"] = readiness.resolution
                 lastDiagnosticMetadata["nvstReadinessFps"] = String(readiness.streamFramesPerSecond)
                 lastDiagnosticMetadata["nvstFirstFrameLatencyMs"] = String(firstFrameLatencyMilliseconds)
-                WebRTCMediaTelemetry.capture(
+                NativeNVSTMediaTelemetry.capture(
                     "nvst.media.first_frame",
                     level: .info,
                     message: "Native NVST performance telemetry confirmed media readiness.",
@@ -272,7 +272,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         lastDiagnosticMetadata["nvstReadinessStage"] = NativeNVSTReadinessStage.transportConnected.rawValue
         let error = NativeNVSTError.mediaNotReady("Native NVST connected but did not deliver a rendered video frame before the readiness deadline.")
         lastDiagnosticMetadata["nvstFailurePhase"] = error.failurePhase
-        WebRTCMediaTelemetry.capture(
+        NativeNVSTMediaTelemetry.capture(
             "nvst.media.first_frame.timeout",
             level: .error,
             message: error.errorDescription ?? "Native NVST media readiness timed out.",
@@ -342,7 +342,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
     }
 
-    public func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws {
+    public func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws {
         guard activeConnection != nil, !nativeLifecycleOperationInProgress, let sessionAddress = geronimoSessionAddress else { throw NativeNVSTError.notRunning }
         try await Self.applyRuntimeNetworkControlOnMainActor(sessionAddress: sessionAddress, fallback: "Native NVST gamepad topology update failed.") { session, errorBuffer, length in
             OpenNOWNativeNVSTGeronimoUpdateGamepadTopology(session, topology.connectedPlayerBitmap, topology.hapticPlayerBitmap, errorBuffer, length)
@@ -407,7 +407,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                     runtimeHandlers: runtimeHandlers
                 )) {
                     lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
-                    WebRTCMediaTelemetry.capture(
+                    NativeNVSTMediaTelemetry.capture(
                         "nvst.geronimo.shutdown.quiescence.pending",
                         level: .error,
                         message: "Native NVST shutdown could not prove callback quiescence before the stop deadline.",
@@ -454,7 +454,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             runtimeHandlers: runtimeHandlers
         )) {
             lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.geronimo.shutdown.quiescence.pending",
                 level: .error,
                 message: "Native NVST recovery could not prove callback quiescence before the stop deadline.",
@@ -490,7 +490,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         )
         if !destroyCompleted {
             lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.geronimo.shutdown.quiescence.pending",
                 level: .error,
                 message: "Native NVST pause could not prove callback quiescence before the stop deadline.",
@@ -555,7 +555,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         if let message { lastDiagnosticMetadata["nvstStopFailure"] = message }
         var attributes = lastDiagnosticMetadata
         attributes["outcome"] = outcome
-        WebRTCMediaTelemetry.capture(
+        NativeNVSTMediaTelemetry.capture(
             "nvst.geronimo.stop.completed",
             level: message == nil ? .info : .error,
             message: message ?? "Native NVST stop callback completed.",
@@ -597,7 +597,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             capabilities: presentationCapabilities
         ) else {
             let message = "Native NVST codec \(selectedCodec) is unavailable on this Mac."
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.codec.unsupported",
                 level: .error,
                 message: message,
@@ -612,7 +612,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         let presentationCapability = OPNStreamPreferences.presentationCapability(codec: selectedCodec, capabilities: presentationCapabilities)
         if let nativeWindow {
-            NativeWebRTCStreamView.configureNativeNVSTPresentation(
+            NativeNVSTStreamView.configureNativeNVSTPresentation(
                 window: nativeWindow,
                 requestedHDR: Self.bool(selectedFeatures["hdr"]),
                 codecSupportsHDR: presentationCapability.supportsHDR
@@ -633,7 +633,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         startAttributes["microphoneAvailable"] = String(microphoneAvailable)
         startAttributes["microphoneEnabled"] = String(microphoneEnabled)
         startAttributes["videoSurfaceType"] = "NSWindow"
-        WebRTCMediaTelemetry.capture("nvst.geronimo.start.prepare", level: .info, message: "Preparing Geronimo native NVST session attachment.", attributes: startAttributes)
+        NativeNVSTMediaTelemetry.capture("nvst.geronimo.start.prepare", level: .info, message: "Preparing Geronimo native NVST session attachment.", attributes: startAttributes)
         let gameLanguage = Self.string(settings["gameLanguage"], fallback: "en_US")
         let clientVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "OpenNOW"
         let errorBuffer = UnsafeMutablePointer<CChar>.allocate(capacity: 1024)
@@ -645,7 +645,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             let message = Self.errorMessage(errorBuffer, fallback: "Native Geronimo session could not be created.")
             var attributes = startAttributes
             attributes["error"] = message
-            WebRTCMediaTelemetry.capture("nvst.geronimo.create.failed", level: .error, message: message, attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.create.failed", level: .error, message: message, attributes: attributes)
             throw NativeNVSTError.runtimeUnavailable(message)
         }
         do {
@@ -665,7 +665,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             var attributes = startAttributes
             attributes["result"] = String(callbackResult)
             attributes["error"] = message
-            WebRTCMediaTelemetry.capture("nvst.geronimo.callback.failed", level: .error, message: message, attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.callback.failed", level: .error, message: message, attributes: attributes)
             _ = await Self.destroyGeronimoOnBackground(
                 sessionAddress: UInt(bitPattern: session),
                 eventSink: eventSink
@@ -691,7 +691,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         guard let nativeVideoSurfaceHandle, let nativeVideoSurface = UnsafeMutableRawPointer(bitPattern: nativeVideoSurfaceHandle) else {
             let message = "Native Geronimo requires an AppKit video surface."
-            WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: startAttributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: startAttributes)
             await runtimeHandlers.cancel()
             _ = await Self.destroyGeronimoOnBackground(
                 sessionAddress: UInt(bitPattern: session),
@@ -706,7 +706,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             var attributes = startAttributes
             attributes["result"] = String(surfaceResult)
             attributes["error"] = message
-            WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.video_surface.failed", level: .error, message: message, attributes: attributes)
             await runtimeHandlers.cancel()
             _ = await Self.destroyGeronimoOnBackground(
                 sessionAddress: UInt(bitPattern: session),
@@ -715,7 +715,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             )
             throw NativeNVSTError.privateABIUnavailable(message)
         }
-        WebRTCMediaTelemetry.capture("nvst.geronimo.video_surface.bound", level: .info, message: "Native Geronimo video surface bound for SDL window creation.", attributes: startAttributes)
+        NativeNVSTMediaTelemetry.capture("nvst.geronimo.video_surface.bound", level: .info, message: "Native Geronimo video surface bound for SDL window creation.", attributes: startAttributes)
         var pump: NativeNVSTGeronimoPumpDriver?
         do {
             let result = geronimoSessionJSON.withCString { rawSessionPointer in
@@ -744,19 +744,19 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 attributes["result"] = String(result)
                 attributes["error"] = message
                 attributes["userMessage"] = userMessage
-                WebRTCMediaTelemetry.capture("nvst.geronimo.start.failed", level: .error, message: message, attributes: attributes)
+                NativeNVSTMediaTelemetry.capture("nvst.geronimo.start.failed", level: .error, message: message, attributes: attributes)
                 throw NativeNVSTError.transportFailed(userMessage)
             }
             let sessionAddress = UInt(bitPattern: session)
             var attributes = startAttributes
             attributes["library"] = status.libraryURL.lastPathComponent
-            WebRTCMediaTelemetry.capture("nvst.geronimo.start.accepted", level: .info, message: "Geronimo accepted native NVST start request; waiting for native start delivery.", attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.start.accepted", level: .info, message: "Geronimo accepted native NVST start request; waiting for native start delivery.", attributes: attributes)
             let activePump = NativeNVSTGeronimoPumpDriver(sessionAddress: sessionAddress, eventSink: eventSink, telemetryAttributes: attributes)
             activePump.start()
             pump = activePump
             do {
                 try await eventSink.waitForStartDelivered(timeoutNanoseconds: 30_000_000_000)
-                WebRTCMediaTelemetry.capture("nvst.geronimo.start.delivered", level: .info, message: "Geronimo delivered native NVST start; waiting for StreamerConnected callback.", attributes: attributes)
+                NativeNVSTMediaTelemetry.capture("nvst.geronimo.start.delivered", level: .info, message: "Geronimo delivered native NVST start; waiting for StreamerConnected callback.", attributes: attributes)
                 try await eventSink.waitForStreamerConnected(timeoutNanoseconds: 20_000_000_000)
             } catch is CancellationError {
                 throw CancellationError()
@@ -765,10 +765,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 failureAttributes.merge(eventSink.readinessDiagnosticAttributes()) { _, new in new }
                 let localizedMessage = (error as? LocalizedError)?.errorDescription
                 failureAttributes["error"] = localizedMessage?.isEmpty == false ? localizedMessage : error.localizedDescription
-                WebRTCMediaTelemetry.capture("nvst.geronimo.readiness.failed", level: .error, message: "Geronimo did not reach native NVST readiness.", attributes: failureAttributes)
+                NativeNVSTMediaTelemetry.capture("nvst.geronimo.readiness.failed", level: .error, message: "Geronimo did not reach native NVST readiness.", attributes: failureAttributes)
                 throw error
             }
-            WebRTCMediaTelemetry.capture("nvst.geronimo.stream.connected", level: .info, message: "Geronimo reported StreamerConnected for native NVST.", attributes: attributes)
+            NativeNVSTMediaTelemetry.capture("nvst.geronimo.stream.connected", level: .info, message: "Geronimo reported StreamerConnected for native NVST.", attributes: attributes)
             let nativeMicrophone = Self.readMicrophoneStatus(session: session)
             let resolvedMicrophoneStatus = Self.microphoneStatus(access: microphoneAccess, nativeCode: nativeMicrophone.code)
             var microphoneAttributes = attributes
@@ -776,7 +776,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             if let detail = nativeMicrophone.detail, !detail.isEmpty {
                 microphoneAttributes["microphoneFailure"] = detail
             }
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 Self.microphoneTelemetryEventName(for: resolvedMicrophoneStatus),
                 level: Self.microphoneTelemetryLevel(for: resolvedMicrophoneStatus),
                 message: Self.microphoneTelemetryMessage(for: resolvedMicrophoneStatus),
@@ -819,7 +819,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }.value
         let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
         if elapsedNanoseconds >= 500_000_000 {
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.geronimo.shutdown.slow",
                 level: elapsedNanoseconds >= 3_000_000_000 ? .error : .warning,
                 message: "Native NVST shutdown exceeded its expected duration.",
@@ -840,7 +840,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 completionContext
             )
             if result != 0, result != 1 {
-                WebRTCMediaTelemetry.capture(
+                NativeNVSTMediaTelemetry.capture(
                     "nvst.geronimo.shutdown.async_failed",
                     level: .error,
                     message: "Native NVST asynchronous destruction failed to start.",
@@ -1857,7 +1857,7 @@ private final class NativeNVSTGeronimoPumpDriver {
         if elapsedNanoseconds >= 20_000_000 {
             var attributes = telemetryAttributes
             attributes["durationMilliseconds"] = String(Double(elapsedNanoseconds) / 1_000_000)
-            WebRTCMediaTelemetry.capture(
+            NativeNVSTMediaTelemetry.capture(
                 "nvst.geronimo.pump.slow",
                 level: elapsedNanoseconds >= 100_000_000 ? .error : .warning,
                 message: "Native NVST event pumping exceeded its main-thread budget.",
@@ -1875,7 +1875,7 @@ private final class NativeNVSTGeronimoPumpDriver {
         var attributes = telemetryAttributes
         attributes["result"] = String(result)
         attributes["error"] = message
-        WebRTCMediaTelemetry.capture("nvst.geronimo.pump.failed", level: .error, message: message, attributes: attributes)
+        NativeNVSTMediaTelemetry.capture("nvst.geronimo.pump.failed", level: .error, message: message, attributes: attributes)
         eventSink.fail(NativeNVSTError.transportFailed(message))
     }
 }
@@ -2008,7 +2008,7 @@ final class NativeNVSTGeronimoEventSink: @unchecked Sendable {
             attributes["sessionAlive"] = String(sessionAlive)
             if let reasonName, !reasonName.isEmpty { attributes["reasonName"] = reasonName }
         }
-        WebRTCMediaTelemetry.capture("nvst.geronimo.callback", level: .info, message: "Geronimo native callback observed.", attributes: attributes)
+        NativeNVSTMediaTelemetry.capture("nvst.geronimo.callback", level: .info, message: "Geronimo native callback observed.", attributes: attributes)
 
         if phase == 60 || phase == 61 || phase == 62 { invalidateCursorUpdates() }
 

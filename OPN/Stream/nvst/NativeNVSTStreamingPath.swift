@@ -407,7 +407,7 @@ public protocol NativeNVSTTransport: Sendable {
     func setMaximumBitrateKbps(_ bitrateKbps: UInt32) async throws
     func setDynamicStreamingMode(_ mode: NativeNVSTDynamicStreamingMode) async throws
     func setL4SEnabled(_ enabled: Bool) async throws
-    func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws
+    func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws
     func pause() async throws
     func disconnect() async
     func disconnectForApplicationTermination() async
@@ -432,7 +432,7 @@ public extension NativeNVSTTransport {
     func setMaximumBitrateKbps(_ bitrateKbps: UInt32) async throws { throw NativeNVSTError.notRunning }
     func setDynamicStreamingMode(_ mode: NativeNVSTDynamicStreamingMode) async throws { throw NativeNVSTError.notRunning }
     func setL4SEnabled(_ enabled: Bool) async throws { throw NativeNVSTError.notRunning }
-    func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws { throw NativeNVSTError.notRunning }
+    func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws { throw NativeNVSTError.notRunning }
     func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws {}
     func microphoneStatus() async -> NativeNVSTMicrophoneStatus { .disabled }
 
@@ -571,14 +571,14 @@ public actor NativeNVSTStreamingPath {
                                 progress: (@Sendable (StreamProgress) async -> Void)?) async throws -> StreamSessionDescriptor {
         readiness = NativeNVSTReadiness(stage: .transportConnected)
         startPhase = "runtime-loading"
-        WebRTCMediaTelemetry.capture("nvst.path.start", level: .info, message: "Starting native NVST streaming path.", attributes: ["configurationId": configuration.id.uuidString, "applicationID": configuration.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.path.start", level: .info, message: "Starting native NVST streaming path.", attributes: ["configurationId": configuration.id.uuidString, "applicationID": configuration.applicationID])
 
         try Task.checkCancellation()
         try await publishProgress(configuration: configuration, step: .checkNetworkRoute, message: "Checking native NVST runtime...", progress: progress)
         do {
             _ = try await transport.prepare()
         } catch {
-            WebRTCMediaTelemetry.capture("nvst.path.runtime.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
+            NativeNVSTMediaTelemetry.capture("nvst.path.runtime.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
             throw error
         }
 
@@ -590,7 +590,7 @@ public actor NativeNVSTStreamingPath {
             allocation = try await sessionProvider.startNativeNVSTSession(configuration: configuration)
         } catch {
             if error is CancellationError || Task.isCancelled { throw error }
-            WebRTCMediaTelemetry.capture("nvst.path.session_provider.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
+            NativeNVSTMediaTelemetry.capture("nvst.path.session_provider.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
             throw error
         }
 
@@ -622,7 +622,7 @@ public actor NativeNVSTStreamingPath {
             if let nativeError = error as? NativeNVSTError {
                 startPhase = nativeError.failurePhase
             }
-            WebRTCMediaTelemetry.capture("nvst.path.transport.error", level: .error, message: Self.message(for: error), attributes: ["sessionId": allocation.session.id])
+            NativeNVSTMediaTelemetry.capture("nvst.path.transport.error", level: .error, message: Self.message(for: error), attributes: ["sessionId": allocation.session.id])
             throw error
         }
 
@@ -635,7 +635,7 @@ public actor NativeNVSTStreamingPath {
         state = .running(allocation.session)
         monitorTransportTermination()
         try await publishProgress(configuration: configuration, step: .connected, message: "Connected over native NVST.", isReady: true, progress: progress)
-        WebRTCMediaTelemetry.capture("nvst.path.connected", level: .info, message: "Native NVST streaming path connected.", attributes: ["sessionId": allocation.session.id, "applicationID": allocation.session.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.path.connected", level: .info, message: "Native NVST streaming path connected.", attributes: ["sessionId": allocation.session.id, "applicationID": allocation.session.applicationID])
         return allocation.session
     }
 
@@ -701,7 +701,7 @@ public actor NativeNVSTStreamingPath {
         try await transport.setL4SEnabled(enabled)
     }
 
-    public func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws {
+    public func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws {
         guard activeSession != nil else { throw NativeNVSTError.notRunning }
         try await transport.updateGamepadTopology(topology)
     }
@@ -728,7 +728,7 @@ public actor NativeNVSTStreamingPath {
         launchConfiguration = nil
         startedAt = nil
         recoveryAttempted = false
-        WebRTCMediaTelemetry.capture("nvst.path.stop", level: .info, message: message, attributes: ["sessionId": activeSession.id, "reason": reason.rawValue])
+        NativeNVSTMediaTelemetry.capture("nvst.path.stop", level: .info, message: message, attributes: ["sessionId": activeSession.id, "reason": reason.rawValue])
         if forApplicationTermination {
             await transport.disconnectForApplicationTermination()
         } else {
@@ -768,7 +768,7 @@ public actor NativeNVSTStreamingPath {
         launchConfiguration = nil
         startedAt = nil
         recoveryAttempted = false
-        WebRTCMediaTelemetry.capture("nvst.path.pause", level: .info, message: message, attributes: ["sessionId": activeSession.id])
+        NativeNVSTMediaTelemetry.capture("nvst.path.pause", level: .info, message: message, attributes: ["sessionId": activeSession.id])
         do {
             try await transport.pause()
             try? await sessionProvider.finishSession(activeSession, reason: .paused)
@@ -888,10 +888,10 @@ public actor NativeNVSTStreamingPath {
             readiness = NativeNVSTReadiness(stage: .transportConnected)
             readiness = try await transport.waitForMediaReadiness(timeoutNanoseconds: 15_000_000_000)
             monitorTransportTermination()
-            WebRTCMediaTelemetry.capture("nvst.path.recovered", level: .info, message: "Native NVST session recovered.", attributes: ["sessionId": session.id, "attempt": "1"])
+            NativeNVSTMediaTelemetry.capture("nvst.path.recovered", level: .info, message: "Native NVST session recovered.", attributes: ["sessionId": session.id, "attempt": "1"])
             return true
         } catch {
-            WebRTCMediaTelemetry.capture("nvst.path.recovery.failed", level: .warning, message: Self.message(for: error), attributes: ["sessionId": session.id, "attempt": "1"])
+            NativeNVSTMediaTelemetry.capture("nvst.path.recovery.failed", level: .warning, message: Self.message(for: error), attributes: ["sessionId": session.id, "attempt": "1"])
             await transport.resetForRecovery()
         }
         return false
