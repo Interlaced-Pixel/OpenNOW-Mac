@@ -350,6 +350,14 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     }
 
     public func disconnect() async {
+        await disconnect(waitForNativeDestruction: true)
+    }
+
+    public func disconnectForApplicationTermination() async {
+        await disconnect(waitForNativeDestruction: false)
+    }
+
+    private func disconnect(waitForNativeDestruction: Bool) async {
         await beginNativeLifecycleOperation()
         defer {
             geronimoPump = nil
@@ -367,10 +375,6 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let eventSink = geronimoEventSink
         let runtimeHandlers = self.runtimeHandlers
         await runtimeHandlers?.cancel()
-        if sessionAddress != nil {
-            videoSurfaceNeedsRecovery = true
-            await prepareGeronimoVideoSurfaceForShutdown()
-        }
         if let sessionAddress, let eventSink {
             if !eventSink.hasDeliveredTerminal {
                 eventSink.beginStop()
@@ -391,18 +395,30 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             }
         }
         if let pump { await pump.stop() }
+        if sessionAddress != nil {
+            videoSurfaceNeedsRecovery = true
+            await prepareGeronimoVideoSurfaceForShutdown()
+        }
         if let sessionAddress {
-            if !(await Self.destroyGeronimoOnBackground(
-                sessionAddress: sessionAddress,
-                eventSink: eventSink,
-                runtimeHandlers: runtimeHandlers
-            )) {
-                lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
-                WebRTCMediaTelemetry.capture(
-                    "nvst.geronimo.shutdown.quiescence.pending",
-                    level: .error,
-                    message: "Native NVST shutdown could not prove callback quiescence before the stop deadline.",
-                    attributes: lastDiagnosticMetadata
+            if waitForNativeDestruction {
+                if !(await Self.destroyGeronimoOnBackground(
+                    sessionAddress: sessionAddress,
+                    eventSink: eventSink,
+                    runtimeHandlers: runtimeHandlers
+                )) {
+                    lastDiagnosticMetadata["nvstShutdownQuarantine"] = "true"
+                    WebRTCMediaTelemetry.capture(
+                        "nvst.geronimo.shutdown.quiescence.pending",
+                        level: .error,
+                        message: "Native NVST shutdown could not prove callback quiescence before the stop deadline.",
+                        attributes: lastDiagnosticMetadata
+                    )
+                }
+            } else {
+                Self.scheduleGeronimoDestructionOnBackground(
+                    sessionAddress: sessionAddress,
+                    eventSink: eventSink,
+                    runtimeHandlers: runtimeHandlers
                 )
             }
         }
@@ -427,11 +443,11 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let runtimeHandlers = self.runtimeHandlers
         eventSink?.cancel()
         await runtimeHandlers?.cancel()
+        if let pump { await pump.stop() }
         if sessionAddress != nil {
             videoSurfaceNeedsRecovery = true
             await prepareGeronimoVideoSurfaceForShutdown()
         }
-        if let pump { await pump.stop() }
         if let sessionAddress, !(await Self.destroyGeronimoOnBackground(
             sessionAddress: sessionAddress,
             eventSink: eventSink,
@@ -463,9 +479,9 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         guard geronimoSessionAddress == sessionAddress else { throw CancellationError() }
         let pump = geronimoPump
         let runtimeHandlers = self.runtimeHandlers
+        if let pump { await pump.stop() }
         videoSurfaceNeedsRecovery = true
         await prepareGeronimoVideoSurfaceForShutdown()
-        if let pump { await pump.stop() }
         await runtimeHandlers?.cancel()
         let destroyCompleted = await Self.destroyGeronimoOnBackground(
             sessionAddress: sessionAddress,
@@ -793,13 +809,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                                                    eventSink: NativeNVSTGeronimoEventSink? = nil,
                                                    runtimeHandlers: NativeNVSTRuntimeHandlers? = nil) async -> Bool {
         let startedAt = DispatchTime.now().uptimeNanoseconds
-        let completionContext: UnsafeMutableRawPointer?
-        if let eventSink {
-            let lease = NativeNVSTDeferredShutdownLease(eventSink: eventSink, runtimeHandlers: runtimeHandlers)
-            completionContext = Unmanaged.passRetained(lease).toOpaque()
-        } else {
-            completionContext = nil
-        }
+        let completionContext = Self.shutdownCompletionContext(eventSink: eventSink, runtimeHandlers: runtimeHandlers)
         let result = await Task.detached(priority: .userInitiated) {
             OpenNOWNativeNVSTGeronimoDestroyWithCompletion(
                 UnsafeMutableRawPointer(bitPattern: sessionAddress),
@@ -817,6 +827,34 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             )
         }
         return result == 0
+    }
+
+    private static func scheduleGeronimoDestructionOnBackground(sessionAddress: UInt,
+                                                                eventSink: NativeNVSTGeronimoEventSink?,
+                                                                runtimeHandlers: NativeNVSTRuntimeHandlers?) {
+        let completionContext = Self.shutdownCompletionContext(eventSink: eventSink, runtimeHandlers: runtimeHandlers)
+        Task.detached(priority: .userInitiated) {
+            let result = OpenNOWNativeNVSTGeronimoDestroyWithCompletion(
+                UnsafeMutableRawPointer(bitPattern: sessionAddress),
+                NativeNVSTDeferredShutdownLease.nativeDestroyCompletion,
+                completionContext
+            )
+            if result != 0, result != 1 {
+                WebRTCMediaTelemetry.capture(
+                    "nvst.geronimo.shutdown.async_failed",
+                    level: .error,
+                    message: "Native NVST asynchronous destruction failed to start.",
+                    attributes: ["result": String(result)]
+                )
+            }
+        }
+    }
+
+    private static func shutdownCompletionContext(eventSink: NativeNVSTGeronimoEventSink?,
+                                                  runtimeHandlers: NativeNVSTRuntimeHandlers?) -> UnsafeMutableRawPointer? {
+        guard let eventSink else { return nil }
+        let lease = NativeNVSTDeferredShutdownLease(eventSink: eventSink, runtimeHandlers: runtimeHandlers)
+        return Unmanaged.passRetained(lease).toOpaque()
     }
 
     @MainActor private static func resolveMicrophoneCaptureAccess(requested: Bool) async -> NativeNVSTMicrophoneAccess {

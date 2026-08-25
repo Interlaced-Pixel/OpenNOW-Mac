@@ -1347,9 +1347,9 @@ void reconcileHostPointerCaptureAfterCursorUpdate(OpenNOWNativeNVSTGeronimoSessi
         api.setWindowGrab(sdlWindow, 0);
         api.setWindowMouseRect(sdlWindow, nullptr);
     }
+    if (cursorState == 2) { return; }
     if (api.setRelativeMouseMode != nullptr) { api.setRelativeMouseMode(0); }
     if (api.captureMouse != nullptr) { api.captureMouse(0); }
-    if (cursorState == 2 && api.showCursor != nullptr) { api.showCursor(0); }
 }
 
 void openNOWGridAppCursorInfoUpdate(void *gridApp, const void *cursorInfo) {
@@ -3338,6 +3338,7 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoPump(void *sessionPointer,
                 setError(errorBuffer, errorBufferLength, session->lastError.c_str());
                 return startResult;
             }
+            bool stopping = false;
             {
                 std::lock_guard<std::mutex> stateLock(session->stateMutex);
                 if (session->state == NativeSessionState::stopped) { return 1; }
@@ -3345,7 +3346,7 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoPump(void *sessionPointer,
                     setError(errorBuffer, errorBufferLength, session->lastError.c_str());
                     return -4;
                 }
-                if (session->state == NativeSessionState::stopping) { return 0; }
+                stopping = session->state == NativeSessionState::stopping;
             }
             void *eventProcessor = nullptr;
             {
@@ -3353,7 +3354,8 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoPump(void *sessionPointer,
                 eventProcessor = session->eventProcessor;
             }
             if (eventProcessor != nullptr) {
-                if (!session->functions.eventProcessorProcessEvents(eventProcessor, waitTimeoutMilliseconds)) {
+                const int32_t eventWaitTimeoutMilliseconds = stopping ? 0 : waitTimeoutMilliseconds;
+                if (!session->functions.eventProcessorProcessEvents(eventProcessor, eventWaitTimeoutMilliseconds)) {
                     setSessionFailure(session, "SDL requested native Geronimo event-loop shutdown.");
                     emitEvent(session, 70, 0, 0, 0, -6);
                     setError(errorBuffer, errorBufferLength, "SDL requested native Geronimo event-loop shutdown.");
@@ -3723,22 +3725,24 @@ extern "C" int32_t OpenNOWNativeNVSTGeronimoStopWithResult(void *sessionPointer,
                                                               size_t errorBufferLength) {
     auto *session = static_cast<OpenNOWNativeNVSTGeronimoSession *>(sessionPointer);
     if (session == nullptr) { return 0; }
-    std::lock_guard<std::recursive_mutex> operationLock(session->operationMutex);
-    if (session->microphoneRoute != nullptr) {
-        std::lock_guard<std::mutex> routeLock(session->microphoneRoute->stateMutex);
-        resetVoiceActivity(session->microphoneRoute->vad);
-    }
     bool completesImmediately = false;
     {
-        std::lock_guard<std::mutex> stateLock(session->stateMutex);
-        if (session->state == NativeSessionState::stopping || session->state == NativeSessionState::stopped) { return 0; }
-        completesImmediately = session->state == NativeSessionState::created ||
-                               session->state == NativeSessionState::configured ||
-                               session->state == NativeSessionState::failed;
-        session->stopIssued = true;
-        session->stopAcknowledged = completesImmediately;
-        session->state = completesImmediately ? NativeSessionState::stopped : NativeSessionState::stopping;
-        session->pendingStart.reset();
+        std::lock_guard<std::recursive_mutex> operationLock(session->operationMutex);
+        if (session->microphoneRoute != nullptr) {
+            std::lock_guard<std::mutex> routeLock(session->microphoneRoute->stateMutex);
+            resetVoiceActivity(session->microphoneRoute->vad);
+        }
+        {
+            std::lock_guard<std::mutex> stateLock(session->stateMutex);
+            if (session->state == NativeSessionState::stopping || session->state == NativeSessionState::stopped) { return 0; }
+            completesImmediately = session->state == NativeSessionState::created ||
+                                   session->state == NativeSessionState::configured ||
+                                   session->state == NativeSessionState::failed;
+            session->stopIssued = true;
+            session->stopAcknowledged = completesImmediately;
+            session->state = completesImmediately ? NativeSessionState::stopped : NativeSessionState::stopping;
+            session->pendingStart.reset();
+        }
     }
     if (completesImmediately) { session->stopCompleted.notify_all(); }
     if (completesImmediately) {
@@ -3822,6 +3826,7 @@ int32_t destroyGeronimoSession(OpenNOWNativeNVSTGeronimoSession *session,
         }
     }
     if (shouldForceStop) {
+        operationLock.unlock();
         try {
             if (!session->functions.stop(session->gridApp, "OpenNOW native NVST forced destroy", 0)) {
                 std::lock_guard<std::mutex> stateLock(session->stateMutex);
@@ -3838,6 +3843,7 @@ int32_t destroyGeronimoSession(OpenNOWNativeNVSTGeronimoSession *session,
             session->stopCompleted.notify_all();
             fprintf(stderr, "OpenNOW forced native stop raised an unexpected C++ exception.\n");
         }
+        operationLock.lock();
     }
     if (!waitForNativeStopAcknowledgement(session, std::chrono::seconds(3))) {
         if (scheduleDeferredNativeDestruction(session)) {

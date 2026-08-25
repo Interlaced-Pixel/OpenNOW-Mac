@@ -410,6 +410,7 @@ public protocol NativeNVSTTransport: Sendable {
     func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws
     func pause() async throws
     func disconnect() async
+    func disconnectForApplicationTermination() async
     func resetForRecovery() async
     func terminalEvents() async -> AsyncStream<NativeNVSTTransportTermination>
     func diagnosticMetadata() async -> [String: String]
@@ -437,6 +438,10 @@ public extension NativeNVSTTransport {
 
     func pause() async throws {
         throw NativeNVSTError.notRunning
+    }
+
+    func disconnectForApplicationTermination() async {
+        await disconnect()
     }
 
     func terminalEvents() async -> AsyncStream<NativeNVSTTransportTermination> {
@@ -702,6 +707,17 @@ public actor NativeNVSTStreamingPath {
     }
 
     public func stop(reason: StreamEndReason = .userRequested, message: String = "Native NVST stream ended.") async throws -> StreamReport {
+        try await stop(reason: reason, message: message, forApplicationTermination: false)
+    }
+
+    public func stopForApplicationTermination(reason: StreamEndReason = .userRequested,
+                                              message: String = "Native NVST stream ended.") async throws -> StreamReport {
+        try await stop(reason: reason, message: message, forApplicationTermination: true)
+    }
+
+    private func stop(reason: StreamEndReason,
+                      message: String,
+                      forApplicationTermination: Bool) async throws -> StreamReport {
         if reason == .paused { return try await pause(message: message) }
         guard let activeSession else { throw NativeNVSTError.notRunning }
         terminalTask?.cancel()
@@ -713,7 +729,11 @@ public actor NativeNVSTStreamingPath {
         startedAt = nil
         recoveryAttempted = false
         WebRTCMediaTelemetry.capture("nvst.path.stop", level: .info, message: message, attributes: ["sessionId": activeSession.id, "reason": reason.rawValue])
-        await transport.disconnect()
+        if forApplicationTermination {
+            await transport.disconnectForApplicationTermination()
+        } else {
+            await transport.disconnect()
+        }
         let diagnostics = await transport.diagnosticMetadata()
         let finishError: Error?
         do {

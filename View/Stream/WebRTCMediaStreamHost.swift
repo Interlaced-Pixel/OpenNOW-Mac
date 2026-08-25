@@ -706,7 +706,9 @@ private struct NativeNVSTMediaStreamSurface: View {
         }
     }
 
-    private func finish(reason: StreamEndReason, message: String) async -> Bool {
+    private func finish(reason: StreamEndReason,
+                        message: String,
+                        forApplicationTermination: Bool = false) async -> Bool {
         guard !isEnding else { return false }
         let inputDispatcher = await MainActor.run {
             nativeView?.remoteInputEnabled = false
@@ -736,7 +738,12 @@ private struct NativeNVSTMediaStreamSurface: View {
                     attributes: ["applicationID": configuration.applicationID, "reason": reason.rawValue]
                 )
             }
-            let report = try await path.stop(reason: reason, message: message)
+            let report: StreamReport
+            if forApplicationTermination {
+                report = try await path.stopForApplicationTermination(reason: reason, message: message)
+            } else {
+                report = try await path.stop(reason: reason, message: message)
+            }
             await MainActor.run { finishOnce(report: report) }
             return true
         } catch {
@@ -802,7 +809,6 @@ private struct NativeNVSTMediaStreamSurface: View {
         pendingApplicationQuitCompletion = nil
         nativeView?.setPointerLocked(false)
         nativeView?.setNativeNVSTVideoVisible(false)
-        nativeView?.prepareNativeNVSTRendererForShutdown()
         exitStreamFullScreenIfNeeded()
         endEventTask?.cancel()
         endEventTask = nil
@@ -855,7 +861,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         view.onInputEvent = { [weak view] event in
             guard path != nil, let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd else { return }
             if view.remoteInputEnabled && !NativeNVSTInputDispatcher.isNeutralizing(event) {
-                guard NSApplication.shared.isActive, view.window?.isKeyWindow == true else {
+                guard NSApplication.shared.isActive, view.streamWindowHasInputFocus else {
                     WebRTCMediaTelemetry.capture(
                         "nvst.input.focus_lost",
                         level: .debug,
@@ -883,7 +889,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             guard isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd,
                   view.remoteInputEnabled, view.mouseInputMode == .absolute else { return }
             guard view.isEmittingNeutralizingAbsolutePosition ||
-                    (NSApplication.shared.isActive && view.window?.isKeyWindow == true) else { return }
+                    (NSApplication.shared.isActive && view.streamWindowHasInputFocus) else { return }
             lastAcceptedStreamInputAt = Date()
             inputDispatcher?.enqueueAbsoluteMove(event)
         }
@@ -1161,7 +1167,11 @@ private struct NativeNVSTMediaStreamSurface: View {
         let shouldTerminateApplication = completion != nil
         pendingApplicationQuitCompletion = nil
         Task {
-            let didFinish = await finish(reason: .userRequested, message: "Native NVST stream ended by user.")
+            let didFinish = await finish(
+                reason: .userRequested,
+                message: "Native NVST stream ended by user.",
+                forApplicationTermination: shouldTerminateApplication
+            )
             completion?(didFinish && shouldTerminateApplication)
         }
     }

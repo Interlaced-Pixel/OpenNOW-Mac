@@ -21,8 +21,9 @@ private final class NativeWebRTCVideoSurfaceView: NSView {
 private final class NativeNVSTRendererWindow: NSWindow {
     var hdrPresentationRequested = false
     var codecSupportsHDR = false
+    var keyboardFocusEnabled = false
 
-    override var canBecomeKey: Bool { false }
+    override var canBecomeKey: Bool { keyboardFocusEnabled }
     override var canBecomeMain: Bool { false }
 }
 
@@ -337,6 +338,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         updateNativeNVSTRendererWindowParent()
         updateNativeNVSTRendererWindowFrame()
         updateNativeNVSTPresentation()
+        synchronizeSDLKeyboardFocus()
         return nativeNVSTRendererWindow
     }
 
@@ -370,8 +372,18 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     }
 
     public func prepareNativeNVSTRendererForShutdown() {
+        removePointerLockNotifications()
+        if isPointerLocked {
+            disablePointerLock()
+        } else {
+            removePointerLockMonitor()
+        }
         nativeNVSTVideoVisible = false
         nativeNVSTRendererPreparedForShutdown = true
+        nativeNVSTRendererWindow.keyboardFocusEnabled = false
+        if nativeNVSTRendererWindow.isKeyWindow {
+            window?.makeKeyAndOrderFront(nil)
+        }
         nativeNVSTRendererWindow.alphaValue = 0
         if let nativeNVSTRendererParentWindow {
             nativeNVSTRendererParentWindow.removeChildWindow(nativeNVSTRendererWindow)
@@ -389,8 +401,16 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         nativeNVSTMetalView = nil
     }
 
+    public var streamWindowHasInputFocus: Bool {
+        guard NSApplication.shared.isActive, let window else { return false }
+        let keyWindow = NSApplication.shared.keyWindow
+        if keyWindow === window { return true }
+        return nativeNVSTRendererEnabled && keyWindow === nativeNVSTRendererWindow
+    }
+
     public func restoreInputFocus() {
         guard remoteInputEnabled, NSApplication.shared.isActive else { return }
+        synchronizeSDLKeyboardFocus()
         window?.makeFirstResponder(self)
         if locksPointerWhenRelativeModeSelected, mouseInputMode == .relative, directMouseInputEnabled {
             synchronizeRelativePointerCapture()
@@ -400,16 +420,43 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     public func applyServerCursorVisibility(_ visible: Bool) {
         mouseInputMode = visible || !directMouseInputEnabled ? .absolute : .relative
         if mouseInputMode == .relative {
+            synchronizeSDLKeyboardFocus()
             synchronizeRelativePointerCapture()
         } else {
+            synchronizeSDLKeyboardFocus()
             setPointerLocked(false)
         }
     }
 
     public func synchronizeRelativePointerCapture() {
         guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative else { return }
+        synchronizeSDLKeyboardFocus()
         window?.makeFirstResponder(self)
         setPointerLocked(true)
+    }
+
+    private func synchronizeSDLKeyboardFocus() {
+        guard !nativeNVSTRendererPreparedForShutdown else {
+            nativeNVSTRendererWindow.keyboardFocusEnabled = false
+            return
+        }
+        let wantsProxyFocus = nativeNVSTRendererEnabled
+            && !nativeNVSTRendererPreparedForShutdown
+            && remoteInputEnabled
+            && directMouseInputEnabled
+            && mouseInputMode == .relative
+        nativeNVSTRendererWindow.keyboardFocusEnabled = wantsProxyFocus
+        guard window != nil else { return }
+        if wantsProxyFocus {
+            if !nativeNVSTRendererWindow.isKeyWindow {
+                nativeNVSTRendererWindow.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            nativeNVSTRendererWindow.keyboardFocusEnabled = false
+            if nativeNVSTRendererWindow.isKeyWindow {
+                window?.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     public override func layout() {
@@ -767,7 +814,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard pointerLockMonitor == nil else { return }
         pointerLockMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]) { [weak self] event in
             guard let self, self.isCursorCaptured else { return event }
-            guard NSApplication.shared.isActive, self.window?.isKeyWindow == true else {
+            guard NSApplication.shared.isActive, self.streamWindowHasInputFocus else {
                 self.handleFocusLoss()
                 return event
             }
@@ -797,12 +844,24 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
         let windowToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleFocusLoss() }
+            MainActor.assumeIsolated {
+                guard let self, !self.nativeNVSTRendererWindow.isKeyWindow else { return }
+                self.handleFocusLoss()
+            }
         }
         let becameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restoreInputFocus() }
         }
-        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken]
+        let rendererResignToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.isKeyWindow != true else { return }
+                self.handleFocusLoss()
+            }
+        }
+        let rendererBecameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.synchronizeRelativePointerCapture() }
+        }
+        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken, rendererResignToken, rendererBecameKeyToken]
     }
 
     private func removePointerLockNotifications() {
@@ -824,6 +883,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     private func capturePointerForMouseDown() -> Bool {
         guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative, !isPointerLocked else { return false }
+        synchronizeSDLKeyboardFocus()
         setPointerLocked(true)
         return isPointerLocked
     }
@@ -985,7 +1045,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard keyEquivalentMonitor == nil else { return }
         keyEquivalentMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             guard let self else { return event }
-            guard self.window?.isKeyWindow == true,
+            guard self.streamWindowHasInputFocus,
                   Self.isStreamWindowKeyEvent(event.window, streamWindow: self.window) else {
                 self.releaseRemotelyPressedKeyIfNeeded(event)
                 return event
@@ -1016,7 +1076,8 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     static func isStreamWindowKeyEvent(_ eventWindow: NSWindow?, streamWindow: NSWindow?) -> Bool {
         guard let eventWindow, let streamWindow else { return false }
-        return eventWindow === streamWindow
+        if eventWindow === streamWindow { return true }
+        return streamWindow.childWindows?.contains(where: { $0 === eventWindow }) == true
     }
 
     private func removeKeyEquivalentMonitor() {
