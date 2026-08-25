@@ -371,6 +371,7 @@ private struct NativeNVSTMediaStreamSurface: View {
     @State private var networkPathAvailable = true
     @State private var nativeFailure: FailurePresentation?
     @State private var nativeAudioDeviceMonitor: NativeNVSTAudioDeviceMonitor?
+    @State private var streamingFullScreenWindow: NSWindow?
     private let nativeInputFailureReporter = NativeNVSTInputFailureReporter()
 
     var body: some View {
@@ -406,6 +407,7 @@ private struct NativeNVSTMediaStreamSurface: View {
             loadingStepIndex = StreamLaunchStep.checkNetworkRoute.rawValue
             return
         }
+        enterStreamFullScreenIfNeeded(for: nativeView)
         nativeView.remoteInputEnabled = false
         nativeView.setNativeNVSTVideoVisible(false)
         let profile = OPNStreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: OPNStreamPreferences.loadDeviceCapabilities())
@@ -799,6 +801,7 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.setPointerLocked(false)
         nativeView?.setNativeNVSTVideoVisible(false)
         nativeView?.prepareNativeNVSTRendererForShutdown()
+        exitStreamFullScreenIfNeeded()
         endEventTask?.cancel()
         endEventTask = nil
         nativeView?.onInputEvent = nil
@@ -808,6 +811,19 @@ private struct NativeNVSTMediaStreamSurface: View {
         nativeView?.shouldHandleCommand = nil
         WebRTCMediaStreamLifecycle.deactivate(configuration.id)
         onEnd(report.success, report.message, report)
+    }
+
+    private func enterStreamFullScreenIfNeeded(for view: NativeWebRTCStreamView) {
+        guard streamingFullScreenWindow == nil, let window = view.window, !window.styleMask.contains(.fullScreen) else { return }
+        streamingFullScreenWindow = window
+        window.toggleFullScreen(nil)
+    }
+
+    private func exitStreamFullScreenIfNeeded() {
+        guard let window = streamingFullScreenWindow else { return }
+        streamingFullScreenWindow = nil
+        guard window.styleMask.contains(.fullScreen) else { return }
+        window.toggleFullScreen(nil)
     }
 
     private func configureNativeView(_ view: NativeWebRTCStreamView) {
