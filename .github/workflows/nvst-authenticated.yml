@@ -12,13 +12,18 @@ concurrency:
 
 jobs:
   authenticated-nvst:
-    name: Authenticated NVST Start and Stop
+    name: Authenticated NVST ${{ matrix.codec }}
     runs-on: macos-26
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        codec: [H264, H265]
     env:
       OPN_NVST_E2E_ENABLED: "1"
       OPN_NVST_TEST_TOKEN: ${{ secrets.OPN_NVST_TEST_TOKEN }}
       OPN_NVST_TEST_APP_ID: ${{ secrets.OPN_NVST_TEST_APP_ID }}
+      OPN_NVST_TEST_CODEC: ${{ matrix.codec }}
 
     steps:
       - name: Checkout repository
@@ -53,7 +58,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenNOW-NVST-authenticated-xcresult
+          name: OpenNOW-NVST-authenticated-${{ matrix.codec }}-xcresult
           path: build/nvst-authenticated/OpenNOW-NVST.xcresult
           if-no-files-found: error
           retention-days: 7

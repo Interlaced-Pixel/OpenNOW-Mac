@@ -56,8 +56,30 @@ public struct NVSTNativeRuntimeStatus: Equatable, Sendable {
     }
 }
 
+private final class NVSTNativeRuntimeAvailabilityCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Result<NVSTNativeRuntimeStatus, NVSTNativeRuntimeLoadError>] = [:]
+
+    func value(for key: String,
+               refresh: Bool,
+               load: () -> Result<NVSTNativeRuntimeStatus, NVSTNativeRuntimeLoadError>) -> Result<NVSTNativeRuntimeStatus, NVSTNativeRuntimeLoadError> {
+        lock.lock()
+        if !refresh, let cached = values[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        let result = load()
+        lock.lock()
+        values[key] = result
+        lock.unlock()
+        return result
+    }
+}
+
 public final class NVSTNativeRuntime: @unchecked Sendable {
     public static let bundledLibraryName = "libBifrost2.dylib"
+    public static let supportedArchitecture = "arm64"
     public static let bundledAuxiliaryArtifactPaths = [
         "libGeronimo.dylib",
         "libGsAudioWebRTC.dylib",
@@ -71,17 +93,11 @@ public final class NVSTNativeRuntime: @unchecked Sendable {
             "libGsAudioWebRTC.dylib": "36BB135F-70E7-336C-A8B3-B070055E6595",
             "SDL2.framework/Versions/A/SDL2": "4902919F-6CCE-3FE0-BCC3-0EFB63BDBB8E",
         ]
-#elseif arch(x86_64)
-        return [
-            "libBifrost2.dylib": "F8A3AD93-1D5D-3072-99ED-B17493CF1819",
-            "libGeronimo.dylib": "37D47DFE-6018-32C2-85E9-989E6AA509E2",
-            "libGsAudioWebRTC.dylib": "148B2860-6540-31AF-BF87-5E28FD9282A7",
-            "SDL2.framework/Versions/A/SDL2": "8347A2BA-9EEF-3D72-B031-CEF271260D71",
-        ]
 #else
         return [:]
 #endif
     }()
+    private static let availabilityCache = NVSTNativeRuntimeAvailabilityCache()
 
     private let handle: UnsafeMutableRawPointer
     private let symbols: [NVSTNativeSymbol: UnsafeMutableRawPointer]
@@ -92,6 +108,9 @@ public final class NVSTNativeRuntime: @unchecked Sendable {
     }
 
     public init(frameworksDirectory: URL?, libraryName: String = NVSTNativeRuntime.bundledLibraryName) throws {
+#if !arch(arm64)
+        throw NVSTNativeRuntimeLoadError.loadFailed(path: frameworksDirectory?.path ?? "", reason: "Native NVST is supported only on arm64 Macs.")
+#else
         let directory = try Self.validatedFrameworksDirectory(frameworksDirectory)
         let libraryURL = directory.appendingPathComponent(libraryName, isDirectory: false)
         guard FileManager.default.isReadableFile(atPath: libraryURL.path) else {
@@ -120,20 +139,25 @@ public final class NVSTNativeRuntime: @unchecked Sendable {
         self.handle = handle
         self.symbols = resolvedSymbols
         status = NVSTNativeRuntimeStatus(libraryURL: libraryURL, bundledArtifactURLs: artifactURLs, resolvedSymbols: NVSTNativeSymbol.allCases.map(\.rawValue), artifactUUIDs: artifactUUIDs)
+#endif
     }
 
     deinit {
         dlclose(handle)
     }
 
-    public static func availability(frameworksDirectory: URL? = Bundle.main.privateFrameworksURL) -> Result<NVSTNativeRuntimeStatus, NVSTNativeRuntimeLoadError> {
-        do {
-            let runtime = try NVSTNativeRuntime(frameworksDirectory: frameworksDirectory)
-            return .success(runtime.status)
-        } catch let error as NVSTNativeRuntimeLoadError {
-            return .failure(error)
-        } catch {
-            return .failure(.loadFailed(path: frameworksDirectory?.path ?? "", reason: error.localizedDescription))
+    public static func availability(frameworksDirectory: URL? = Bundle.main.privateFrameworksURL,
+                                    forceRefresh: Bool = false) -> Result<NVSTNativeRuntimeStatus, NVSTNativeRuntimeLoadError> {
+        let key = frameworksDirectory?.standardizedFileURL.path ?? "<nil>"
+        return availabilityCache.value(for: key, refresh: forceRefresh) {
+            do {
+                let runtime = try NVSTNativeRuntime(frameworksDirectory: frameworksDirectory)
+                return .success(runtime.status)
+            } catch let error as NVSTNativeRuntimeLoadError {
+                return .failure(error)
+            } catch {
+                return .failure(.loadFailed(path: frameworksDirectory?.path ?? "", reason: error.localizedDescription))
+            }
         }
     }
 

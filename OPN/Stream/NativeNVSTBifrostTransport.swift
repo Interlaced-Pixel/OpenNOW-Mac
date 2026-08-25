@@ -65,6 +65,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     private let bridgeConfiguration: NVSTNativeBridgeConfiguration
     private let inputEncoder: NativeNVSTInputEncoder
     private let nativeVideoSurfaceHandle: UInt?
+    private let nativeRendererReady: (@MainActor @Sendable () -> Bool)?
     private let cursorVisibilityHandler: (@MainActor @Sendable (Bool) -> Void)?
     private let prepareVideoSurfaceForShutdown: (@MainActor @Sendable () -> Void)?
     private let restoreVideoSurfaceAfterRecovery: (@MainActor @Sendable () -> Void)?
@@ -91,6 +92,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     public init(bridgeConfiguration: NVSTNativeBridgeConfiguration = NVSTNativeBridgeConfiguration(),
                 inputEncoder: NativeNVSTInputEncoder = NativeNVSTInputEncoder(),
                 nativeVideoSurfaceHandle: UInt? = nil,
+                nativeRendererReady: (@MainActor @Sendable () -> Bool)? = nil,
                 cursorVisibilityHandler: (@MainActor @Sendable (Bool) -> Void)? = nil,
                 prepareVideoSurfaceForShutdown: (@MainActor @Sendable () -> Void)? = nil,
                 restoreVideoSurfaceAfterRecovery: (@MainActor @Sendable () -> Void)? = nil,
@@ -100,6 +102,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         self.bridgeConfiguration = bridgeConfiguration
         self.inputEncoder = inputEncoder
         self.nativeVideoSurfaceHandle = nativeVideoSurfaceHandle
+        self.nativeRendererReady = nativeRendererReady
         self.cursorVisibilityHandler = cursorVisibilityHandler
         self.prepareVideoSurfaceForShutdown = prepareVideoSurfaceForShutdown
         self.restoreVideoSurfaceAfterRecovery = restoreVideoSurfaceAfterRecovery
@@ -229,6 +232,51 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         lastDiagnosticMetadata.merge(eventSink.readinessDiagnosticAttributes()) { _, new in new }
         return connection
+    }
+
+    public func waitForMediaReadiness(timeoutNanoseconds: UInt64) async throws -> NativeNVSTReadiness {
+        guard activeConnection != nil, !nativeLifecycleOperationInProgress else {
+            throw NativeNVSTError.notRunning
+        }
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(min(timeoutNanoseconds, UInt64(Int64.max)))))
+        while ContinuousClock.now < deadline {
+            let rendererReady = await nativeRendererReady?() ?? true
+            if rendererReady, let snapshot = await performanceSnapshot(), snapshot.available, snapshot.streamFramesPerSecond > 0 {
+                let firstFrameLatencyMilliseconds = activeConnection.map {
+                    Date().timeIntervalSince($0.startedAt) * 1_000
+                } ?? -1
+                let readiness = NativeNVSTReadiness(
+                    stage: .firstFrameRendered,
+                    codec: snapshot.codec,
+                    resolution: snapshot.resolution,
+                    streamFramesPerSecond: snapshot.streamFramesPerSecond,
+                    firstFrameLatencyMilliseconds: firstFrameLatencyMilliseconds
+                )
+                lastDiagnosticMetadata["nvstReadinessStage"] = readiness.stage.rawValue
+                lastDiagnosticMetadata["nvstReadinessCodec"] = readiness.codec
+                lastDiagnosticMetadata["nvstReadinessResolution"] = readiness.resolution
+                lastDiagnosticMetadata["nvstReadinessFps"] = String(readiness.streamFramesPerSecond)
+                lastDiagnosticMetadata["nvstFirstFrameLatencyMs"] = String(firstFrameLatencyMilliseconds)
+                WebRTCMediaTelemetry.capture(
+                    "nvst.media.first_frame",
+                    level: .info,
+                    message: "Native NVST performance telemetry confirmed media readiness.",
+                    attributes: lastDiagnosticMetadata
+                )
+                return readiness
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        lastDiagnosticMetadata["nvstReadinessStage"] = NativeNVSTReadinessStage.transportConnected.rawValue
+        let error = NativeNVSTError.mediaNotReady("Native NVST connected but did not deliver a rendered video frame before the readiness deadline.")
+        lastDiagnosticMetadata["nvstFailurePhase"] = error.failurePhase
+        WebRTCMediaTelemetry.capture(
+            "nvst.media.first_frame.timeout",
+            level: .error,
+            message: error.errorDescription ?? "Native NVST media readiness timed out.",
+            attributes: lastDiagnosticMetadata
+        )
+        throw error
     }
 
     public func send(_ event: UserInputEvent) async throws {
@@ -526,6 +574,24 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         let selectedProfile = Self.jsonObject(from: streamingProfileJSON)
         let selectedFeatures = selectedProfile["selectedFeatures"] as? [String: Any] ?? [:]
         let selectedCodec = Self.selectedCodec(rawSessionJSON: allocation.rawSessionJSON, sessionInfoJSON: allocation.sessionInfoJSON, settingsJSON: allocation.settingsJSON)
+        guard OPNStreamPreferences.codecSupported(
+            OPNStreamCodecOption(label: selectedCodec, value: selectedCodec),
+            capabilities: presentationCapabilities
+        ) else {
+            let message = "Native NVST codec \(selectedCodec) is unavailable on this Mac."
+            WebRTCMediaTelemetry.capture(
+                "nvst.codec.unsupported",
+                level: .error,
+                message: message,
+                attributes: [
+                    "applicationID": allocation.session.applicationID,
+                    "codec": selectedCodec,
+                    "h265HardwareDecodeSupported": String(presentationCapabilities.h265HardwareDecodeSupported),
+                    "av1HardwareDecodeSupported": String(presentationCapabilities.av1HardwareDecodeSupported)
+                ]
+            )
+            throw NativeNVSTError.unsupportedCodec(message)
+        }
         let presentationCapability = OPNStreamPreferences.presentationCapability(codec: selectedCodec, capabilities: presentationCapabilities)
         if let nativeWindow {
             NativeWebRTCStreamView.configureNativeNVSTPresentation(
@@ -701,7 +767,12 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             let connection = NativeNVSTTransportConnection(
                 session: allocation.session,
                 runtimeStatus: status,
-                microphoneStatus: resolvedMicrophoneStatus
+                microphoneStatus: resolvedMicrophoneStatus,
+                readiness: NativeNVSTReadiness(
+                    stage: .audioReady,
+                    codec: selectedCodec,
+                    resolution: Self.string(selectedProfile["resolution"], fallback: "")
+                )
             )
             return (connection, sessionAddress, activePump, runtimeHandlers)
         } catch {
@@ -987,6 +1058,10 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         if string(profile["codec"], fallback: "").isEmpty {
             let codec = normalizedCodec(string(settings["codec"], fallback: ""))
             if !codec.isEmpty { profile["codec"] = codec }
+        }
+        let normalizedProfileCodec = normalizedCodec(string(profile["codec"], fallback: ""))
+        if !normalizedProfileCodec.isEmpty {
+            profile["codec"] = normalizedProfileCodec
         }
         let requestedMaxBitrateKbps = min(max(0, int(settings["maxBitrateMbps"])), 1_000) * 1_000
         if requestedMaxBitrateKbps > 0 {
@@ -1613,9 +1688,16 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     }
 
     private static func normalizedCodec(_ value: String) -> String {
-        let codec = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if codec.caseInsensitiveCompare("auto") == .orderedSame { return "H264" }
-        return codec
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "", "AUTO", "H264":
+            return "H264"
+        case "H265", "HEVC":
+            return "H265"
+        case "AV1":
+            return "AV1"
+        default:
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
     }
 
     private static func errorMessage(_ buffer: UnsafePointer<CChar>, fallback: String) -> String {

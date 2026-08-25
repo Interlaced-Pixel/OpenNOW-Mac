@@ -36,6 +36,8 @@ private final class CatalogSendableValue<T>: @unchecked Sendable {
 private struct CatalogSettingsPreferencesSnapshot: Sendable {
     let capabilities: OPNStreamDeviceCapabilities
     let profile: OPNStreamPreferenceProfile
+    let nativeNVSTRuntimeAvailable: Bool
+    let nativeNVSTRuntimeMessage: String
     let remoteCoOpPreferences: OPNRemoteCoOpPreferences
     let selectedRegionUrl: String
     let regionOptions: [OPNStreamRegionOption]
@@ -167,6 +169,8 @@ final class CatalogViewModel: ObservableObject {
     @Published var streamProfile = OPNStreamPreferenceProfile()
     @Published var remoteCoOpPreferences = OPNRemoteCoOpPreferencesStore.load()
     @Published var streamCapabilities = OPNStreamDeviceCapabilities()
+    @Published var nativeNVSTRuntimeAvailable = false
+    @Published var nativeNVSTRuntimeMessage = "Checking native NVST runtime availability."
     @Published var settingsRegionOptions: [OPNStreamRegionOption] = []
     @Published var selectedSettingsRegionUrl = ""
     @Published var unavailableSettingsRegionUrl = ""
@@ -1524,6 +1528,10 @@ final class CatalogViewModel: ObservableObject {
     }
 
     func setNVSTTransportEnabled(_ enabled: Bool) {
+        if enabled, !nativeNVSTRuntimeAvailable {
+            actionMessage = nativeNVSTRuntimeMessage
+            return
+        }
         OPNStreamPreferences.saveNVSTTransportEnabled(enabled)
         actionMessage = enabled ? "Native/NVST stream transport selected." : "WebRTC stream transport selected."
         loadSettingsPreferences()
@@ -1920,10 +1928,27 @@ final class CatalogViewModel: ObservableObject {
         settingsPreferencesTask?.cancel()
         settingsPreferencesTask = Task.detached(priority: .userInitiated) {
             let capabilities = OPNStreamPreferences.loadDeviceCapabilities()
-            let profile = OPNStreamPreferences.effectiveProfile(OPNStreamPreferences.loadProfile(), capabilities: capabilities)
+            var profile = OPNStreamPreferences.effectiveProfile(OPNStreamPreferences.loadProfile(), capabilities: capabilities)
+            let runtimeAvailability = NVSTNativeRuntime.availability()
+            let nativeNVSTRuntimeAvailable: Bool
+            let nativeNVSTRuntimeMessage: String
+            switch runtimeAvailability {
+            case .success:
+                nativeNVSTRuntimeAvailable = true
+                nativeNVSTRuntimeMessage = "Native NVST runtime is available."
+            case .failure(let error):
+                nativeNVSTRuntimeAvailable = false
+                nativeNVSTRuntimeMessage = error.errorDescription ?? "Native NVST runtime is unavailable."
+            }
+            if !nativeNVSTRuntimeAvailable, profile.transportMode.value == "nvst" {
+                OPNStreamPreferences.saveNVSTTransportEnabled(false)
+                profile = OPNStreamPreferences.effectiveProfile(OPNStreamPreferences.loadProfile(), capabilities: capabilities)
+            }
             let snapshot = CatalogSettingsPreferencesSnapshot(
                 capabilities: capabilities,
                 profile: profile,
+                nativeNVSTRuntimeAvailable: nativeNVSTRuntimeAvailable,
+                nativeNVSTRuntimeMessage: nativeNVSTRuntimeMessage,
                 remoteCoOpPreferences: OPNRemoteCoOpPreferencesStore.load(),
                 selectedRegionUrl: OPNStreamPreferences.loadSelectedRegionUrl(userId: userId),
                 regionOptions: Self.launchRegionOptions(from: OPNStreamPreferences.loadCachedRegions(userId: userId)),
@@ -1933,6 +1958,8 @@ final class CatalogViewModel: ObservableObject {
                 guard let self, generation == self.settingsPreferencesGeneration, !Task.isCancelled else { return }
                 self.streamCapabilities = snapshot.capabilities
                 self.streamProfile = snapshot.profile
+                self.nativeNVSTRuntimeAvailable = snapshot.nativeNVSTRuntimeAvailable
+                self.nativeNVSTRuntimeMessage = snapshot.nativeNVSTRuntimeMessage
                 self.remoteCoOpPreferences = snapshot.remoteCoOpPreferences
                 self.selectedSettingsRegionUrl = snapshot.selectedRegionUrl
                 self.settingsRegionOptions = snapshot.regionOptions

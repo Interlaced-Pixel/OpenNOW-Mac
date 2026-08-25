@@ -266,6 +266,12 @@ struct WebRTCMediaStreamView: View {
 }
 
 private struct NativeNVSTMediaStreamSurface: View {
+    private struct FailurePresentation: Identifiable {
+        let id = UUID()
+        let message: String
+        let diagnostics: [String: String]
+    }
+
     let configuration: StreamLaunchConfiguration
     let sessionProvider: any NativeNVSTSessionProvider
     let preventDisplaySleep: Bool
@@ -307,6 +313,8 @@ private struct NativeNVSTMediaStreamSurface: View {
     @State private var networkGovernor: NativeNVSTNetworkGovernor?
     @State private var networkPathTask: Task<Void, Never>?
     @State private var networkPathAvailable = true
+    @State private var nativeFailure: FailurePresentation?
+    @State private var nativeAudioDeviceMonitor: NativeNVSTAudioDeviceMonitor?
 
     var body: some View {
         ZStack {
@@ -318,7 +326,9 @@ private struct NativeNVSTMediaStreamSurface: View {
             }
             .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
             nativeWindowOverlay
-            if !isConnected {
+            if let nativeFailure {
+                nativeFailureOverlay(nativeFailure)
+            } else if !isConnected {
                 StreamLaunchLoadingScreen(
                     title: configuration.title,
                     stage: StreamLaunchLoadingStage.label(stepIndex: loadingStepIndex),
@@ -356,8 +366,21 @@ private struct NativeNVSTMediaStreamSurface: View {
         lastAcceptedStreamInputAt = Date()
         beginStreamingPerformanceMode()
         startNetworkPathMonitoring()
+        let audioDeviceMonitor = NativeNVSTAudioDeviceMonitor {
+            WebRTCMediaTelemetry.capture(
+                "nvst.audio.device_changed",
+                level: .info,
+                message: "Default audio device changed while native NVST was active.",
+                attributes: ["applicationID": configuration.applicationID]
+            )
+        }
+        audioDeviceMonitor.start()
+        nativeAudioDeviceMonitor = audioDeviceMonitor
         let transport = NativeNVSTBifrostTransport(
             nativeVideoSurfaceHandle: nativeVideoSurfaceHandle,
+            nativeRendererReady: { [weak nativeView] in
+                nativeView?.nativeNVSTRendererSurfaceReady == true
+            },
             cursorVisibilityHandler: { [weak nativeView] visible in
                 guard let nativeView else { return }
                 nativeView.mouseInputMode = visible || !nativeView.directMouseInputEnabled ? .absolute : .relative
@@ -442,7 +465,10 @@ private struct NativeNVSTMediaStreamSurface: View {
                 }
             } catch {
                 let diagnostics = await path.diagnosticMetadata()
-                await MainActor.run { handleStartFailure(error, diagnostics: diagnostics) }
+                await MainActor.run {
+                    startTask = nil
+                    handleStartFailure(error, diagnostics: diagnostics)
+                }
             }
         }
     }
@@ -468,7 +494,79 @@ private struct NativeNVSTMediaStreamSurface: View {
         if let sessionError = error as? OpenNOWStreamSessionError, case .activeSessionConflict(let conflict) = sessionError {
             metadata.merge(conflict.reportMetadata) { current, _ in current }
         }
-        finishOnce(report: StreamReport(title: configuration.title, success: false, reason: .failed, message: message, durationSeconds: 0, metadata: metadata))
+        metadata["failurePhase"] = (error as? NativeNVSTError)?.failurePhase ?? "unknown"
+        metadata["retryNativeAvailable"] = "true"
+        metadata["switchToWebRTCAvailable"] = "true"
+        nativeFailure = FailurePresentation(message: message, diagnostics: metadata)
+        path = nil
+        endEventTask?.cancel()
+        endEventTask = nil
+        WebRTCMediaStreamLifecycle.activate(
+            configuration.id,
+            quitRequestHandler: { completion in
+                completion(true)
+                return true
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func nativeFailureOverlay(_ failure: FailurePresentation) -> some View {
+        ZStack {
+            Color.black.opacity(0.88).ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+            VStack(alignment: .leading, spacing: 18) {
+                Text("NATIVE NVST UNAVAILABLE")
+                    .font(.streamNvidia(size: 16, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundStyle(WebRTCMediaStreamTheme.accent)
+                Text(failure.message)
+                    .font(.streamNvidia(size: 13, weight: .medium))
+                    .foregroundStyle(WebRTCMediaStreamTheme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Phase: \(failure.diagnostics["failurePhase"] ?? "unknown")")
+                    .font(.streamNvidia(size: 11, weight: .medium))
+                    .foregroundStyle(WebRTCMediaStreamTheme.textSecondary)
+                HStack(spacing: 10) {
+                    Button("Retry Native", action: retryNativeFailure)
+                    Button("Switch to WebRTC", action: switchToWebRTCFromFailure)
+                    Button("Copy Diagnostics", action: { copyNativeFailureDiagnostics(failure) })
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+            .padding(28)
+            .frame(maxWidth: 620)
+            .background(WebRTCMediaStreamTheme.panel)
+            .overlay(Rectangle().stroke(WebRTCMediaStreamTheme.accent.opacity(0.4), lineWidth: 1))
+        }
+    }
+
+    private func retryNativeFailure() {
+        nativeFailure = nil
+        didEnd = false
+        isEnding = false
+        isConnected = false
+        nativeView?.setNativeNVSTVideoVisible(false)
+        nativeView?.prepareNativeNVSTRendererForShutdown()
+        startIfNeeded()
+    }
+
+    private func switchToWebRTCFromFailure() {
+        OPNStreamPreferences.saveNVSTTransportEnabled(false)
+        nativeFailure = nil
+        didEnd = true
+        WebRTCMediaStreamLifecycle.deactivate(configuration.id)
+        onEnd(false, "Native NVST failed; WebRTC transport selected.", nil)
+    }
+
+    private func copyNativeFailureDiagnostics(_ failure: FailurePresentation) {
+        let lines: [String] = failure.diagnostics.keys.sorted().compactMap { key -> String? in
+            guard let value = failure.diagnostics[key] else { return nil }
+            return "\(key)=\(value)"
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        showNativeTransientStreamMessage("Diagnostics copied")
     }
 
     private func stopStream() {
@@ -488,6 +586,8 @@ private struct NativeNVSTMediaStreamSurface: View {
         networkPathTask?.cancel()
         networkPathTask = nil
         networkPathAvailable = true
+        nativeAudioDeviceMonitor?.stop()
+        nativeAudioDeviceMonitor = nil
         cancelNativeShortcutTasks()
         endStreamingPerformanceMode()
         nativeView?.remoteInputEnabled = false
@@ -665,7 +765,15 @@ private struct NativeNVSTMediaStreamSurface: View {
         view.onInputEvent = { [weak view] event in
             guard path != nil, let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd else { return }
             if view.remoteInputEnabled && !NativeNVSTInputDispatcher.isNeutralizing(event) {
-                guard NSApplication.shared.isActive, view.window?.isKeyWindow == true else { return }
+                guard NSApplication.shared.isActive, view.window?.isKeyWindow == true else {
+                    WebRTCMediaTelemetry.capture(
+                        "nvst.input.focus_lost",
+                        level: .debug,
+                        message: "Native NVST input was withheld because the stream window was not focused.",
+                        attributes: ["applicationID": configuration.applicationID]
+                    )
+                    return
+                }
             }
             lastAcceptedStreamInputAt = Date()
             if case .mouse = event {
@@ -903,6 +1011,9 @@ private struct NativeNVSTMediaStreamSurface: View {
 
     private func recordNativeNetworkTelemetry(_ snapshot: NativeNVSTPerformanceSnapshot) {
         let attributes = ["transport": "nvst", "applicationID": configuration.applicationID]
+        if let droppedInputCount = inputDispatcher?.droppedInputCount, droppedInputCount > 0 {
+            WebRTCMediaTelemetry.record("nvst.input.dropped", kind: .counter, value: Double(droppedInputCount), unit: "event", attributes: attributes)
+        }
         if snapshot.latencyMilliseconds >= 0 { WebRTCMediaTelemetry.record("nvst.network.latency_ms", kind: .gauge, value: snapshot.latencyMilliseconds, unit: "millisecond", attributes: attributes) }
         if snapshot.jitterMilliseconds >= 0 { WebRTCMediaTelemetry.record("nvst.network.jitter_ms", kind: .gauge, value: snapshot.jitterMilliseconds, unit: "millisecond", attributes: attributes) }
         if snapshot.bitrateMegabitsPerSecond >= 0 { WebRTCMediaTelemetry.record("nvst.network.bitrate_mbps", kind: .gauge, value: snapshot.bitrateMegabitsPerSecond, unit: "megabit/second", attributes: attributes) }

@@ -6,16 +6,16 @@
 
 ## Executive summary
 
-Native NVST is not complete enough to treat as release-verified media transport. The code contains a real H.265/HEVC decode and render path, but it does not contain a local NVIDIA NVENC encoder implementation. The `video.encoder*` values in NVST SDP are remote/vendor stream parameters and should not be described as proof that OpenNOW is encoding with NVENC.
+Native NVST now has explicit readiness, failure, capability-gating, and diagnostics contracts. It contains a real H.265/HEVC decode and render path, but it does not contain a local NVIDIA NVENC encoder implementation. The `video.encoder*` values in NVST SDP are remote/vendor stream parameters and should not be described as proof that OpenNOW is encoding with NVENC.
 
 The most important gaps are:
 
-1. Authenticated NVST tests verify lifecycle only, not delivered video, audio, microphone, or input.
-2. Native codec selection can preserve a negotiated H.265 or AV1 value without rejecting it when the local decoder cannot support it.
-3. The Native/NVST settings toggle is available without checking runtime availability.
-4. Native audio controls are incomplete: microphone control exists, but game-volume/mute and audio-device recovery are not wired through the native path.
-5. Architecture validation and CI are arm64-only even though runtime parsing supports x86_64.
-6. A native frame receiver abstraction exists, but the transport does not currently deliver decoded frames to it; rendering is delegated to Geronimo.
+1. Authenticated NVST tests require first-frame and sustained-FPS evidence, but audio loopback and input acknowledgement still require a live test environment that exposes those signals.
+2. Native codec selection is now capability-gated before Geronimo session creation.
+3. The Native/NVST settings toggle and launch selector now check runtime availability.
+4. Native microphone permission/setup diagnostics and audio-device change telemetry are wired; game-volume/mute remains intentionally unavailable because the verified ABI exposes no safe per-stream control.
+5. Architecture support is now explicit: native NVST is arm64-only because the bundled WebRTC framework has no x86_64 slice.
+6. The native frame receiver API is explicitly deprecated for production use; Geronimo remains the native rendering sink.
 
 ## Status scale
 
@@ -29,16 +29,16 @@ The most important gaps are:
 ### F-01 — Native H.265/NVST media delivery is not verified
 
 **Severity:** High  
-**Status:** Verification gap
+**Status:** Partially resolved; authenticated execution required
 
-The authenticated tests start a native session, wait, pause/resume, and stop successfully. They do not assert that a decoded frame reached the renderer, that frames continued arriving, or that audio, microphone, and input worked.
+The authenticated tests now wait for first-frame readiness, assert observed codec/resolution/FPS, require sustained FPS, and verify pause/resume readiness. Direct game-audio samples, microphone loopback, and input acknowledgement remain environment-dependent.
 
 **Evidence**
 
-- `Tests/GFN/NVST/NVSTNativeRuntimeTests.swift:158-193` starts a session, sleeps for five seconds, stops, and checks only `report.success`.
-- `Tests/GFN/NVST/NVSTNativeRuntimeTests.swift:195-229` exercises pause/resume lifecycle without media assertions.
-- `OPN/Stream/NativeNVSTStreamingPath.swift:458-492` marks the path connected after transport connection/readiness and before an independently asserted first rendered frame.
-- `Docs/NVST/NativeNVSTRemainingWork.md:57-66` explicitly records authenticated media verification as outstanding.
+- `Tests/GFN/NVST/NVSTNativeRuntimeTests.swift:159-211` starts each configured codec, requires first-frame readiness and observed codec/resolution/FPS, verifies sustained performance telemetry, captures diagnostics, and stops cleanly.
+- `Tests/GFN/NVST/NVSTNativeRuntimeTests.swift:213-270` verifies first-frame readiness and performance again across pause/resume.
+- `OPN/Stream/NativeNVSTStreamingPath.swift:565-629` waits for transport readiness and native renderer readiness before publishing the running state.
+- `Docs/NVST/NativeNVSTRemainingWork.md:57-68` records the remaining environment-dependent audio/input evidence and the authoritative Xcode test path.
 
 **Impact**
 
@@ -57,11 +57,11 @@ CI can pass while H.265 produces no visible frames, audio is silent, microphone 
 ### F-02 — Native codec selection is not capability-gated at startup
 
 **Severity:** High  
-**Status:** High-risk behavior
+**Status:** Resolved
 
 User-facing preference resolution correctly checks hardware decode support for H.265 and AV1 in `OPN/Core/OPNStreamPreferences.swift:524-548`. However, native profile construction retains the negotiated codec in `OPN/Stream/NativeNVSTBifrostTransport.swift:959-1023`, and the native decoder is initialized with H.265 (`2`) or AV1 (`4`) in `OPN/NativeGeronimo/NativeNVSTGeronimoShim.mm:2000-2039`.
 
-There is no equivalent final guard that rejects an unsupported negotiated codec immediately before native startup.
+The native transport now rejects an unsupported negotiated codec immediately before Geronimo startup with a typed `unsupportedCodec` error.
 
 **Impact**
 
@@ -79,9 +79,9 @@ The fallback must not silently claim native readiness.
 ### F-03 — The Native/NVST transport toggle is ungated
 
 **Severity:** Medium  
-**Status:** Confirmed incomplete
+**Status:** Resolved
 
-`View/Settings/SettingsView.swift:1154-1160` always displays the Native/NVST toggle. `ViewModel/CatalogViewModel.swift:1526-1530` saves the preference without checking runtime availability. `NVSTNativeRuntime.availability()` is available in `GFN/NVST/Native/NVSTNativeRuntime.swift:129-137`, but the setting does not use it.
+The setting and transport selector use cached `NVSTNativeRuntime.availability()` results, disable unusable selection, and persist WebRTC when the native runtime is unavailable. Native launch errors expose phase, retry, WebRTC fallback, and copy-diagnostics actions.
 
 **Impact**
 
@@ -94,37 +94,37 @@ Probe availability before enabling the setting. If unavailable, show the reason 
 ### F-04 — Native game-audio controls are incomplete
 
 **Severity:** Medium  
-**Status:** Confirmed incomplete
+**Status:** Explicit product boundary
 
-The native path exposes microphone controls, but the remaining-work document states that game volume/mute and audio-device changes are not integrated. `OPN/NativeGeronimo/NativeNVSTGeronimoShim.mm:2614-2621` exposes microphone volume, while the game and microphone volume controls in `OPN/Stream/WebRTCNativeStreamSession.swift:388-392` are associated with WebRTC.
+The native path exposes microphone controls and permission/setup diagnostics. Geronimo automatically reopens its renderer for channel changes, and OpenNOW records default-device changes. The verified ABI does not expose safe per-stream game-volume/mute control, so the Native/NVST settings UI disables that WebRTC-only control rather than changing global macOS output volume.
 
 **Impact**
 
-The same preferences can behave differently depending on transport. Output-device changes may leave native audio silent or stale after restart/resume.
+The same preferences intentionally behave differently depending on transport. Native output-device hot-swap recovery remains unverified until a safe native audio rebind entry point is available.
 
-**Required fix**
+**Required completion evidence**
 
-Wire game volume and mute through native NVST, observe output-device changes, rebind or restart native audio on device changes, and validate microphone permission plus `com.apple.security.device.audio-input` in signed builds.
+Keep game volume/mute disabled for native NVST until a safe per-stream ABI is verified; retain device-change telemetry and microphone permission diagnostics. Add hot-swap recovery only after the native rebind contract is established.
 
 ### F-05 — Architecture support is ambiguous
 
 **Severity:** Medium  
-**Status:** Verification gap
+**Status:** Resolved
 
-`GFN/NVST/Native/NVSTNativeRuntime.swift:194-215` parses both arm64 and x86_64 Mach-O slices, and the runtime manifest validator checks both architectures. However, `scripts/validate-native-nvst-bundle.sh:36-40` checks only for an arm64 slice, and both normal and authenticated CI jobs use `destination 'platform=macOS,arch=arm64'`.
+Native NVST is arm64-only because the bundled WebRTC framework is arm64-only. The runtime rejects other host architectures, the bundle validator requires arm64, and normal/authenticated CI destinations explicitly select arm64.
 
 **Impact**
 
-The project either carries an unverified Intel-support claim or has unnecessary x86_64 handling that can drift unnoticed.
+Historical x86_64 ABI offsets may remain in the reverse-engineering record, but they are not a supported product configuration.
 
 **Required fix**
 
-Declare Intel unsupported everywhere if that is intentional, or add x86_64 bundle validation and an Intel build/test lane.
+The supported product configuration is arm64-only; keep runtime checks, bundle validation, and CI aligned with that decision.
 
 ### F-06 — Native media receiver API is disconnected from production delivery
 
 **Severity:** Low  
-**Status:** Suspicious abstraction
+**Status:** Resolved by explicit sink-only contract
 
 `GFN/NVST/Native/NativeNVSTMedia.swift:62-117` defines async video/audio frame streams. `OPN/Stream/NativeNVSTStreamingPath.swift:371-407` exposes them through a media session, but `OPN/Stream/NativeNVSTBifrostTransport.swift:125-231` accepts the receiver without delivering frames to it. The current production rendering path is Geronimo's native SDL/Metal renderer.
 
@@ -134,7 +134,7 @@ Consumers of `videoFrames()` and `audioFrames()` can receive no data even while 
 
 **Required fix**
 
-Either bridge actual decoded media into the receiver, or remove/deprecate the frame-stream API and document that native rendering is sink-only. Do not leave both contracts implied.
+The frame-stream API is deprecated for production consumers and documents the Geronimo AppKit renderer as the supported native sink. Tests retain the receiver for instrumentation.
 
 ### F-07 — Network governor is intentionally inert
 
@@ -160,7 +160,7 @@ This is not a confirmed defect if Bifrost owns network adaptation. The type shou
 - No project source reference establishes a local NVENC encoder path.
 - No `VTCompressionSession` usage appears in OpenNOW source; the matching references are in the vendored WebRTC framework and relate to H.264 encoding.
 - The `video.encoder*` SDP attributes describe remote/vendor streaming parameters, not OpenNOW's local encoder implementation.
-- Existing H.265 tests are primarily preference, SDP, and payload-parity tests; they do not prove a live H.265 NVST frame was decoded and rendered.
+- Authenticated H.264/H.265 tests now require native first-frame readiness and sustained stream FPS, while direct audio-loopback and input-acknowledgement evidence remains dependent on the configured test environment.
 
 ### Correct product wording
 
@@ -172,25 +172,25 @@ Do not use: **“NVENC H.265 encoding in OpenNOW”** unless a local encoder imp
 
 ### P0 — Establish truth in authenticated testing
 
-1. Add first-frame and sustained-frame assertions.
-2. Record negotiated and observed codec, dimensions, and frame rate.
-3. Assert game audio, microphone, input, pause/resume, and teardown.
-4. Run the matrix for H.264 and H.265 on supported and unsupported hardware.
+1. Completed: first-frame and sustained-FPS readiness assertions.
+2. Completed: negotiated/observed codec, dimensions, and frame-rate diagnostics.
+3. Completed: pause/resume and teardown assertions; audio/input loopback remains dependent on the authenticated environment.
+4. Completed: H.264/H.265 selection matrix on the supported arm64 lane; unsupported-codec behavior is covered by capability seams.
 
 ### P1 — Make failure behavior deterministic
 
-1. Gate final native codec selection against VideoToolbox capabilities.
-2. Gate the Native/NVST preference on runtime availability.
-3. Add typed failure phases and actionable diagnostics.
-4. Decide and document Intel support.
+1. Completed: final native codec selection is gated against VideoToolbox capabilities.
+2. Completed: Native/NVST preference and launch selection are gated on runtime availability.
+3. Completed: typed failure phases and actionable diagnostics.
+4. Completed: arm64-only support is explicit; an attempted x86_64 build is rejected by the arm64-only WebRTC dependency.
 
 ### P2 — Close transport parity gaps
 
-1. Add native game-volume/mute and device-change handling.
-2. Add audio-input entitlement and permission diagnostics.
-3. Resolve the frame-receiver API contract.
-4. Document the network-governor delegation boundary.
+1. Resolved by product boundary: game-volume/mute remains WebRTC-only because no safe native per-stream ABI exists; native device-change telemetry and vendor channel-reopen behavior are documented.
+2. Completed: audio-input entitlement and permission diagnostics.
+3. Completed: native rendering is explicitly Geronimo sink-only.
+4. Completed: Bifrost ownership is documented and covered by delegation tests.
 
 ## Release recommendation
 
-Do not describe native NVST H.265 as fully complete or NVENC-backed yet. The implementation is substantial and likely functional on the intended arm64 configuration, but release confidence is limited until P0 media assertions prove that the negotiated H.265 stream produces usable video/audio/input behavior and P1 prevents unsupported native startup from failing late.
+Native NVST H.265 can be described as capability-gated receive and native decode/render support over NVST, subject to authenticated live-session verification. It must not be described as local NVENC encoding. Release promotion should require the authenticated media workflow and bundled-artifact validation to pass.

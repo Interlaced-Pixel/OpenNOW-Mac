@@ -26,38 +26,40 @@ only what is genuinely left.
 
 ### 1. Diagnostics Bridging
 
-- Bridge stream-quality, decoder-state, and HID-capability native callbacks to Swift. Stats are polled;
-  these callback-driven channels are not.
-- Add operational telemetry for dropped input, focus loss, and unsupported HID capabilities observed in
-  authenticated sessions.
+- Stream-quality and decoder readiness are now exposed through the native readiness snapshot and the
+  polled performance telemetry path. HID-capability callback fields remain vendor-owned and are not
+  exposed until their ABI is verified.
+- Dropped input and focus-loss telemetry are emitted by the native input host.
 - Relevant files: `OPN/NativeGeronimo/NativeNVSTGeronimoShim.mm`,
   `OPN/Stream/NativeNVSTBifrostTransport.swift`, `Docs/NVST/NativeNVSTABI.md`.
 
 ### 2. Audio
 
-- Integrate game volume/mute preferences with the native path; current native audio control covers
-  microphone volume only, and game-audio controls are WebRTC-only.
-- Handle audio device changes and stream restart/resume on the native path.
-- Add capture-permission diagnostics and validate `com.apple.security.device.audio-input` in signed
-  builds.
+- Native audio setup is now part of the readiness contract and microphone permission/setup failures
+  are surfaced with sanitized diagnostics. The signed target includes
+  `com.apple.security.device.audio-input`.
+- Game volume/mute remains intentionally unsupported by the verified Geronimo ABI. The native path
+  must not change global macOS output volume as a substitute; keep the control disabled or use
+  WebRTC when per-stream game-audio control is required.
+- Default audio-device hot-swap recovery remains pending until a safe native audio rebind entry point
+  is verified.
 - Relevant files: `OPN/Stream/NativeNVSTBifrostTransport.swift`, `GFN/NVST/Native/NativeNVSTMedia.swift`,
   `OPN/Core/OPNStreamPreferences.swift`.
 
 ### 3. UX Gates
 
-- Gate the Native/NVST transport setting on runtime availability. `NVSTNativeRuntime.availability()`
-  is currently only exercised by tests; the Settings toggle (`View/Settings/SettingsView.swift`) is
-  ungated.
-- Add a dedicated native failure surface: exact native phase, sanitized error, retry-native and
-  switch-to-WebRTC actions, and copyable diagnostics. Failures currently flow through the generic
-  `StreamReport` path with diagnostics metadata (`View/Stream/WebRTCMediaStreamHost.swift`).
-- Relevant files: `GFN/NVST/Native/NVSTNativeRuntime.swift`, `View/Settings/SettingsView.swift`,
-  `View/Stream/WebRTCMediaStreamHost.swift`.
+- The Native/NVST transport setting and transport selector are gated on runtime availability.
+- Native startup failures expose the failure phase, sanitized error, retry-native, switch-to-WebRTC,
+  and copy-diagnostics actions in `View/Stream/WebRTCMediaStreamHost.swift`.
+- Relevant files: `GFN/NVST/Native/NVSTNativeRuntime.swift`, `OPN/Stream/StreamTransportSelection.swift`,
+  `View/Settings/SettingsView.swift`, `View/Stream/WebRTCMediaStreamHost.swift`.
 
 ### 4. Verification
 
-- Authenticated media verification is still manual. The E2E tests prove lifecycle (start, pump, pause,
-  resume, stop) but assert no video frames, game audio, microphone, or input behavior.
+- Authenticated tests now require first-frame performance evidence, sustained stream FPS, negotiated
+  codec/resolution, pause/resume readiness, and teardown success. Direct game-audio, microphone
+  sample, and input-loopback evidence still requires a test account/session that exposes those
+  signals.
 - Obtain runtime evidence for whether a live server session ever produces Bifrost's private internal
   resume event; do not expose that path without evidence.
 - Re-check the SwiftPM test-filter path: as of 2026-08-18,
@@ -76,10 +78,12 @@ only what is genuinely left.
 - Do not log tokens, raw auth headers, or secret session data.
 - Do not ship a generic "switch to WebRTC" failure as the only Native/NVST diagnostic.
 - Do not call a probe-only runtime path complete.
+- Native NVST support is arm64-only. The bundled WebRTC framework has no x86_64 slice, so the
+  runtime rejects Intel execution and CI validates the arm64 configuration.
 
 ## Verification Commands
 
-- `xcodebuild -project OpenNOW.xcodeproj -scheme OpenNOW -configuration Debug -destination 'platform=macOS' build`
+- `xcodebuild -project OpenNOW.xcodeproj -scheme OpenNOW -configuration Debug -destination 'platform=macOS,arch=arm64' build`
 - `scripts/validate-native-nvst-runtime-manifest.sh`
 - `scripts/validate-native-nvst-bundle.sh <path-to-OpenNOW.app>`
 - Authenticated lifecycle: run the `NVST Authenticated Validation` workflow, or locally with

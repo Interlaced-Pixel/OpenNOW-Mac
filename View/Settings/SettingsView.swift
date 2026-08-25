@@ -1154,8 +1154,11 @@ private struct ExperimentalFeaturesSettingsPage: View {
             SettingsCard(title: "Stream Transport") {
                 SettingsToggleRow(
                     title: "Native/NVST Transport",
-                    subtitle: "Off uses the default WebRTC session path. On requests native NVST secure RTSP transport with matching CloudMatch headers.",
+                    subtitle: viewModel.nativeNVSTRuntimeAvailable
+                        ? "Off uses the default WebRTC session path. On requests native NVST secure RTSP transport with matching CloudMatch headers."
+                        : viewModel.nativeNVSTRuntimeMessage,
                     isOn: viewModel.streamProfile.transportMode.value == "nvst",
+                    isLocked: !viewModel.nativeNVSTRuntimeAvailable,
                     action: viewModel.setNVSTTransportEnabled
                 )
             }
@@ -1265,7 +1268,15 @@ private struct GameplaySettingsPage: View {
             }
 
             SettingsCard(title: "Audio") {
-                SettingsSliderRow(title: "Game Volume", valueText: percentText(viewModel.streamProfile.gameVolume), value: viewModel.streamProfile.gameVolume, range: 0...1, step: 0.01, action: viewModel.setGameVolume)
+                SettingsSliderRow(
+                    title: "Game Volume",
+                    valueText: viewModel.streamProfile.transportMode.value == "nvst" ? "WebRTC only" : percentText(viewModel.streamProfile.gameVolume),
+                    value: viewModel.streamProfile.gameVolume,
+                    range: 0...1,
+                    step: 0.01,
+                    isLocked: viewModel.streamProfile.transportMode.value == "nvst",
+                    action: viewModel.setGameVolume
+                )
                 SettingsDivider()
                 SettingsSliderRow(title: "Microphone Volume", valueText: percentText(viewModel.streamProfile.microphoneVolume), value: viewModel.streamProfile.microphoneVolume, range: 0...1, step: 0.01, action: viewModel.setMicrophoneVolume)
                 SettingsDivider()

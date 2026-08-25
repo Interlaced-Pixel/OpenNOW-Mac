@@ -59,6 +59,8 @@ public struct NativeNVSTAudioFrame: Equatable, Sendable {
     }
 }
 
+/// Receives test or future decoded-media taps. Production native NVST presentation is
+/// rendered directly by Geronimo into the AppKit surface and does not publish frames here.
 public protocol NativeNVSTMediaReceiver: Sendable {
     func receiveVideoFrame(_ frame: NativeNVSTVideoFrame) async
     func receiveAudioFrame(_ frame: NativeNVSTAudioFrame) async
@@ -69,6 +71,8 @@ public actor NativeNVSTMediaSession: NativeNVSTMediaReceiver {
     private var audioContinuation: (id: UUID, value: AsyncStream<NativeNVSTAudioFrame>.Continuation)?
 
     public init() {}
+
+    public static let productionRenderingContract = "geronimo-window-renderer"
 
     public func videoFrames(bufferingPolicy: AsyncStream<NativeNVSTVideoFrame>.Continuation.BufferingPolicy = .bufferingNewest(120)) -> AsyncStream<NativeNVSTVideoFrame> {
         let id = UUID()

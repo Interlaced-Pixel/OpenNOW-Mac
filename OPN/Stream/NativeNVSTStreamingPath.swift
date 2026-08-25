@@ -1,4 +1,67 @@
+import CoreAudio
 import Foundation
+
+final class NativeNVSTAudioDeviceMonitor: @unchecked Sendable {
+    private static let systemObject = AudioObjectID(kAudioObjectSystemObject)
+    private let callback: @Sendable () -> Void
+    private var context: UnsafeMutableRawPointer?
+    private var isMonitoring = false
+
+    init(callback: @escaping @Sendable () -> Void) {
+        self.callback = callback
+        context = nil
+        context = Unmanaged.passUnretained(self).toOpaque()
+    }
+
+    func start() {
+        guard !isMonitoring else { return }
+        isMonitoring = true
+        guard let context else { return }
+        for selector in Self.monitoredSelectors {
+            var address = Self.propertyAddress(selector)
+            AudioObjectAddPropertyListener(Self.systemObject, &address, nativeNVSTAudioDeviceChangedCallback, context)
+        }
+    }
+
+    func stop() {
+        guard isMonitoring else { return }
+        isMonitoring = false
+        guard let context else { return }
+        for selector in Self.monitoredSelectors {
+            var address = Self.propertyAddress(selector)
+            AudioObjectRemovePropertyListener(Self.systemObject, &address, nativeNVSTAudioDeviceChangedCallback, context)
+        }
+    }
+
+    deinit {
+        stop()
+    }
+
+    fileprivate func notifyChange() {
+        callback()
+    }
+
+    private static let monitoredSelectors: [AudioObjectPropertySelector] = [
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioHardwarePropertyDevices
+    ]
+
+    private static func propertyAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+}
+
+private let nativeNVSTAudioDeviceChangedCallback: AudioObjectPropertyListenerProc = { _, _, _, clientData in
+    guard let clientData else { return noErr }
+    let monitor = Unmanaged<NativeNVSTAudioDeviceMonitor>.fromOpaque(clientData).takeUnretainedValue()
+    monitor.notifyChange()
+    return noErr
+}
 
 public protocol NativeNVSTSessionProvider: Sendable {
     func startNativeNVSTSession(configuration: StreamLaunchConfiguration) async throws -> NativeNVSTSessionAllocation
@@ -11,6 +74,37 @@ extension OpenNOWStreamSessionCoordinator: NativeNVSTSessionProvider {}
 public extension NativeNVSTSessionProvider {
     func recoverNativeNVSTSession(configuration: StreamLaunchConfiguration, session: StreamSessionDescriptor) async throws -> NativeNVSTSessionAllocation {
         throw NativeNVSTError.transportFailed("Native NVST session recovery is unavailable.")
+    }
+}
+
+public enum NativeNVSTReadinessStage: String, Equatable, Sendable {
+    case transportConnected = "transport-connected"
+    case decoderReady = "decoder-ready"
+    case firstFrameRendered = "first-frame-rendered"
+    case audioReady = "audio-ready"
+    case inputReady = "input-ready"
+}
+
+public struct NativeNVSTReadiness: Equatable, Sendable {
+    public let stage: NativeNVSTReadinessStage
+    public let observedAt: Date
+    public let codec: String
+    public let resolution: String
+    public let streamFramesPerSecond: Double
+    public let firstFrameLatencyMilliseconds: Double
+
+    public init(stage: NativeNVSTReadinessStage,
+                observedAt: Date = Date(),
+                codec: String = "",
+                resolution: String = "",
+                streamFramesPerSecond: Double = 0,
+                firstFrameLatencyMilliseconds: Double = -1) {
+        self.stage = stage
+        self.observedAt = observedAt
+        self.codec = codec
+        self.resolution = resolution
+        self.streamFramesPerSecond = streamFramesPerSecond
+        self.firstFrameLatencyMilliseconds = firstFrameLatencyMilliseconds
     }
 }
 
@@ -30,15 +124,18 @@ public struct NativeNVSTTransportConnection: Equatable, Sendable {
     public let session: StreamSessionDescriptor
     public let runtimeStatus: NVSTNativeBridgeStatus
     public let microphoneStatus: NativeNVSTMicrophoneStatus
+    public let readiness: NativeNVSTReadiness
     public let startedAt: Date
 
     public init(session: StreamSessionDescriptor,
                 runtimeStatus: NVSTNativeBridgeStatus,
                 microphoneStatus: NativeNVSTMicrophoneStatus = .disabled,
+                readiness: NativeNVSTReadiness = NativeNVSTReadiness(stage: .transportConnected),
                 startedAt: Date = Date()) {
         self.session = session
         self.runtimeStatus = runtimeStatus
         self.microphoneStatus = microphoneStatus
+        self.readiness = readiness
         self.startedAt = startedAt
     }
 }
@@ -299,6 +396,7 @@ public struct NativeNVSTHapticCommand: Equatable, Sendable {
 public protocol NativeNVSTTransport: Sendable {
     func prepare() async throws -> NVSTNativeBridgeStatus
     func connect(allocation: NativeNVSTSessionAllocation, mediaReceiver: any NativeNVSTMediaReceiver) async throws -> NativeNVSTTransportConnection
+    func waitForMediaReadiness(timeoutNanoseconds: UInt64) async throws -> NativeNVSTReadiness
     func send(_ event: UserInputEvent) async throws
     func sendAbsoluteMouseMove(_ event: NativeNVSTAbsoluteMouseEvent) async throws
     func setMicrophoneEnabled(_ enabled: Bool) async throws
@@ -318,6 +416,10 @@ public protocol NativeNVSTTransport: Sendable {
 }
 
 public extension NativeNVSTTransport {
+    func waitForMediaReadiness(timeoutNanoseconds _: UInt64) async throws -> NativeNVSTReadiness {
+        NativeNVSTReadiness(stage: .transportConnected)
+    }
+
     func sendAbsoluteMouseMove(_ event: NativeNVSTAbsoluteMouseEvent) async throws {
         throw NativeNVSTError.notRunning
     }
@@ -353,6 +455,8 @@ public enum NativeNVSTError: LocalizedError, Equatable, Sendable {
     case runtimeUnavailable(String)
     case privateABIUnavailable(String)
     case transportFailed(String)
+    case unsupportedCodec(String)
+    case mediaNotReady(String)
 
     public var errorDescription: String? {
         switch self {
@@ -362,8 +466,27 @@ public enum NativeNVSTError: LocalizedError, Equatable, Sendable {
             "Native NVST stream is not running."
         case .sessionLimitReached:
             "GeForce NOW reports that another session is already active."
-        case .invalidSession(let message), .runtimeUnavailable(let message), .privateABIUnavailable(let message), .transportFailed(let message):
+        case .invalidSession(let message), .runtimeUnavailable(let message), .privateABIUnavailable(let message), .transportFailed(let message), .unsupportedCodec(let message), .mediaNotReady(let message):
             message
+        }
+    }
+
+    public var failurePhase: String {
+        switch self {
+        case .runtimeUnavailable:
+            "runtime-loading"
+        case .invalidSession:
+            "session-validation"
+        case .unsupportedCodec:
+            "codec-validation"
+        case .privateABIUnavailable:
+            "native-setup"
+        case .mediaNotReady:
+            "media-readiness"
+        case .sessionLimitReached, .transportFailed:
+            "transport"
+        case .alreadyRunning, .notRunning:
+            "lifecycle"
         }
     }
 }
@@ -383,6 +506,8 @@ public actor NativeNVSTStreamingPath {
     private var cancelStartTask: Task<Void, Never>?
     private var recoveryAttempted = false
     private var reportContinuations: [UUID: AsyncStream<StreamReport>.Continuation] = [:]
+    private var readiness = NativeNVSTReadiness(stage: .transportConnected)
+    private var startPhase = "idle"
 
     public init(sessionProvider: any NativeNVSTSessionProvider,
                 transport: any NativeNVSTTransport,
@@ -398,10 +523,16 @@ public actor NativeNVSTStreamingPath {
         state
     }
 
+    public func currentReadiness() -> NativeNVSTReadiness {
+        readiness
+    }
+
+    @available(*, deprecated, message: "Native NVST production video is rendered by Geronimo into the AppKit surface.")
     public func videoFrames(bufferingPolicy: AsyncStream<NativeNVSTVideoFrame>.Continuation.BufferingPolicy = .bufferingNewest(120)) async -> AsyncStream<NativeNVSTVideoFrame> {
         await mediaSession.videoFrames(bufferingPolicy: bufferingPolicy)
     }
 
+    @available(*, deprecated, message: "Native NVST production audio is rendered by Geronimo; this stream is not a production delivery contract.")
     public func audioFrames(bufferingPolicy: AsyncStream<NativeNVSTAudioFrame>.Continuation.BufferingPolicy = .bufferingNewest(240)) async -> AsyncStream<NativeNVSTAudioFrame> {
         await mediaSession.audioFrames(bufferingPolicy: bufferingPolicy)
     }
@@ -433,6 +564,8 @@ public actor NativeNVSTStreamingPath {
 
     private func startStreaming(configuration: StreamLaunchConfiguration,
                                 progress: (@Sendable (StreamProgress) async -> Void)?) async throws -> StreamSessionDescriptor {
+        readiness = NativeNVSTReadiness(stage: .transportConnected)
+        startPhase = "runtime-loading"
         WebRTCMediaTelemetry.capture("nvst.path.start", level: .info, message: "Starting native NVST streaming path.", attributes: ["configurationId": configuration.id.uuidString, "applicationID": configuration.applicationID])
 
         try Task.checkCancellation()
@@ -445,6 +578,7 @@ public actor NativeNVSTStreamingPath {
         }
 
         try Task.checkCancellation()
+        startPhase = "session-allocation"
         try await publishProgress(configuration: configuration, step: .allocateCloudSession, message: "Allocating native NVST cloud session...", progress: progress)
         let allocation: NativeNVSTSessionAllocation
         do {
@@ -457,10 +591,14 @@ public actor NativeNVSTStreamingPath {
 
         do {
             try await stopSessionIfCancelled(allocation.session)
+            startPhase = "transport-negotiation"
             try await publishProgress(configuration: configuration, step: .receiveStreamOffer, message: "Preparing native NVST transport...", progress: progress)
             try validate(allocation: allocation)
             try await publishProgress(configuration: configuration, step: .negotiateWebRTC, message: "Connecting native NVST secure RTSP transport...", progress: progress)
-            _ = try await transport.connect(allocation: allocation, mediaReceiver: mediaSession)
+            let connection = try await transport.connect(allocation: allocation, mediaReceiver: mediaSession)
+            readiness = connection.readiness
+            let mediaReadiness = try await transport.waitForMediaReadiness(timeoutNanoseconds: 15_000_000_000)
+            readiness = mediaReadiness
             try await stopSessionIfCancelled(allocation.session)
         } catch {
             await transport.disconnect()
@@ -476,6 +614,9 @@ public actor NativeNVSTStreamingPath {
             }
             try? await sessionProvider.finishSession(allocation.session, reason: Task.isCancelled ? .userRequested : .failed)
             if error is CancellationError || Task.isCancelled { throw error }
+            if let nativeError = error as? NativeNVSTError {
+                startPhase = nativeError.failurePhase
+            }
             WebRTCMediaTelemetry.capture("nvst.path.transport.error", level: .error, message: Self.message(for: error), attributes: ["sessionId": allocation.session.id])
             throw error
         }
@@ -485,6 +626,7 @@ public actor NativeNVSTStreamingPath {
         launchConfiguration = configuration
         startedAt = .now
         recoveryAttempted = false
+        startPhase = "ready"
         state = .running(allocation.session)
         monitorTransportTermination()
         try await publishProgress(configuration: configuration, step: .connected, message: "Connected over native NVST.", isReady: true, progress: progress)
@@ -527,7 +669,16 @@ public actor NativeNVSTStreamingPath {
     }
 
     public func diagnosticMetadata() async -> [String: String] {
-        await transport.diagnosticMetadata()
+        var metadata = await transport.diagnosticMetadata()
+        metadata["nvstReadinessStage"] = readiness.stage.rawValue
+        metadata["nvstStartPhase"] = startPhase
+        if !readiness.codec.isEmpty { metadata["nvstReadinessCodec"] = readiness.codec }
+        if !readiness.resolution.isEmpty { metadata["nvstReadinessResolution"] = readiness.resolution }
+        if readiness.streamFramesPerSecond > 0 { metadata["nvstReadinessFps"] = String(readiness.streamFramesPerSecond) }
+        if readiness.firstFrameLatencyMilliseconds >= 0 {
+            metadata["nvstFirstFrameLatencyMs"] = String(readiness.firstFrameLatencyMilliseconds)
+        }
+        return metadata
     }
 
     public func setMaximumBitrateKbps(_ bitrateKbps: UInt32) async throws {
@@ -714,6 +865,8 @@ public actor NativeNVSTStreamingPath {
                 return false
             }
             activeAllocation = refreshed
+            readiness = NativeNVSTReadiness(stage: .transportConnected)
+            readiness = try await transport.waitForMediaReadiness(timeoutNanoseconds: 15_000_000_000)
             monitorTransportTermination()
             WebRTCMediaTelemetry.capture("nvst.path.recovered", level: .info, message: "Native NVST session recovered.", attributes: ["sessionId": session.id, "attempt": "1"])
             return true

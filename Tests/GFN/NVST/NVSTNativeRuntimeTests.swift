@@ -8,6 +8,7 @@ import Testing
 struct NVSTNativeRuntimeTests {
 
 @Test func nvstNativeRuntimeLoadsVendoredBifrostSymbols() throws {
+    #expect(NVSTNativeRuntime.supportedArchitecture == "arm64")
     let frameworksDirectory = testRuntimeFrameworksDirectory()
 
     let runtime = try NVSTNativeRuntime(frameworksDirectory: frameworksDirectory)
@@ -162,6 +163,12 @@ struct NVSTNativeRuntimeTests {
     let applicationID = try #require(environment["OPN_NVST_TEST_APP_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines))
     #expect(!token.isEmpty)
     #expect(!applicationID.isEmpty)
+    let originalCodecIndex = OPNStreamPreferences.loadProfile().codecIndex
+    let requestedCodec = configureAuthenticatedCodec(from: environment)
+    defer { OPNStreamPreferences.saveCodecIndex(originalCodecIndex) }
+    if requestedCodec == "H265" {
+        #expect(OPNStreamPreferences.loadDeviceCapabilities().h265HardwareDecodeSupported)
+    }
 
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
@@ -187,7 +194,18 @@ struct NVSTNativeRuntimeTests {
 
     let session = try await path.start(configuration: configuration)
     #expect(session.applicationID == applicationID)
+    let readiness = await path.currentReadiness()
+    #expect(readiness.stage == .firstFrameRendered)
+    #expect(!readiness.codec.isEmpty)
+    #expect(!readiness.resolution.isEmpty)
+    #expect(readiness.streamFramesPerSecond > 0)
+    if let requestedCodec { #expect(readiness.codec == requestedCodec) }
     try await Task.sleep(for: .seconds(5))
+    let sustainedSnapshot = await path.performanceSnapshot()
+    #expect(sustainedSnapshot?.available == true)
+    #expect(sustainedSnapshot?.streamFramesPerSecond ?? 0 > 0)
+    let diagnostics = await path.diagnosticMetadata()
+    #expect(diagnostics["nvstReadinessStage"] == NativeNVSTReadinessStage.firstFrameRendered.rawValue)
     let report = try await path.stop(reason: .userRequested, message: "Authenticated NVST validation completed.")
     #expect(report.success)
 }
@@ -199,6 +217,12 @@ struct NVSTNativeRuntimeTests {
     let applicationID = try #require(environment["OPN_NVST_TEST_APP_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines))
     #expect(!token.isEmpty)
     #expect(!applicationID.isEmpty)
+    let originalCodecIndex = OPNStreamPreferences.loadProfile().codecIndex
+    let requestedCodec = configureAuthenticatedCodec(from: environment)
+    defer { OPNStreamPreferences.saveCodecIndex(originalCodecIndex) }
+    if requestedCodec == "H265" {
+        #expect(OPNStreamPreferences.loadDeviceCapabilities().h265HardwareDecodeSupported)
+    }
 
     let provider = OpenNOWStreamSessionCoordinator()
     let initialWindow = nativeNVSTTestWindow()
@@ -214,6 +238,7 @@ struct NVSTNativeRuntimeTests {
     let initialTransport = NativeNVSTBifrostTransport(nativeVideoSurfaceHandle: UInt(bitPattern: Unmanaged.passUnretained(initialWindow).toOpaque()))
     let initialPath = NativeNVSTStreamingPath(sessionProvider: provider, transport: initialTransport)
     let initialSession = try await initialPath.start(configuration: initialConfiguration)
+    #expect((await initialPath.currentReadiness()).stage == .firstFrameRendered)
     try await Task.sleep(for: .seconds(3))
     let pauseReport = try await initialPath.pause(message: "Authenticated NVST pause validation.")
     #expect(pauseReport.success)
@@ -236,6 +261,9 @@ struct NVSTNativeRuntimeTests {
     let resumePath = NativeNVSTStreamingPath(sessionProvider: provider, transport: resumeTransport)
     let resumedSession = try await resumePath.start(configuration: resumeConfiguration)
     #expect(resumedSession.id == initialSession.id)
+    #expect((await resumePath.currentReadiness()).stage == .firstFrameRendered)
+    #expect((await resumePath.performanceSnapshot())?.streamFramesPerSecond ?? 0 > 0)
+    if let requestedCodec { #expect((await resumePath.currentReadiness()).codec == requestedCodec) }
     try await Task.sleep(for: .seconds(3))
     let stopReport = try await resumePath.stop(reason: .userRequested, message: "Authenticated NVST resume validation completed.")
     #expect(stopReport.success)
@@ -246,6 +274,19 @@ struct NVSTNativeRuntimeTests {
 private func vendoredBridge() throws -> NVSTNativeBridge {
     let frameworksDirectory = testRuntimeFrameworksDirectory()
     return try NVSTNativeBridge(configuration: NVSTNativeBridgeConfiguration(frameworksDirectory: frameworksDirectory))
+}
+
+private func configureAuthenticatedCodec(from environment: [String: String]) -> String? {
+    guard let requestedCodec = environment["OPN_NVST_TEST_CODEC"]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+          !requestedCodec.isEmpty else {
+        return nil
+    }
+    guard let codecIndex = OPNStreamPreferences.codecOptions.firstIndex(where: { $0.value == requestedCodec }) else {
+        Issue.record("Unsupported authenticated NVST test codec \(requestedCodec).")
+        return nil
+    }
+    OPNStreamPreferences.saveCodecIndex(codecIndex)
+    return requestedCodec
 }
 
 private func testRuntimeFrameworksDirectory() -> URL {

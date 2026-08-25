@@ -40,6 +40,10 @@ final class NativeNVSTInputDispatcher: Sendable {
         buffer.count
     }
 
+    var droppedInputCount: Int {
+        buffer.droppedInputCount
+    }
+
     static func isNeutralizing(_ event: UserInputEvent) -> Bool {
         switch event {
         case .keyboard(let keyboard):
@@ -86,6 +90,7 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var inputs: [NativeNVSTInput] = []
     private var finished = false
+    private var droppedCount = 0
 
     init(capacity: Int) {
         let normalizedCapacity = max(1, capacity)
@@ -100,6 +105,10 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
 
     var count: Int {
         lock.withLock { inputs.count }
+    }
+
+    var droppedInputCount: Int {
+        lock.withLock { droppedCount }
     }
 
     func append(_ input: NativeNVSTInput) -> Bool {
@@ -121,6 +130,7 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
                     inputs.append(input)
                     return true
                 } else {
+                    droppedCount += 1
                     return false
                 }
             }

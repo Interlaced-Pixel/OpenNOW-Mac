@@ -90,6 +90,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     private(set) var l4sUpdates: [Bool] = []
     private let mode: Mode
     private let reportedMicrophoneStatus: NativeNVSTMicrophoneStatus
+    private let reportedReadiness: NativeNVSTReadiness
     private let terminalStream: AsyncStream<NativeNVSTTransportTermination>
     private let terminalContinuation: AsyncStream<NativeNVSTTransportTermination>.Continuation
     private var connectContinuation: CheckedContinuation<NativeNVSTTransportConnection, Error>?
@@ -98,9 +99,12 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     private var disconnectStartedContinuations: [CheckedContinuation<Void, Never>] = []
     private var disconnectReleaseRequested = false
 
-    init(mode: Mode, microphoneStatus: NativeNVSTMicrophoneStatus = .disabled) {
+    init(mode: Mode,
+         microphoneStatus: NativeNVSTMicrophoneStatus = .disabled,
+         readiness: NativeNVSTReadiness = NativeNVSTReadiness(stage: .firstFrameRendered, codec: "H264", resolution: "1920x1080", streamFramesPerSecond: 60)) {
         self.mode = mode
         self.reportedMicrophoneStatus = microphoneStatus
+        self.reportedReadiness = readiness
         let pair = AsyncStream<NativeNVSTTransportTermination>.makeStream()
         terminalStream = pair.stream
         terminalContinuation = pair.continuation
@@ -131,7 +135,11 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
             }
         }
         await mediaReceiver.receiveVideoFrame(NativeNVSTVideoFrame(streamID: 1, codec: .h264, timestamp: MediaTimestamp(nanoseconds: 1), durationNanoseconds: 16_666_667, width: 1920, height: 1080, isKeyFrame: true, payload: Data([1, 2, 3])))
-        return NativeNVSTTransportConnection(session: allocation.session, runtimeStatus: try await prepare(), microphoneStatus: reportedMicrophoneStatus)
+        return NativeNVSTTransportConnection(session: allocation.session, runtimeStatus: try await prepare(), microphoneStatus: reportedMicrophoneStatus, readiness: reportedReadiness)
+    }
+
+    func waitForMediaReadiness(timeoutNanoseconds _: UInt64) async throws -> NativeNVSTReadiness {
+        reportedReadiness
     }
 
     func waitForConnect() async {
@@ -364,6 +372,8 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     try await path.setMicrophoneEnabled(true)
     try await path.setMicrophoneEnabled(false)
     try await path.togglePerformanceOverlay()
+    #expect((await path.currentReadiness()).stage == .firstFrameRendered)
+    #expect((await path.currentReadiness()).streamFramesPerSecond == 60)
     let report = try await path.stop(reason: .userRequested, message: "Stopped")
 
     #expect(session == nativeAllocation().session)
@@ -403,6 +413,7 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
 }
 
 @Test func nativeNVSTMediaSessionIgnoresTerminationFromReplacedSubscriber() async {
+    #expect(NativeNVSTMediaSession.productionRenderingContract == "geronimo-window-renderer")
     let mediaSession = NativeNVSTMediaSession()
     let oldStream = await mediaSession.videoFrames()
     let oldConsumer = Task {

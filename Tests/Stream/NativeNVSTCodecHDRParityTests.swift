@@ -30,6 +30,23 @@ private func nativeAudioFrameTriggersRendererReopen(_ configuredChannelCount: UI
     #expect(OPNStreamPreferences.presentationCapability(codec: "HEVC", capabilities: capabilities) == OPNStreamPresentationCapability(supportsTenBit: true, supportsHDR: false))
 }
 
+@Test func nativeCodecCapabilityGateAcceptsOnlySupportedVideoCodecs() {
+    var capabilities = OPNStreamDeviceCapabilities()
+    capabilities.h265HardwareDecodeSupported = true
+    capabilities.av1HardwareDecodeSupported = false
+
+    #expect(OPNStreamPreferences.codecSupported(OPNStreamCodecOption(label: "H.264", value: "H264"), capabilities: capabilities))
+    #expect(OPNStreamPreferences.codecSupported(OPNStreamCodecOption(label: "H.265", value: "H265"), capabilities: capabilities))
+    #expect(!OPNStreamPreferences.codecSupported(OPNStreamCodecOption(label: "AV1", value: "AV1"), capabilities: capabilities))
+    #expect(!OPNStreamPreferences.codecSupported(OPNStreamCodecOption(label: "Unknown", value: "VP9"), capabilities: capabilities))
+}
+
+@Test func nativeErrorsExposeFailurePhase() {
+    #expect(NativeNVSTError.unsupportedCodec("H265").failurePhase == "codec-validation")
+    #expect(NativeNVSTError.mediaNotReady("timeout").failurePhase == "media-readiness")
+    #expect(NativeNVSTError.runtimeUnavailable("missing").failurePhase == "runtime-loading")
+}
+
 @Test @MainActor func nativePresentationEnablesEDROnlyWhenEveryConditionIsMet() {
     #expect(NativeWebRTCStreamView.nativeNVSTPresentationUsesEDR(requestedHDR: true, codecSupportsHDR: true, screenSupportsEDR: true))
     #expect(!NativeWebRTCStreamView.nativeNVSTPresentationUsesEDR(requestedHDR: false, codecSupportsHDR: true, screenSupportsEDR: true))
