@@ -872,7 +872,10 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         let windowToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
-        pointerLockNotificationTokens = [appToken, windowToken]
+        let becameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restoreInputFocus() }
+        }
+        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken]
     }
 
     private func removePointerLockNotifications() {
