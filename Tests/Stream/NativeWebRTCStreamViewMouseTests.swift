@@ -68,6 +68,28 @@ private struct MouseButtonTransition: Equatable {
     #expect(releaseObservedWhileLocked)
 }
 
+@Test @MainActor func pointerLockSamplesRestoreLocationBeforeDissociation() {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720), styleMask: .borderless, backing: .buffered, defer: false)
+    let view = NativeWebRTCStreamView(frame: window.contentView?.bounds ?? .zero)
+    window.contentView = view
+    var didSampleLocation = false
+    var associationObservedSample = false
+    view.cursorLocationProvider = {
+        didSampleLocation = true
+        return .zero
+    }
+    view.cursorAssociationHandler = { _ in
+        associationObservedSample = didSampleLocation
+        return .success
+    }
+    view.hidesCursorWhilePointerLocked = false
+
+    view.setPointerLocked(true)
+
+    #expect(associationObservedSample)
+    view.setPointerLocked(false)
+}
+
 @Test @MainActor func pointerCaptureSuppressesTheCompleteActivationClick() throws {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720), styleMask: .borderless, backing: .buffered, defer: false)
     let view = NativeWebRTCStreamView(frame: window.contentView?.bounds ?? .zero)
