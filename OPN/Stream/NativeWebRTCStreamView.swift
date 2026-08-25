@@ -738,7 +738,8 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     private func captureAbsoluteCursorIfNeeded() {
         guard remoteInputEnabled, directMouseInputEnabled, confinesCursorToWindowInAbsoluteMode,
               mouseInputMode == .absolute, !isPointerLocked, !isAbsoluteCursorConfined, window != nil else { return }
-        guard Self.confinedCursorPoint(NSEvent.mouseLocation, to: window?.frame ?? .zero) != nil else { return }
+        guard let confinementFrame = absoluteCursorConfinementFrame(),
+              Self.confinedCursorPoint(NSEvent.mouseLocation, to: confinementFrame) != nil else { return }
         isAbsoluteCursorConfined = true
         window?.acceptsMouseMovedEvents = true
         installPointerLockMonitor()
@@ -767,8 +768,10 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     @discardableResult
     private func constrainAssociatedAbsoluteCursor() -> Bool {
         let cursor = NSEvent.mouseLocation
-        guard isAbsoluteCursorConfined, let window, let confined = Self.confinedCursorPoint(cursor, to: window.frame), confined != cursor else { return false }
+        guard isAbsoluteCursorConfined, let confinementFrame = absoluteCursorConfinementFrame(),
+              let confined = Self.confinedCursorPoint(cursor, to: confinementFrame), confined != cursor else { return false }
         moveCursor(toScreenPoint: confined)
+        guard let window else { return true }
         let windowPoint = window.convertPoint(fromScreen: confined)
         let viewPoint = convert(windowPoint, from: nil)
         guard let absoluteEvent = absoluteMouseEvent(at: viewPoint, timestamp: Self.timestamp()) else { return true }
@@ -850,6 +853,16 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         self.absoluteCursorGlobalMonitor = nil
     }
 
+    private func absoluteCursorConfinementFrame() -> CGRect? {
+        guard let window, let contentView = window.contentView, let screen = window.screen else { return nil }
+        layoutSubtreeIfNeeded()
+        let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
+        let contentFrame = window.convertToScreen(contentFrameInWindow)
+        let videoFrameInWindow = videoSurface.convert(videoSurface.bounds, to: nil)
+        let videoFrame = window.convertToScreen(videoFrameInWindow)
+        return Self.vendorConfinementRect(contentFrame: contentFrame, videoFrame: videoFrame, screenFrame: screen.frame)
+    }
+
     private func installPointerLockNotifications() {
         guard pointerLockNotificationTokens.isEmpty else { return }
         let center = NotificationCenter.default
@@ -887,11 +900,30 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     static func confinedCursorPoint(_ point: CGPoint, to windowFrame: CGRect) -> CGPoint? {
         guard point.x.isFinite, point.y.isFinite, windowFrame.origin.x.isFinite, windowFrame.origin.y.isFinite,
-              windowFrame.width.isFinite, windowFrame.height.isFinite, windowFrame.width >= 2, windowFrame.height >= 2 else { return nil }
+              windowFrame.width.isFinite, windowFrame.height.isFinite, windowFrame.width >= 1, windowFrame.height >= 1 else { return nil }
         return CGPoint(
-            x: min(max(point.x, windowFrame.minX + 1), windowFrame.maxX - 1),
-            y: min(max(point.y, windowFrame.minY + 1), windowFrame.maxY - 1)
+            x: min(max(point.x, windowFrame.minX), windowFrame.maxX),
+            y: min(max(point.y, windowFrame.minY), windowFrame.maxY)
         )
+    }
+
+    static func vendorConfinementRect(contentFrame: CGRect, videoFrame: CGRect, screenFrame: CGRect) -> CGRect? {
+        guard [contentFrame, videoFrame, screenFrame].allSatisfy(Self.isFiniteRect) else { return nil }
+        let adjustedContentFrame = CGRect(
+            x: contentFrame.minX,
+            y: contentFrame.minY + 1,
+            width: max(0, contentFrame.width - 1),
+            height: max(0, contentFrame.height - 1)
+        )
+        let visibleContentFrame = adjustedContentFrame.intersection(screenFrame)
+        let confinementFrame = visibleContentFrame.intersection(videoFrame)
+        guard !confinementFrame.isNull, confinementFrame.width >= 1, confinementFrame.height >= 1 else { return nil }
+        return confinementFrame
+    }
+
+    private static func isFiniteRect(_ rect: CGRect) -> Bool {
+        rect.origin.x.isFinite && rect.origin.y.isFinite && rect.width.isFinite && rect.height.isFinite &&
+            rect.width >= 0 && rect.height >= 0
     }
 
     static func accumulatedWheelDelta(scrollingDeltaY: Double,
