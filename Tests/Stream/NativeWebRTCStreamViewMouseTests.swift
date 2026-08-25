@@ -247,13 +247,17 @@ private struct MouseButtonTransition: Equatable {
     #expect(mouseButtonTransitions(events).last == MouseButtonTransition(button: .left, isPressed: false))
 }
 
-@Test @MainActor func absoluteCursorConfinementUsesCompleteWindowFrame() {
-    let frame = CGRect(x: 100, y: 200, width: 800, height: 600)
+@Test @MainActor func absoluteCursorConfinementMatchesVendorVisibleVideoGeometry() throws {
+    let contentFrame = CGRect(x: 100, y: 200, width: 800, height: 600)
+    let videoFrame = CGRect(x: 120, y: 300, width: 700, height: 500)
+    let screenFrame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+    let confinementFrame = try #require(NativeWebRTCStreamView.vendorConfinementRect(contentFrame: contentFrame, videoFrame: videoFrame, screenFrame: screenFrame))
 
-    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 130, y: 770), to: frame) == CGPoint(x: 130, y: 770))
-    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 20, y: 900), to: frame) == CGPoint(x: 101, y: 799))
-    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 950, y: 100), to: frame) == CGPoint(x: 899, y: 201))
-    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: CGFloat.nan, y: 300), to: frame) == nil)
+    #expect(confinementFrame == CGRect(x: 120, y: 300, width: 700, height: 468))
+    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 130, y: 770), to: confinementFrame) == CGPoint(x: 130, y: 768))
+    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 20, y: 900), to: confinementFrame) == CGPoint(x: 120, y: 768))
+    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: 950, y: 100), to: confinementFrame) == CGPoint(x: 820, y: 300))
+    #expect(NativeWebRTCStreamView.confinedCursorPoint(CGPoint(x: CGFloat.nan, y: 300), to: confinementFrame) == nil)
 }
 
 @Test @MainActor func cursorModeTransitionReleasesButtonsUsingPreviousMode() throws {
