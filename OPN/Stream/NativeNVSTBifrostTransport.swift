@@ -1092,6 +1092,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
                 OPNStreamPreferences.presentationCapability(codec: string(profile["codec"], fallback: "H264"), capabilities: $0)
             }
         )
+        modeSelection["cursorType"] = nativeWindowedCursorType
+        modeSelection["windowedStreaming"] = nativeWindowedStreaming
         guard JSONSerialization.isValidJSONObject(modeSelection),
               let data = try? JSONSerialization.data(withJSONObject: modeSelection),
               let string = String(data: data, encoding: .utf8), !string.isEmpty else {
