@@ -160,6 +160,9 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     var cursorAssociationHandler: (Bool) -> CGError = {
         CGAssociateMouseAndMouseCursorPosition(boolean_t($0 ? 1 : 0))
     }
+    var cursorLocationProvider: () -> CGPoint = {
+        NSEvent.mouseLocation
+    }
     public private(set) var isPointerLocked = false
     public private(set) var isAbsoluteCursorConfined = false
     public private(set) var isEmittingNeutralizingAbsolutePosition = false
@@ -694,13 +697,14 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard window != nil else { return }
         disableAbsoluteCursorConfinement()
         guard !isAbsoluteCursorConfined else { return }
+        let restoreLocation = cursorLocationProvider()
         guard cursorAssociationHandler(false) == .success else {
             WebRTCMediaTelemetry.capture("webrtc.input.pointer_lock.failed", level: .error, message: "macOS rejected relative pointer capture.", attributes: ["locked": "false"])
             return
         }
         cursorAssociationGeneration &+= 1
         isPointerLocked = true
-        pointerLockRestoreLocation = NSEvent.mouseLocation
+        pointerLockRestoreLocation = restoreLocation
         window?.acceptsMouseMovedEvents = true
         window?.makeFirstResponder(self)
         updatePointerLockCursorVisibility()
