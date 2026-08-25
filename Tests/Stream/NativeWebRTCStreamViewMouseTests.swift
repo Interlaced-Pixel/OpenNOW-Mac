@@ -266,6 +266,17 @@ private struct MouseButtonTransition: Equatable {
     #expect(remainder == 727)
 }
 
+@Test func relativeMouseDeltaUsesVendorTowardZeroConversion() {
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(1.9) == 1)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(-1.9) == -1)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(0.9) == 0)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(-0.9) == 0)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(32767.9) == Int16.max)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(-32768.9) == Int16.min)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(.infinity) == 0)
+    #expect(NativeWebRTCStreamView.truncatedMouseDelta(.nan) == 0)
+}
+
 @Test func nativeNVSTMouseDispatcherPreservesEventOrder() async {
     let recorder = MouseInputRecorder()
     let dispatcher = NativeNVSTInputDispatcher { event in
