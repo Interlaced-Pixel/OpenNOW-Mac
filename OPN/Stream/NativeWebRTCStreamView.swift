@@ -667,7 +667,7 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             emitAbsoluteMousePosition(event)
             return
         }
-        emitMouseMove(deltaX: Self.clampedInt16(Int(event.deltaX.rounded())), deltaY: Self.clampedInt16(Int(event.deltaY.rounded())))
+        emitMouseMove(deltaX: Self.truncatedMouseDelta(event.deltaX), deltaY: Self.truncatedMouseDelta(event.deltaY))
     }
 
     private func emitMouseMove(deltaX: Int16, deltaY: Int16) {
@@ -1238,8 +1238,12 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         return modifiers
     }
 
-    private static func clampedInt16(_ value: Int) -> Int16 {
-        Int16(max(Int(Int16.min), min(Int(Int16.max), value)))
+    static func truncatedMouseDelta(_ value: Double) -> Int16 {
+        guard value.isFinite else { return 0 }
+        let truncated = value.rounded(.towardZero)
+        if truncated <= Double(Int16.min) { return Int16.min }
+        if truncated >= Double(Int16.max) { return Int16.max }
+        return Int16(truncated)
     }
 
     private static func timestamp() -> MediaTimestamp {
