@@ -1082,7 +1082,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
         }
         let finalizedFeatures = rawSession["finalizedStreamingFeatures"] as? [String: Any] ?? [:]
         let requestedFeatures = requestData["requestedStreamingFeatures"] as? [String: Any] ?? [:]
-        let modeSelection = modeSelectionProfile(
+        var modeSelection = modeSelectionProfile(
             from: profile,
             dimensions: dimensions,
             finalizedFeatures: finalizedFeatures,
