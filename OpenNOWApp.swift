@@ -161,7 +161,7 @@ struct OpenNOWApp: App {
 
 @MainActor
 final class OpenNOWAppDelegate: NSObject, NSApplicationDelegate {
-    private let githubUpdater = OpenNOWGitHubUpdater(owner: "OpenCloudGaming", repository: "OpenNOW-Mac")
+    private let githubUpdater = OpenNOWGitHubUpdater(owner: "Interlaced-Pixel", repository: "OpenNOW-Mac")
     private var applicationUpdateCheckTimer: Timer?
     private var updateCheckTask: Task<Void, Never>?
     private var updateInstallTask: Task<Void, Never>?
