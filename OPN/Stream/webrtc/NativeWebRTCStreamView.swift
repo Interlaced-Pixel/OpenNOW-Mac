@@ -20,6 +20,7 @@ private final class NativeWebRTCVideoSurfaceView: NSView {
 
 
 
+@MainActor
 public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     public var onInputEvent: ((UserInputEvent) -> Void)?
     public var onAbsoluteMouseMove: ((WebRTCAbsoluteMouseEvent) -> Void)?

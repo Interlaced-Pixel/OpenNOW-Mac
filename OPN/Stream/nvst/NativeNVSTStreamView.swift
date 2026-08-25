@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 
+@MainActor
 private final class NativeNVSTVideoSurfaceView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -28,6 +29,7 @@ private final class NativeNVSTRendererWindow: NSWindow {
 }
 
 
+@MainActor
 public final class NativeNVSTStreamView: NSView, NSTextInputClient {
     public var onInputEvent: ((UserInputEvent) -> Void)?
     public var onAbsoluteMouseMove: ((NativeNVSTAbsoluteMouseEvent) -> Void)?

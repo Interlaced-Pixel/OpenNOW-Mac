@@ -266,6 +266,7 @@ private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
 }
 
 
+@MainActor
 struct NativeNVSTMediaStreamSurface: View {
     private struct FailurePresentation: Identifiable {
         let id = UUID()

@@ -2,6 +2,7 @@ import AppKit
 import CoreAudio
 import CoreMedia
 import Foundation
+import SystemConfiguration
 import VideoToolbox
 
 public struct OPNStreamAspectOption: Equatable, Sendable {
@@ -488,7 +489,7 @@ public enum OPNStreamPreferences {
         return devices
     }
 
-    public static func loadDeviceCapabilities(screen: NSScreen? = NSScreen.main) -> OPNStreamDeviceCapabilities {
+    public static func loadDeviceCapabilities(screen: NSScreen? = nil) -> OPNStreamDeviceCapabilities {
         var capabilities = OPNStreamDeviceCapabilities()
         capabilities.h264HardwareDecodeSupported = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264)
         capabilities.h265HardwareDecodeSupported = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
@@ -496,6 +497,7 @@ public enum OPNStreamPreferences {
             capabilities.av1HardwareDecodeSupported = VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)
         }
 
+        let screen = screen ?? (Thread.isMainThread ? NSScreen.main : nil)
         guard let screen else { return capabilities }
         let scale = screen.backingScaleFactor > 0 ? screen.backingScaleFactor : 1.0
         capabilities.displayDpi = max(100, Int((100.0 * scale).rounded()))
@@ -1507,8 +1509,7 @@ public enum OPNStreamPreferences {
         var interfaces: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&interfaces) == 0, let first = interfaces else { return "Unknown" }
         defer { freeifaddrs(interfaces) }
-        var hasWifi = false
-        var hasWired = false
+        var activeInterfaceNames = Set<String>()
         var pointer: UnsafeMutablePointer<ifaddrs>? = first
         while let item = pointer?.pointee {
             defer { pointer = item.ifa_next }
@@ -1517,11 +1518,19 @@ public enum OPNStreamPreferences {
             if flags & IFF_UP == 0 || flags & IFF_RUNNING == 0 || flags & IFF_LOOPBACK != 0 { continue }
             let name = String(cString: namePointer)
             if name.hasPrefix("awdl") || name.hasPrefix("llw") || name.hasPrefix("utun") { continue }
-            if name == "en0" || name == "en1" { hasWifi = true }
-            else if name.hasPrefix("en") || name.hasPrefix("bridge") { hasWired = true }
+            activeInterfaceNames.insert(name)
         }
-        if hasWired { return "Ethernet" }
-        if hasWifi { return "WiFi" }
+        let interfaceTypes = (SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] ?? []).reduce(into: [String: CFString]()) { result, interface in
+            guard let name = SCNetworkInterfaceGetBSDName(interface) as String?,
+                  let type = SCNetworkInterfaceGetInterfaceType(interface) else { return }
+            result[name] = type
+        }
+        if activeInterfaceNames.contains(where: { CFEqual(interfaceTypes[$0], kSCNetworkInterfaceTypeEthernet) }) {
+            return "Ethernet"
+        }
+        if activeInterfaceNames.contains(where: { CFEqual(interfaceTypes[$0], kSCNetworkInterfaceTypeIEEE80211) }) {
+            return "WiFi"
+        }
         return "Unknown"
     }
 

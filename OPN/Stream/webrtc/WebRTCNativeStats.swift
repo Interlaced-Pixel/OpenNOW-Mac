@@ -19,6 +19,7 @@ final class OPNLibWebRTCStats: NSObject, @unchecked Sendable {
     func requestStats(sessionImpl: OPNLibWebRTCSessionImpl?, queue: DispatchQueue) {
         guard Self.envFlagEnabled("OPN_ENABLE_WEBRTC_STATS", defaultValue: true) else { return }
         guard let peerConnection = sessionImpl?.peerConnection else { return }
+        guard peerConnection.iceConnectionState == .connected || peerConnection.iceConnectionState == .completed else { return }
         let now = Self.monotonicMs()
         guard lastRequestMs == 0 || now - lastRequestMs >= 900 else { return }
         guard !requestInFlight else { return }
@@ -40,9 +41,11 @@ final class OPNLibWebRTCStats: NSObject, @unchecked Sendable {
     @objc(startPollingWithSessionImpl:queue:)
     func startPolling(sessionImpl: OPNLibWebRTCSessionImpl?, queue: DispatchQueue) {
         guard timer == nil else { return }
+        guard let peerConnection = sessionImpl?.peerConnection,
+              peerConnection.iceConnectionState == .connected || peerConnection.iceConnectionState == .completed else { return }
         self.sessionImpl = sessionImpl
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(100))
+        timer.schedule(deadline: .now() + .milliseconds(1500), repeating: 1, leeway: .milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.requestStats(sessionImpl: self.sessionImpl, queue: queue)

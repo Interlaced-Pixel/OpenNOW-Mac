@@ -106,15 +106,15 @@ private final class OPNCoreAudioTerminationResources: @unchecked Sendable {
             }
             return
         }
-        if let playoutUnit {
-            if wasPlaying { AudioOutputUnitStop(playoutUnit) }
-            if wasPlayoutInitialized { AudioUnitUninitialize(playoutUnit) }
-            AudioComponentInstanceDispose(playoutUnit)
-        }
         if let recordingUnit {
             if wasRecording { AudioOutputUnitStop(recordingUnit) }
             if wasRecordingInitialized { AudioUnitUninitialize(recordingUnit) }
             AudioComponentInstanceDispose(recordingUnit)
+        }
+        if let playoutUnit {
+            if wasPlaying { AudioOutputUnitStop(playoutUnit) }
+            if wasPlayoutInitialized { AudioUnitUninitialize(playoutUnit) }
+            AudioComponentInstanceDispose(playoutUnit)
         }
     }
 }
@@ -203,15 +203,6 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     func terminateDevice() -> Bool {
         if DispatchQueue.getSpecific(key: audioQueueKey) != nil {
             terminateDeviceLocked()
-        } else if Thread.isMainThread {
-            audioQueue.async { [self] in
-                terminateDeviceLocked()
-            }
-            WebRTCMediaTelemetry.capture(
-                "webrtc.native.audio.terminate_scheduled",
-                level: .debug,
-                message: "CoreAudio RTC device termination scheduled on the audio queue."
-            )
         } else {
             audioQueue.sync {
                 terminateDeviceLocked()
@@ -235,10 +226,10 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
             }
             return
         }
-        stopPlayoutLocked()
         stopRecordingLocked()
-        disposePlayoutUnitLocked()
+        stopPlayoutLocked()
         disposeRecordingUnitLocked()
+        disposePlayoutUnitLocked()
         delegate = nil
         isInitialized = false
         isPlayoutInitialized = false

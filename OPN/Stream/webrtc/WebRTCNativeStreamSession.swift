@@ -316,9 +316,9 @@ final class OPNLibWebRTCStreamSession: NSObject, @unchecked Sendable {
             }
             impl.reliableInputChannel?.close()
             impl.partialInputChannel?.close()
-            impl.peerConnection?.close()
             _ = impl.audioDevice?.terminateDevice()
             impl.audioDevice = nil
+            impl.peerConnection?.close()
         }
         impl = nil
     }
