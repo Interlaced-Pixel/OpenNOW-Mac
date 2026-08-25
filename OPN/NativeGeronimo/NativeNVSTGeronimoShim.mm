@@ -1991,6 +1991,13 @@ bool videoSurfaceDimensions(void *nativeHandle, uint32_t &width, uint32_t &heigh
     }
     if (surfaceView == nil) { return false; }
     NSSize size = surfaceView.bounds.size;
+    if ([nativeObject isKindOfClass:[NSWindow class]] &&
+        (!std::isfinite(size.width) || !std::isfinite(size.height) || size.width < 1 || size.height < 1)) {
+        size = static_cast<NSWindow *>(nativeObject).frame.size;
+        if (std::isfinite(size.width) && std::isfinite(size.height) && size.width >= 1 && size.height >= 1) {
+            [surfaceView setFrameSize:size];
+        }
+    }
     if (size.width < 1 || size.height < 1 || size.width > UINT32_MAX || size.height > UINT32_MAX) { return false; }
     width = static_cast<uint32_t>(size.width);
     height = static_cast<uint32_t>(size.height);
