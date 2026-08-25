@@ -8,6 +8,7 @@ import Foundation
 
 enum ControllerCatalogFocusArea {
     case navigation
+    case categories
     case content
 }
 
@@ -51,6 +52,7 @@ enum ControllerNavigationItem: CaseIterable, Equatable, Identifiable {
 final class ControllerCatalogViewModel: ObservableObject {
     @Published var focusArea = ControllerCatalogFocusArea.navigation
     @Published var selectedNavigationIndex = 0
+    @Published var selectedCategoryIndex = 0
     @Published var selectedRailIndex = 0
     @Published var selectedGameIndices: [String: Int] = [:]
     @Published var isActionMenuVisible = false
@@ -87,6 +89,10 @@ final class ControllerCatalogViewModel: ObservableObject {
 
     func clampRailSelection(sectionCount: Int) {
         selectedRailIndex = min(max(selectedRailIndex, 0), max(sectionCount - 1, 0))
+    }
+
+    func clampCategorySelection(categoryCount: Int) {
+        selectedCategoryIndex = min(max(selectedCategoryIndex, 0), max(categoryCount - 1, 0))
     }
 }
 

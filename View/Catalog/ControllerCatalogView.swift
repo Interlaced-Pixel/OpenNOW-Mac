@@ -144,6 +144,18 @@ struct ControllerCatalogView: View {
     @StateObject private var controllerViewModel = ControllerCatalogViewModel()
 
     private var navigationItems: [ControllerNavigationItem] { controllerViewModel.navigationItems }
+    private var categories: [ControllerCatalogCategory] {
+        var values = [ControllerCatalogCategory(id: "all", title: "All Games", icon: "square.grid.2x2.fill")]
+        var seen = Set<String>()
+        for genre in viewModel.catalogSections.flatMap({ $0.games.flatMap(\.genres) }) {
+            let title = genre.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = title.lowercased()
+            guard !title.isEmpty, !seen.contains(key), values.count < 8 else { continue }
+            seen.insert(key)
+            values.append(ControllerCatalogCategory(id: key, title: title, icon: categoryIcon(for: title)))
+        }
+        return values
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -245,6 +257,7 @@ struct ControllerCatalogView: View {
         .onChange(of: viewModel.selectedMainPage) { _, _ in synchronizeNavigationSelection() }
         .onChange(of: viewModel.selectedCatalogDestination) { _, _ in synchronizeNavigationSelection() }
         .onChange(of: viewModel.catalogSections.map(\.id)) { _, _ in clampRailSelection() }
+        .onChange(of: categories.map(\.id)) { _, _ in clampCategorySelection() }
         .onChange(of: viewModel.catalogGames.map(\.catalogIdentity)) { _, _ in
             controllerViewModel.searchResultIndex = min(controllerViewModel.searchResultIndex, max(viewModel.catalogGames.count - 1, 0))
         }
@@ -256,11 +269,14 @@ struct ControllerCatalogView: View {
             ControllerGamesPage(
                 viewModel: viewModel,
                 focusArea: controllerViewModel.focusArea,
+                categories: categories,
+                selectedCategoryIndex: controllerViewModel.selectedCategoryIndex,
                 selectedRailIndex: controllerViewModel.selectedRailIndex,
                 selectedGameIndices: $controllerViewModel.selectedGameIndices,
                 layout: layout,
                 openDetails: openDetails,
-                showAll: openShowAll
+                showAll: openShowAll,
+                selectCategory: selectCategory
             )
         case .recordings:
             ControllerEmbeddedPage(title: "Recordings", subtitle: "Saved gameplay videos", layout: layout) {
@@ -310,6 +326,7 @@ struct ControllerCatalogView: View {
         if controllerViewModel.isSearchVisible { return [.move, .select, .back, .clear] }
         if controllerViewModel.isDetailVisible { return [.move, .select, .back, .search] }
         if controllerViewModel.showAllSection != nil { return [.move, .select, .back] }
+        if controllerViewModel.focusArea == .categories { return [.move, .select, .back, .search, .menu] }
         if controllerViewModel.focusArea == .content { return [.move, .select, .back, .search, .showAll, .menu] }
         return [.move, .select, .back, .search, .menu]
     }
@@ -386,7 +403,9 @@ struct ControllerCatalogView: View {
         case .confirm:
             confirmFocusedItem()
         case .back:
-            if viewModel.selectedMainPage != .games || viewModel.selectedCatalogDestination != .home {
+            if controllerViewModel.focusArea == .categories {
+                controllerViewModel.focusArea = .navigation
+            } else if viewModel.selectedMainPage != .games || viewModel.selectedCatalogDestination != .home {
                 viewModel.showCatalogDestination(.home)
                 controllerViewModel.focusArea = .content
             }
@@ -482,6 +501,13 @@ struct ControllerCatalogView: View {
                 if controllerViewModel.selectedRailIndex == 0 { controllerViewModel.focusArea = .navigation } else { moveRail(delta: -1) }
             case .down: moveRail(delta: 1)
             }
+        case .categories:
+            switch direction {
+            case .left: controllerViewModel.selectedCategoryIndex = max(controllerViewModel.selectedCategoryIndex - 1, 0)
+            case .right: controllerViewModel.selectedCategoryIndex = min(controllerViewModel.selectedCategoryIndex + 1, max(categories.count - 1, 0))
+            case .up: controllerViewModel.focusArea = .navigation
+            case .down: controllerViewModel.focusArea = .content
+            }
         }
     }
 
@@ -489,6 +515,11 @@ struct ControllerCatalogView: View {
         if controllerViewModel.focusArea == .navigation {
             guard navigationItems.indices.contains(controllerViewModel.selectedNavigationIndex) else { return }
             selectNavigationItem(navigationItems[controllerViewModel.selectedNavigationIndex])
+            return
+        }
+        if controllerViewModel.focusArea == .categories {
+            guard categories.indices.contains(controllerViewModel.selectedCategoryIndex) else { return }
+            selectCategory(categories[controllerViewModel.selectedCategoryIndex])
             return
         }
         guard let section = currentSection else { return }
@@ -503,13 +534,13 @@ struct ControllerCatalogView: View {
         switch item {
         case .home:
             viewModel.showCatalogDestination(.home)
-            controllerViewModel.focusArea = .content
+            controllerViewModel.focusArea = .categories
         case .library:
             viewModel.showCatalogDestination(.library)
-            controllerViewModel.focusArea = .content
+            controllerViewModel.focusArea = .categories
         case .favorites:
             viewModel.showCatalogDestination(.favorites)
-            controllerViewModel.focusArea = .content
+            controllerViewModel.focusArea = .categories
         case .search:
             openSearchOverlay()
         case .recordings:
@@ -762,6 +793,33 @@ struct ControllerCatalogView: View {
     private func clampRailSelection() {
         controllerViewModel.clampRailSelection(sectionCount: viewModel.catalogSections.count)
     }
+
+    private func clampCategorySelection() {
+        controllerViewModel.clampCategorySelection(categoryCount: categories.count)
+    }
+
+    private func selectCategory(_ category: ControllerCatalogCategory) {
+        controllerViewModel.selectedCategoryIndex = categories.firstIndex(of: category) ?? 0
+        controllerViewModel.focusArea = .content
+        controllerViewModel.selectedRailIndex = 0
+        if category.id == "all" {
+            viewModel.clearSearchAndFilters()
+        } else {
+            viewModel.searchQuery = category.title
+            viewModel.browseCatalog()
+        }
+    }
+
+    private func categoryIcon(for title: String) -> String {
+        let value = title.lowercased()
+        if value.contains("action") { return "bolt.fill" }
+        if value.contains("rpg") || value.contains("role") { return "person.crop.circle.fill" }
+        if value.contains("strategy") { return "checkerboard.rectangle" }
+        if value.contains("racing") || value.contains("sport") { return "flag.checkered" }
+        if value.contains("horror") { return "moon.fill" }
+        if value.contains("adventure") { return "mountain.2.fill" }
+        return "sparkles"
+    }
 }
 
 private struct ControllerHeader: View {
@@ -772,22 +830,38 @@ private struct ControllerHeader: View {
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("GEFORCE NOW")
-                    .font(.nvidia(size: 11, weight: .bold))
+                Text("OPENNOW")
+                    .font(.nvidia(size: 12, weight: .bold))
                     .foregroundStyle(Color.openNowGreen)
-                    .tracking(1.6)
+                    .tracking(1.8)
                 Text(headerTitle)
-                    .font(.nvidia(size: 24, weight: .bold))
+                    .font(.nvidia(size: 22, weight: .bold))
                     .foregroundStyle(.white.opacity(0.96))
             }
             Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(syncIsActive ? Color.orange : Color.openNowGreen)
+                    .frame(width: 7, height: 7)
+                Text(syncLabel)
+                    .font(.nvidia(size: 10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 30)
+            .background((syncIsActive ? Color.orange : Color.openNowGreen).opacity(0.10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke((syncIsActive ? Color.orange : Color.openNowGreen).opacity(0.28), lineWidth: 1)
+            }
             ControllerDeviceBadge(glyphs: glyphs)
             CatalogAccountAvatar(account: viewModel.account, size: 34)
         }
         .frame(width: layout.contentWidth)
         .frame(height: 72)
         .background {
-            Color.black.opacity(0.24)
+            Color.black.opacity(0.30)
             WindowDragArea()
         }
     }
@@ -798,6 +872,16 @@ private struct ControllerHeader: View {
         case .recordings: return "Recordings"
         case .settings: return viewModel.selectedSettingsPage.title
         }
+    }
+
+    private var syncIsActive: Bool {
+        viewModel.isLoading || viewModel.isLoadingPanels
+    }
+
+    private var syncLabel: String {
+        if syncIsActive { return "SYNCING LIBRARY" }
+        if viewModel.libraryGames.isEmpty { return "LIBRARY NOT SYNCED" }
+        return "CLOUD SYNCED"
     }
 }
 
@@ -822,6 +906,12 @@ private struct ControllerDeviceBadge: View {
         .background(Color.white.opacity(0.055))
         .overlay { Rectangle().stroke(Color.white.opacity(0.10), lineWidth: 1) }
     }
+}
+
+private struct ControllerCatalogCategory: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let icon: String
 }
 
 private struct ControllerNavigationBar: View {
@@ -849,8 +939,12 @@ private struct ControllerNavigationBar: View {
                         .foregroundStyle(selected || active ? .black.opacity(0.86) : .white.opacity(0.78))
                         .padding(.horizontal, 14)
                         .frame(height: 40)
-                        .background(selected || active ? Color.openNowGreen : Color.white.opacity(0.065))
-                        .overlay { Rectangle().stroke(selected ? .white.opacity(0.82) : (active ? Color.openNowGreen : Color.white.opacity(0.10)), lineWidth: selected ? 2 : 1) }
+                        .background(selected ? Color.openNowGreen : (active ? Color.openNowGreen.opacity(0.14) : Color.white.opacity(0.065)))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(selected ? .white.opacity(0.82) : (active ? Color.openNowGreen.opacity(0.72) : Color.white.opacity(0.10)), lineWidth: selected ? 2 : 1)
+                        }
                     }
                     .buttonStyle(.plain)
                 }
@@ -866,11 +960,14 @@ private struct ControllerNavigationBar: View {
 private struct ControllerGamesPage: View {
     @ObservedObject var viewModel: CatalogViewModel
     let focusArea: ControllerCatalogFocusArea
+    let categories: [ControllerCatalogCategory]
+    let selectedCategoryIndex: Int
     let selectedRailIndex: Int
     @Binding var selectedGameIndices: [String: Int]
     let layout: ControllerLayoutMetrics
     let openDetails: (OPNCatalogGameObject, String) -> Void
     let showAll: (CatalogSectionModel) -> Void
+    let selectCategory: (ControllerCatalogCategory) -> Void
 
     var body: some View {
         let sections = viewModel.catalogSections
@@ -881,6 +978,14 @@ private struct ControllerGamesPage: View {
                         ControllerHeroBillboard(viewModel: viewModel, game: heroGame(sections: sections), height: layout.heroHeight)
                             .frame(width: layout.contentWidth)
                             .padding(.top, layout.compactHeight ? 10 : 14)
+
+                        ControllerCategoryRail(
+                            categories: categories,
+                            selectedIndex: selectedCategoryIndex,
+                            isFocused: focusArea == .categories,
+                            select: selectCategory
+                        )
+                        .frame(width: layout.contentWidth)
 
                         if !viewModel.errorMessage.isEmpty {
                             CatalogMessageView(message: viewModel.errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -946,6 +1051,62 @@ private struct ControllerGamesPage: View {
     }
 }
 
+private struct ControllerCategoryRail: View {
+    let categories: [ControllerCatalogCategory]
+    let selectedIndex: Int
+    let isFocused: Bool
+    let select: (ControllerCatalogCategory) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("EXPLORE BY GENRE")
+                    .font(.nvidia(size: 11, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.openNowGreen.opacity(0.88))
+                Spacer(minLength: 0)
+                Text("D-PAD TO MOVE")
+                    .font(.nvidia(size: 10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.38))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+                        let isSelected = index == selectedIndex
+                        Button { select(category) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: category.icon)
+                                    .font(.nvidia(size: 12, weight: .bold))
+                                Text(category.title.uppercased())
+                                    .font(.nvidia(size: 11, weight: .bold))
+                                    .tracking(0.6)
+                            }
+                            .foregroundStyle(isSelected ? .black.opacity(0.88) : .white.opacity(0.76))
+                            .padding(.horizontal, 13)
+                            .frame(height: 36)
+                            .background(isSelected ? Color.openNowGreen : Color.white.opacity(0.065))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(isFocused && isSelected ? .white.opacity(0.9) : (isSelected ? Color.openNowGreen : Color.white.opacity(0.12)), lineWidth: isFocused && isSelected ? 2 : 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(isFocused ? Color.openNowGreen.opacity(0.65) : Color.white.opacity(0.08), lineWidth: isFocused ? 2 : 1)
+        }
+    }
+}
+
 private struct ControllerHeroBillboard: View {
     @ObservedObject var viewModel: CatalogViewModel
     let game: OPNCatalogGameObject?
@@ -960,7 +1121,7 @@ private struct ControllerHeroBillboard: View {
                 LinearGradient(colors: [.black.opacity(0.94), .black.opacity(0.48), .black.opacity(0.10)], startPoint: .leading, endPoint: .trailing)
                 LinearGradient(colors: [.clear, .black.opacity(0.76)], startPoint: .top, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("NOW PLAYING IN THE CLOUD")
+                    Text("READY TO PLAY IN THE CLOUD")
                         .font(.nvidia(size: 11, weight: .bold))
                         .tracking(1.6)
                         .foregroundStyle(Color.openNowGreen)
@@ -973,6 +1134,7 @@ private struct ControllerHeroBillboard: View {
                         if !game.ratingLabel.isEmpty { ControllerMetadataPill(text: game.ratingLabel) }
                         if game.supportsGamepad { ControllerMetadataPill(text: "Gamepad") }
                         if game.isInLibrary { ControllerMetadataPill(text: "In Library", highlighted: true) }
+                        if game.isFreeToPlay { ControllerMetadataPill(text: "Free to Play") }
                         if let badge = game.cardBadgeLabel { ControllerMetadataPill(text: badge) }
                     }
                     Text(heroDescription(game))
@@ -1047,7 +1209,7 @@ private struct ControllerGameRail: View {
                 Text(section.title)
                     .font(.nvidia(size: isFocused ? 24 : 21, weight: .bold))
                     .foregroundStyle(isFocused ? .white : .white.opacity(0.84))
-                Text("\(section.games.count) games".uppercased())
+                Text("\(section.games.count) GAMES")
                     .font(.nvidia(size: 11, weight: .bold))
                     .foregroundStyle(Color.openNowGreen.opacity(0.82))
                 Spacer(minLength: 0)
@@ -1170,7 +1332,9 @@ private struct ControllerGameTile: View {
 
     private var subtitle: String {
         if game.isLaunchPatching { return isQueuedForPatching ? "Queued for patch completion" : game.patchStatusPrimaryDisplayText }
-        if game.isInLibrary { return "In Library" }
+        if game.isInLibrary || game.variants.contains(where: { $0.inLibrary || $0.librarySelected }) { return "Cloud ready • In Library" }
+        if game.isFreeToPlay { return "Free to play • Add to library" }
+        if !game.membershipTierLabel.isEmpty { return "\(game.membershipTierLabel) membership required" }
         if !game.primaryStoreLabel.isEmpty { return game.primaryStoreLabel }
         return game.supportsGamepad ? "Gamepad supported" : "Cloud ready"
     }
@@ -1363,6 +1527,12 @@ private struct ControllerGameDetailOverlay: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ControllerOverlayHeader(title: game.title.isEmpty ? "Selected Game" : game.title, subtitle: detailSubtitle, glyphs: glyphs, close: close)
                     detailMetadata
+                    ControllerCloudStatusCard(
+                        title: cloudStatusTitle,
+                        message: cloudStatusMessage,
+                        systemImage: cloudStatusIcon,
+                        isReady: cloudStatusIsReady
+                    )
                     Text(detailDescription)
                         .font(.nvidia(size: 18, weight: .medium))
                         .foregroundStyle(.white.opacity(0.82))
@@ -1417,6 +1587,46 @@ private struct ControllerGameDetailOverlay: View {
         return "Play instantly through GeForce NOW cloud streaming."
     }
 
+    private var cloudStatusTitle: String {
+        if game.isLaunchPatching || selectedVariant?.isPatching == true {
+            return "Patching before cloud launch"
+        }
+        if selectedPlatformOption?.hasAccess == true || (selectedPlatformOption == nil && game.isInLibrary) {
+            return "Ready to play in the cloud"
+        }
+        if viewModel.isFreeTierAccount, game.freeAccountAccessBadgeLabel(isFreeTierAccount: true) != nil {
+            return "Membership required"
+        }
+        if game.isFreeToPlay {
+            return "Free-to-play game"
+        }
+        return "Ownership required"
+    }
+
+    private var cloudStatusMessage: String {
+        if game.isLaunchPatching || selectedVariant?.isPatching == true {
+            return game.patchStatusSecondaryDisplayText.isEmpty ? "GeForce NOW is preparing this game." : game.patchStatusSecondaryDisplayText
+        }
+        if selectedPlatformOption?.hasAccess == true || (selectedPlatformOption == nil && game.isInLibrary) {
+            return "Your selected store account can launch this game."
+        }
+        if game.isFreeToPlay {
+            return "Add the game to your connected store account before launching."
+        }
+        return selectedPlatformOption?.status.isEmpty == false ? selectedPlatformOption?.status ?? "Select an owned store version to launch." : "Select an owned store version to launch."
+    }
+
+    private var cloudStatusIcon: String {
+        if game.isLaunchPatching || selectedVariant?.isPatching == true { return "clock.arrow.circlepath" }
+        if cloudStatusIsReady { return "checkmark.circle.fill" }
+        if game.isFreeToPlay { return "gift.fill" }
+        return "lock.fill"
+    }
+
+    private var cloudStatusIsReady: Bool {
+        selectedPlatformOption?.hasAccess == true || (selectedPlatformOption == nil && game.isInLibrary)
+    }
+
     private var detailMetadata: some View {
         FlowLayout(spacing: 8) {
             if !game.ratingLabel.isEmpty { ControllerMetadataPill(text: game.ratingLabel) }
@@ -1444,6 +1654,41 @@ private struct ControllerGameDetailOverlay: View {
         if game.maxOnlinePlayers > 1 { return "Online multiplayer" }
         if game.maxLocalPlayers > 1 { return "1-\(game.maxLocalPlayers) local players" }
         return "Single player"
+    }
+}
+
+private struct ControllerCloudStatusCard: View {
+    let title: String
+    let message: String
+    let systemImage: String
+    let isReady: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.nvidia(size: 17, weight: .bold))
+                .foregroundStyle(isReady ? Color.openNowGreen : .white.opacity(0.78))
+                .frame(width: 28, height: 28)
+                .background(isReady ? Color.openNowGreen.opacity(0.14) : Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.nvidia(size: 13, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.92))
+                Text(message)
+                    .font(.nvidia(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.065))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isReady ? Color.openNowGreen.opacity(0.42) : Color.white.opacity(0.12), lineWidth: 1)
+        }
     }
 }
 

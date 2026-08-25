@@ -14,22 +14,22 @@ import SwiftUI
 
 private enum CatalogVendorLayout {
     static let windowTopInset: CGFloat = 42
-    static let appBarHeight: CGFloat = 48
+    static let appBarHeight: CGFloat = 58
     static let appBarBackground = OpenNOWDesign.Surface.appBar
     static let mallSurface = OpenNOWDesign.Surface.app
     static let tileTray = OpenNOWDesign.Surface.tileTray
-    static let sectionHeaderMargin: CGFloat = 18
-    static let carouselContainerMargin: CGFloat = 14
-    static let tileHorizontalMargin: CGFloat = 5
-    static let tileTopMargin: CGFloat = 8
-    static let cardTrayHeight: CGFloat = 32
-    static let wideTileWidth: CGFloat = 185
-    static let wideTileHeight: CGFloat = 104
-    static let tileScaleFactor: CGFloat = 1.06
-    static let heroAspectRatio: CGFloat = 0.235
-    static let heroFallbackHeight: CGFloat = 300
-    static let detailPanelHeight: CGFloat = 500
-    static let mainMenuWidth: CGFloat = 320
+    static let sectionHeaderMargin: CGFloat = 28
+    static let carouselContainerMargin: CGFloat = 24
+    static let tileHorizontalMargin: CGFloat = 6
+    static let tileTopMargin: CGFloat = 10
+    static let cardTrayHeight: CGFloat = 38
+    static let wideTileWidth: CGFloat = 224
+    static let wideTileHeight: CGFloat = 126
+    static let tileScaleFactor: CGFloat = 1.04
+    static let heroAspectRatio: CGFloat = 0.265
+    static let heroFallbackHeight: CGFloat = 360
+    static let detailPanelHeight: CGFloat = 540
+    static let mainMenuWidth: CGFloat = 344
 
     static func heroHeight(for width: CGFloat) -> CGFloat {
         width > 0 ? min(width * heroAspectRatio, heroFallbackHeight) : heroFallbackHeight
@@ -40,7 +40,7 @@ private enum CatalogVendorLayout {
     }
 
     static func searchWidth(for width: CGFloat) -> CGFloat {
-        OpenNOWDesign.clamped(width * 0.33, minimum: 260, maximum: 420)
+        OpenNOWDesign.clamped(width * 0.30, minimum: 280, maximum: 440)
     }
 
     static func launchPanelWidth(for width: CGFloat) -> CGFloat {
@@ -624,7 +624,6 @@ private struct VendorStreamLaunchLoadingOverlay: View {
         let progress = viewModel.activeStreamProgress
         let configuration = viewModel.activeStreamConfiguration
         let title = progress?.title.isEmpty == false ? progress?.title ?? "GeForce NOW" : "GeForce NOW"
-        let stage = viewModel.activeStreamAdPlayback == nil ? "Starting" : "Sponsored break"
         let queuePosition = progress?.queuePosition
         let cancelAction = viewModel.cancelActiveStreamLaunch
         let accessoryPresented = viewModel.activeStreamAdPlayback != nil
@@ -1004,7 +1003,28 @@ private struct CatalogTopBar: View {
                         .font(.nvidia(size: 18, weight: .bold))
                         .foregroundStyle(Color.openNowGreen)
                         .tracking(-0.4)
-                    if viewModel.selectedMainPage != .games {
+                    if viewModel.selectedMainPage == .games {
+                        HStack(spacing: 4) {
+                            ForEach(CatalogDestination.allCases) { destination in
+                                Button {
+                                    viewModel.showCatalogDestination(destination)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: destinationIcon(destination))
+                                            .font(.nvidia(size: 11, weight: .bold))
+                                        Text(destination.title)
+                                            .font(.nvidia(size: 11, weight: .bold))
+                                    }
+                                    .foregroundStyle(isActive(destination) ? .black.opacity(0.88) : .white.opacity(0.66))
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 32)
+                                    .background(isActive(destination) ? Color.openNowGreen : Color.clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    } else {
                         Text(mainPageTitle)
                             .font(.nvidia(size: 14, weight: .medium))
                             .foregroundStyle(.white.opacity(0.72))
@@ -1013,7 +1033,7 @@ private struct CatalogTopBar: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, minHeight: CatalogVendorLayout.appBarHeight, alignment: .leading)
-                .padding(.leading, 56)
+                .padding(.leading, 24)
 
                 if viewModel.selectedMainPage == .games {
                     catalogSearchField
@@ -1028,23 +1048,6 @@ private struct CatalogTopBar: View {
 
                 HStack(spacing: 24) {
                     Spacer()
-                    Button {
-                        viewModel.showCatalogDestination(.library)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "books.vertical.fill")
-                                .font(.nvidia(size: 11, weight: .bold))
-                            Text("LIBRARY")
-                                .font(.nvidia(size: 11, weight: .bold))
-                                .tracking(0.6)
-                        }
-                        .foregroundStyle(.white.opacity(0.88))
-                        .padding(.horizontal, 11)
-                        .frame(height: 30)
-                        .background(Color.white.opacity(0.045))
-                        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 1) }
-                    }
-                    .buttonStyle(.plain)
                     Menu {
                         ForEach(accounts) { account in
                             Button {
@@ -1097,6 +1100,18 @@ private struct CatalogTopBar: View {
         case .games: return viewModel.selectedCatalogDestination.title
         case .recordings: return "Recordings"
         case .settings: return "Settings"
+        }
+    }
+
+    private func isActive(_ destination: CatalogDestination) -> Bool {
+        viewModel.selectedMainPage == .games && viewModel.selectedCatalogDestination == destination
+    }
+
+    private func destinationIcon(_ destination: CatalogDestination) -> String {
+        switch destination {
+        case .home: return "gamecontroller.fill"
+        case .library: return "rectangle.stack.fill"
+        case .favorites: return "heart.fill"
         }
     }
 
@@ -1951,6 +1966,10 @@ private struct CatalogContentView: View {
             ZStack {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
+                        CatalogExperienceHeader(viewModel: viewModel)
+                            .padding(.horizontal, CatalogVendorLayout.sectionHeaderMargin)
+                            .padding(.top, 22)
+
                         if hero != nil && !isGridDestination {
                             CatalogHeroView(
                                 viewModel: viewModel,
@@ -2135,6 +2154,70 @@ private struct CatalogContentView: View {
     }
 }
 
+private struct CatalogExperienceHeader: View {
+    @ObservedObject var viewModel: CatalogViewModel
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.nvidia(size: 30, weight: .bold))
+                    .foregroundStyle(OpenNOWDesign.Text.primary)
+                Text(subtitle)
+                    .font(.nvidia(size: 13, weight: .medium))
+                    .foregroundStyle(OpenNOWDesign.Text.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 9) {
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.nvidia(size: 13, weight: .bold))
+                    .foregroundStyle(Color.openNowGreen)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LIBRARY SYNC")
+                        .font(.nvidia(size: 10, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(OpenNOWDesign.Text.tertiary)
+                    Text(syncLabel)
+                        .font(.nvidia(size: 11, weight: .bold))
+                        .foregroundStyle(OpenNOWDesign.Text.primary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .background(OpenNOWDesign.Surface.panel.opacity(0.82))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.openNowGreen.opacity(0.28), lineWidth: 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var title: String {
+        if viewModel.isBrowseMode { return "Find your next game" }
+        return viewModel.selectedCatalogDestination.title
+    }
+
+    private var subtitle: String {
+        if viewModel.isBrowseMode {
+            return "Search the GeForce NOW catalogue by title, genre, store, or control support."
+        }
+        switch viewModel.selectedCatalogDestination {
+        case .home: return "Discover and launch supported games from the cloud."
+        case .library: return "Your connected store libraries, ready to play in the cloud."
+        case .favorites: return "Your saved games, gathered in one place."
+        }
+    }
+
+    private var syncLabel: String {
+        if viewModel.isLoading || viewModel.isLoadingPanels { return "Updating" }
+        if viewModel.libraryGames.isEmpty { return "No games synced" }
+        return "\(viewModel.libraryGames.count) games synced"
+    }
+}
+
 private struct CatalogHeroView: View {
     @ObservedObject var viewModel: CatalogViewModel
     let games: [OPNCatalogGameObject]
@@ -2180,9 +2263,13 @@ private struct CatalogHeroView: View {
                         }
                         .foregroundStyle(scrimColor.preferredTextColor.opacity(0.94))
                         Button { viewModel.selectGameFromHero(game) } label: {
-                            Text("VIEW DETAILS")
+                            HStack(spacing: 7) {
+                                Image(systemName: "gamecontroller.fill")
+                                    .font(.nvidia(size: 11, weight: .bold))
+                                Text("OPEN GAME DETAILS")
+                            }
                                 .font(.nvidia(size: 14, weight: .bold))
-                                .frame(width: 132, height: 36)
+                                .frame(width: 184, height: 38)
                         }
                         .buttonStyle(VendorGetInButtonStyle())
                     }
@@ -3325,11 +3412,17 @@ private struct CatalogGameTile: View {
                 if isActive {
                     VStack {
                         Spacer(minLength: 0)
-                        HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(game.title.isEmpty ? "GeForce NOW" : game.title)
                                 .font(.nvidia(size: 12, weight: isSelected ? .medium : .regular))
                                 .lineLimit(1)
                                 .foregroundStyle(.white.opacity(0.90))
+                            Text(cardStateLabel)
+                                .font(.nvidia(size: 10, weight: .bold))
+                                .foregroundStyle(cardStateIsReady ? Color.openNowGreen : .white.opacity(0.60))
+                                .lineLimit(1)
+                        }
+                        HStack(spacing: 8) {
                             Spacer(minLength: 0)
                             Image(systemName: isSelected ? "chevron.up" : "chevron.down")
                                 .font(.nvidia(size: 10, weight: .bold))
@@ -3376,6 +3469,18 @@ private struct CatalogGameTile: View {
         .padding(.top, CatalogVendorLayout.tileTopMargin)
         .frame(width: CatalogVendorLayout.wideTileWidth + CatalogVendorLayout.tileHorizontalMargin * 2, height: CatalogVendorLayout.wideTileHeight + CatalogVendorLayout.tileTopMargin + 25, alignment: .top)
         .contentShape(Rectangle())
+    }
+
+    private var cardStateLabel: String {
+        if game.isLaunchPatching { return isQueuedForPatching ? "Queued for patch completion" : "Patching before launch" }
+        if game.isInLibrary || game.variants.contains(where: { $0.inLibrary || $0.librarySelected }) { return "Cloud ready • In Library" }
+        if game.isFreeToPlay { return "Free to play • Add to library" }
+        if !game.membershipTierLabel.isEmpty { return "\(game.membershipTierLabel) membership required" }
+        return game.primaryStoreLabel.isEmpty ? "Cloud ready" : "\(game.primaryStoreLabel) • Ownership required"
+    }
+
+    private var cardStateIsReady: Bool {
+        game.isInLibrary || game.variants.contains(where: { $0.inLibrary || $0.librarySelected })
     }
 }
 
@@ -3518,10 +3623,10 @@ private struct GameDetailPanel: View {
                         .transition(.opacity.animation(.easeInOut(duration: 0.22)))
                     LinearGradient(
                         stops: [
-                            .init(color: Color(red: 57 / 255, green: 57 / 255, blue: 59 / 255).opacity(0.99), location: 0.00),
-                            .init(color: Color(red: 57 / 255, green: 57 / 255, blue: 59 / 255).opacity(0.98), location: 0.34),
-                            .init(color: Color(red: 57 / 255, green: 57 / 255, blue: 59 / 255).opacity(0.84), location: 0.49),
-                            .init(color: Color(red: 57 / 255, green: 57 / 255, blue: 59 / 255).opacity(0.22), location: 0.67),
+                            .init(color: OpenNOWDesign.Surface.panel.opacity(0.99), location: 0.00),
+                            .init(color: OpenNOWDesign.Surface.panel.opacity(0.98), location: 0.34),
+                            .init(color: OpenNOWDesign.Surface.panel.opacity(0.84), location: 0.49),
+                            .init(color: OpenNOWDesign.Surface.panel.opacity(0.22), location: 0.67),
                             .init(color: .clear, location: 1.00)
                         ],
                         startPoint: .leading,
@@ -3615,7 +3720,11 @@ private struct GameDetailPanel: View {
                     }
                 }
                 .frame(width: panelWidth, height: CatalogVendorLayout.detailPanelHeight)
-                .background(Color(red: 57 / 255, green: 57 / 255, blue: 59 / 255))
+                .background(OpenNOWDesign.Surface.panel)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.13), lineWidth: 1)
+                }
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity, minHeight: CatalogVendorLayout.detailPanelHeight, maxHeight: CatalogVendorLayout.detailPanelHeight)
@@ -3768,7 +3877,7 @@ private struct GameDetailPanel: View {
     }
 
     private func variantStatusRow(game: OPNCatalogGameObject) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 10) {
             if let option = selectedPlatformOption {
                 Button { viewModel.changeSelectedGameStore() } label: {
                     HStack(spacing: 6) {
@@ -3785,15 +3894,40 @@ private struct GameDetailPanel: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text(selectedPlatformHasAccess(game) ? "Ready" : "Not Owned")
+            Image(systemName: variantStatusIcon(game))
+                .font(.nvidia(size: 11, weight: .bold))
+                .foregroundStyle(variantStatusIsReady(game) ? Color.openNowGreen : .white.opacity(0.74))
+            Text(variantStatusLabel(game))
                 .font(.nvidia(size: 12, weight: .bold))
                 .foregroundStyle(.white.opacity(0.72))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color.black.opacity(0.14))
+                .background(variantStatusIsReady(game) ? Color.openNowGreen.opacity(0.12) : Color.white.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             Spacer(minLength: 0)
         }
         .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private func variantStatusLabel(_ game: OPNCatalogGameObject) -> String {
+        if game.isLaunchPatching || selectedVariant?.isPatching == true {
+            return viewModel.isQueuedForPatching(game) ? "Queued for patch completion" : "Patching before launch"
+        }
+        if selectedPlatformHasAccess(game) { return "Cloud ready" }
+        if game.isFreeToPlay { return "Free to play • Add to library" }
+        if let option = selectedPlatformOption, option.hasSubscriptionEntitlement { return "Membership access" }
+        return "Ownership required"
+    }
+
+    private func variantStatusIcon(_ game: OPNCatalogGameObject) -> String {
+        if game.isLaunchPatching || selectedVariant?.isPatching == true { return "clock.arrow.circlepath" }
+        if variantStatusIsReady(game) { return "checkmark.circle.fill" }
+        if game.isFreeToPlay { return "gift.fill" }
+        return "lock.fill"
+    }
+
+    private func variantStatusIsReady(_ game: OPNCatalogGameObject) -> Bool {
+        selectedPlatformHasAccess(game) && !game.isLaunchPatching && selectedVariant?.isPatching != true
     }
 
     private func accessMessage(game: OPNCatalogGameObject) -> some View {
