@@ -9,6 +9,62 @@ import SwiftUI
 typealias WebRTCMediaStreamCompletion = WebRTCMediaStreamEndCallback
 typealias WebRTCMediaStreamProgressHandler = WebRTCMediaStreamProgressCallback
 
+private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let minimumReportInterval: TimeInterval = 1
+    private var lastReportedAt = Date.distantPast
+    private var suppressedFailureCount = 0
+
+    func report(operation: String, error: Error, applicationID: String) {
+        let now = Date()
+        let suppressedCount: Int? = lock.withLock {
+            guard now.timeIntervalSince(lastReportedAt) >= minimumReportInterval else {
+                suppressedFailureCount += 1
+                return nil
+            }
+            let count = suppressedFailureCount
+            suppressedFailureCount = 0
+            lastReportedAt = now
+            return count
+        }
+        guard let suppressedCount else { return }
+
+        let nativeError = error as? NativeNVSTError
+        let isExpectedDuringTeardown = nativeError == .notRunning
+        var attributes = [
+            "applicationID": applicationID,
+            "operation": operation,
+            "failurePhase": nativeError?.failurePhase ?? "unknown",
+            "error": Self.sanitizedMessage(for: error),
+            "expectedDuringTeardown": String(isExpectedDuringTeardown),
+        ]
+        if suppressedCount > 0 {
+            attributes["suppressedCount"] = String(suppressedCount)
+        }
+        WebRTCMediaTelemetry.capture(
+            "nvst.input.send_failed",
+            level: isExpectedDuringTeardown ? .debug : .error,
+            message: isExpectedDuringTeardown ? "Native NVST input arrived after teardown began." : "Native NVST input send failed.",
+            attributes: attributes
+        )
+    }
+
+    private static func sanitizedMessage(for error: Error) -> String {
+        let message: String
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            message = description
+        } else {
+            message = error.localizedDescription
+        }
+        let sanitized = message
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else { return "Unknown native NVST input failure." }
+        return String(sanitized.prefix(256))
+    }
+}
+
 enum StreamLaunchLoadingStage {
     static func label(stepIndex: Int, queuePosition: Int? = nil) -> String {
         if let queuePosition, queuePosition > 0 { return "Waiting in queue" }
@@ -315,6 +371,7 @@ private struct NativeNVSTMediaStreamSurface: View {
     @State private var networkPathAvailable = true
     @State private var nativeFailure: FailurePresentation?
     @State private var nativeAudioDeviceMonitor: NativeNVSTAudioDeviceMonitor?
+    private let nativeInputFailureReporter = NativeNVSTInputFailureReporter()
 
     var body: some View {
         ZStack {
@@ -402,9 +459,17 @@ private struct NativeNVSTMediaStreamSurface: View {
         let inputDispatcher = NativeNVSTInputDispatcher { input in
             switch input {
             case .event(let event):
-                try? await path.send(event)
+                do {
+                    try await path.send(event)
+                } catch {
+                    nativeInputFailureReporter.report(operation: "event", error: error, applicationID: configuration.applicationID)
+                }
             case .absoluteMove(let event):
-                try? await path.sendAbsoluteMouseMove(event)
+                do {
+                    try await path.sendAbsoluteMouseMove(event)
+                } catch {
+                    nativeInputFailureReporter.report(operation: "absolute-move", error: error, applicationID: configuration.applicationID)
+                }
             }
         }
         self.path = path
@@ -678,9 +743,17 @@ private struct NativeNVSTMediaStreamSurface: View {
                     self.inputDispatcher = NativeNVSTInputDispatcher { input in
                         switch input {
                         case .event(let event):
-                            try? await path.send(event)
+                            do {
+                                try await path.send(event)
+                            } catch {
+                                self.nativeInputFailureReporter.report(operation: "event", error: error, applicationID: self.configuration.applicationID)
+                            }
                         case .absoluteMove(let event):
-                            try? await path.sendAbsoluteMouseMove(event)
+                            do {
+                                try await path.sendAbsoluteMouseMove(event)
+                            } catch {
+                                self.nativeInputFailureReporter.report(operation: "absolute-move", error: error, applicationID: self.configuration.applicationID)
+                            }
                         }
                     }
                     streamControlsVisible = true
