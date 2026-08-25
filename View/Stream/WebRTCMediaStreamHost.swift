@@ -835,7 +835,6 @@ private struct NativeNVSTMediaStreamSurface: View {
         let profile = OPNStreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: OPNStreamPreferences.loadDeviceCapabilities())
         view.directMouseInputEnabled = profile.directMouseInput
         view.locksPointerWhenRelativeModeSelected = true
-        view.confinesCursorToWindowInAbsoluteMode = profile.directMouseInput
         view.hidesCursorWhilePointerLocked = true
         if path == nil { view.mouseInputMode = .absolute }
         view.setStreamContentSize(width: profile.resolution.width, height: profile.resolution.height)

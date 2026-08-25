@@ -164,15 +164,9 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         NSEvent.mouseLocation
     }
     public private(set) var isPointerLocked = false
-    public private(set) var isAbsoluteCursorConfined = false
     public private(set) var isEmittingNeutralizingAbsolutePosition = false
-    public var isCursorCaptured: Bool { isPointerLocked || isAbsoluteCursorConfined }
+    public var isCursorCaptured: Bool { isPointerLocked }
     public var locksPointerWhenRelativeModeSelected = false
-    public var confinesCursorToWindowInAbsoluteMode = false {
-        didSet {
-            if !confinesCursorToWindowInAbsoluteMode { disableAbsoluteCursorConfinement() }
-        }
-    }
     public var mouseInputMode: NativeStreamMouseInputMode = .relative {
         willSet {
             guard newValue != mouseInputMode else { return }
@@ -187,7 +181,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
             if mouseInputMode == .absolute {
                 disablePointerLock()
             } else if directMouseInputEnabled {
-                disableAbsoluteCursorConfinement()
                 restoreInputFocus()
             }
         }
@@ -220,7 +213,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
     private var trackingArea: NSTrackingArea?
     private var keyEquivalentMonitor: Any?
     private var pointerLockMonitor: Any?
-    private var absoluteCursorGlobalMonitor: Any?
     private var pointerLockNotificationTokens: [NSObjectProtocol] = []
     private var pointerLockRestoreLocation: CGPoint?
     private var pointerLockCursorHidden = false
@@ -519,7 +511,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         } else {
             releasePressedMouseButtons()
             disablePointerLock()
-            disableAbsoluteCursorConfinement()
         }
     }
 
@@ -535,7 +526,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard remoteInputEnabled else { return }
         window?.makeFirstResponder(self)
         if capturePointerForMouseDown() { return }
-        captureAbsoluteCursorIfNeeded()
         emitAbsoluteMousePosition(event)
         emitMouseButton(.left, isPressed: true)
     }
@@ -550,7 +540,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard remoteInputEnabled else { return }
         window?.makeFirstResponder(self)
         if capturePointerForMouseDown() { return }
-        captureAbsoluteCursorIfNeeded()
         emitAbsoluteMousePosition(event)
         emitMouseButton(.right, isPressed: true)
     }
@@ -566,7 +555,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard let button = mouseButton(event.buttonNumber) else { return }
         window?.makeFirstResponder(self)
         if capturePointerForMouseDown() { return }
-        captureAbsoluteCursorIfNeeded()
         emitAbsoluteMousePosition(event)
         emitMouseButton(button, isPressed: true)
     }
@@ -580,25 +568,21 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     public override func mouseMoved(with event: NSEvent) {
         guard remoteInputEnabled else { return }
-        if constrainAssociatedAbsoluteCursor() { return }
         emitMouseMove(event)
     }
 
     public override func mouseDragged(with event: NSEvent) {
         guard remoteInputEnabled else { return }
-        if constrainAssociatedAbsoluteCursor() { return }
         emitMouseMove(event)
     }
 
     public override func rightMouseDragged(with event: NSEvent) {
         guard remoteInputEnabled else { return }
-        if constrainAssociatedAbsoluteCursor() { return }
         emitMouseMove(event)
     }
 
     public override func otherMouseDragged(with event: NSEvent) {
         guard remoteInputEnabled else { return }
-        if constrainAssociatedAbsoluteCursor() { return }
         emitMouseMove(event)
     }
 
@@ -695,8 +679,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
 
     private func enablePointerLock() {
         guard window != nil else { return }
-        disableAbsoluteCursorConfinement()
-        guard !isAbsoluteCursorConfined else { return }
         let restoreLocation = cursorLocationProvider()
         guard cursorAssociationHandler(false) == .success else {
             WebRTCMediaTelemetry.capture("webrtc.input.pointer_lock.failed", level: .error, message: "macOS rejected relative pointer capture.", attributes: ["locked": "false"])
@@ -735,27 +717,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         notifyPointerLockChanged(false)
     }
 
-    private func captureAbsoluteCursorIfNeeded() {
-        guard remoteInputEnabled, directMouseInputEnabled, confinesCursorToWindowInAbsoluteMode,
-              mouseInputMode == .absolute, !isPointerLocked, !isAbsoluteCursorConfined, window != nil else { return }
-        guard let confinementFrame = absoluteCursorConfinementFrame(),
-              Self.confinedCursorPoint(NSEvent.mouseLocation, to: confinementFrame) != nil else { return }
-        isAbsoluteCursorConfined = true
-        window?.acceptsMouseMovedEvents = true
-        installPointerLockMonitor()
-        installAbsoluteCursorGlobalMonitor()
-        installPointerLockNotifications()
-        WebRTCMediaTelemetry.capture("webrtc.input.absolute_cursor_confined", level: .info, message: "Absolute stream cursor confined to the window.", attributes: ["confined": "true"])
-    }
-
-    private func disableAbsoluteCursorConfinement() {
-        guard isAbsoluteCursorConfined else { return }
-        isAbsoluteCursorConfined = false
-        removeAbsoluteCursorGlobalMonitor()
-        if !isPointerLocked { removePointerLockMonitor() }
-        WebRTCMediaTelemetry.capture("webrtc.input.absolute_cursor_confined", level: .info, message: "Absolute stream cursor confinement released.", attributes: ["confined": "false"])
-    }
-
     private func retryCursorAssociation(generation: UInt, delay: TimeInterval = 0.01) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
             guard cursorAssociationGeneration == generation, !isCursorCaptured else { return }
@@ -763,20 +724,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
                 retryCursorAssociation(generation: generation, delay: min(delay * 2, 1))
             }
         }
-    }
-
-    @discardableResult
-    private func constrainAssociatedAbsoluteCursor() -> Bool {
-        let cursor = NSEvent.mouseLocation
-        guard isAbsoluteCursorConfined, let confinementFrame = absoluteCursorConfinementFrame(),
-              let confined = Self.confinedCursorPoint(cursor, to: confinementFrame), confined != cursor else { return false }
-        moveCursor(toScreenPoint: confined)
-        guard let window else { return true }
-        let windowPoint = window.convertPoint(fromScreen: confined)
-        let viewPoint = convert(windowPoint, from: nil)
-        guard let absoluteEvent = absoluteMouseEvent(at: viewPoint, timestamp: Self.timestamp()) else { return true }
-        onAbsoluteMouseMove?(absoluteEvent)
-        return true
     }
 
     private func notifyPointerLockChanged(_ locked: Bool) {
@@ -804,20 +751,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
                 self.handleFocusLoss()
                 return event
             }
-            if self.isAbsoluteCursorConfined {
-                switch event.type {
-                case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-                    let point = self.convert(event.locationInWindow, from: nil)
-                    if !self.bounds.contains(point) { self.disableAbsoluteCursorConfinement() }
-                    return event
-                case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                    return self.constrainAssociatedAbsoluteCursor() ? nil : event
-                case .scrollWheel:
-                    return event
-                default:
-                    return event
-                }
-            }
             switch event.type {
             case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
                 self.emitMouseMove(event)
@@ -835,32 +768,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard let pointerLockMonitor else { return }
         NSEvent.removeMonitor(pointerLockMonitor)
         self.pointerLockMonitor = nil
-    }
-
-    private func installAbsoluteCursorGlobalMonitor() {
-        guard absoluteCursorGlobalMonitor == nil else { return }
-        absoluteCursorGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.isAbsoluteCursorConfined, NSApplication.shared.isActive, self.window?.isKeyWindow == true else { return }
-                self.constrainAssociatedAbsoluteCursor()
-            }
-        }
-    }
-
-    private func removeAbsoluteCursorGlobalMonitor() {
-        guard let absoluteCursorGlobalMonitor else { return }
-        NSEvent.removeMonitor(absoluteCursorGlobalMonitor)
-        self.absoluteCursorGlobalMonitor = nil
-    }
-
-    private func absoluteCursorConfinementFrame() -> CGRect? {
-        guard let window, let contentView = window.contentView, let screen = window.screen else { return nil }
-        layoutSubtreeIfNeeded()
-        let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
-        let contentFrame = window.convertToScreen(contentFrameInWindow)
-        let videoFrameInWindow = videoSurface.convert(videoSurface.bounds, to: nil)
-        let videoFrame = window.convertToScreen(videoFrameInWindow)
-        return Self.vendorConfinementRect(contentFrame: contentFrame, videoFrame: videoFrame, screenFrame: screen.frame)
     }
 
     private func installPointerLockNotifications() {
@@ -899,34 +806,6 @@ public final class NativeWebRTCStreamView: NSView, NSTextInputClient {
         guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative, !isPointerLocked else { return false }
         setPointerLocked(true)
         return isPointerLocked
-    }
-
-    static func confinedCursorPoint(_ point: CGPoint, to windowFrame: CGRect) -> CGPoint? {
-        guard point.x.isFinite, point.y.isFinite, windowFrame.origin.x.isFinite, windowFrame.origin.y.isFinite,
-              windowFrame.width.isFinite, windowFrame.height.isFinite, windowFrame.width >= 1, windowFrame.height >= 1 else { return nil }
-        return CGPoint(
-            x: min(max(point.x, windowFrame.minX), windowFrame.maxX),
-            y: min(max(point.y, windowFrame.minY), windowFrame.maxY)
-        )
-    }
-
-    static func vendorConfinementRect(contentFrame: CGRect, videoFrame: CGRect, screenFrame: CGRect) -> CGRect? {
-        guard [contentFrame, videoFrame, screenFrame].allSatisfy(Self.isFiniteRect) else { return nil }
-        let adjustedContentFrame = CGRect(
-            x: contentFrame.minX,
-            y: contentFrame.minY + 1,
-            width: max(0, contentFrame.width - 1),
-            height: max(0, contentFrame.height - 1)
-        )
-        let visibleContentFrame = adjustedContentFrame.intersection(screenFrame)
-        let confinementFrame = visibleContentFrame.intersection(videoFrame)
-        guard !confinementFrame.isNull, confinementFrame.width >= 1, confinementFrame.height >= 1 else { return nil }
-        return confinementFrame
-    }
-
-    private static func isFiniteRect(_ rect: CGRect) -> Bool {
-        rect.origin.x.isFinite && rect.origin.y.isFinite && rect.width.isFinite && rect.height.isFinite &&
-            rect.width >= 0 && rect.height >= 0
     }
 
     static func accumulatedWheelDelta(scrollingDeltaY: Double,
