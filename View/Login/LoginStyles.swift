@@ -90,10 +90,10 @@ struct SecondaryLoginButtonStyle: ButtonStyle {
 
 extension Color {
     static let openNowGreen = Color(red: 0.46, green: 0.90, blue: 0.10)
-    static let gfnBackgroundGreen = Color(red: 25 / 255, green: 25 / 255, blue: 25 / 255)
-    static let gfnPanel = Color(red: 0.224, green: 0.224, blue: 0.224)
-    static let gfnCharcoal = Color(red: 0.098, green: 0.098, blue: 0.098)
-    static let gfnStroke = Color.white.opacity(0.14)
+    static let gfnBackgroundGreen = Color(red: 8 / 255, green: 18 / 255, blue: 29 / 255)
+    static let gfnPanel = Color(red: 17 / 255, green: 34 / 255, blue: 48 / 255)
+    static let gfnCharcoal = Color(red: 5 / 255, green: 12 / 255, blue: 20 / 255)
+    static let gfnStroke = Color.white.opacity(0.12)
     static let gfnTextSecondary = Color.white.opacity(0.72)
     static let gfnTextTertiary = Color.white.opacity(0.48)
 }

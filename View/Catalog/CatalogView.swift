@@ -14,22 +14,22 @@ import SwiftUI
 
 private enum CatalogVendorLayout {
     static let windowTopInset: CGFloat = 42
-    static let appBarHeight: CGFloat = 56
+    static let appBarHeight: CGFloat = 48
     static let appBarBackground = OpenNOWDesign.Surface.appBar
     static let mallSurface = OpenNOWDesign.Surface.app
     static let tileTray = OpenNOWDesign.Surface.tileTray
-    static let sectionHeaderMargin: CGFloat = 40
-    static let carouselContainerMargin: CGFloat = 32
-    static let tileHorizontalMargin: CGFloat = 8
-    static let tileTopMargin: CGFloat = 16
-    static let cardTrayHeight: CGFloat = 40
-    static let wideTileWidth: CGFloat = 272
-    static let wideTileHeight: CGFloat = 153
-    static let tileScaleFactor: CGFloat = 1.12
-    static let heroAspectRatio: CGFloat = 0.3229
-    static let heroFallbackHeight: CGFloat = 500
+    static let sectionHeaderMargin: CGFloat = 18
+    static let carouselContainerMargin: CGFloat = 14
+    static let tileHorizontalMargin: CGFloat = 5
+    static let tileTopMargin: CGFloat = 8
+    static let cardTrayHeight: CGFloat = 32
+    static let wideTileWidth: CGFloat = 185
+    static let wideTileHeight: CGFloat = 104
+    static let tileScaleFactor: CGFloat = 1.06
+    static let heroAspectRatio: CGFloat = 0.235
+    static let heroFallbackHeight: CGFloat = 300
     static let detailPanelHeight: CGFloat = 500
-    static let mainMenuWidth: CGFloat = 344
+    static let mainMenuWidth: CGFloat = 320
 
     static func heroHeight(for width: CGFloat) -> CGFloat {
         width > 0 ? min(width * heroAspectRatio, heroFallbackHeight) : heroFallbackHeight
@@ -40,7 +40,7 @@ private enum CatalogVendorLayout {
     }
 
     static func searchWidth(for width: CGFloat) -> CGFloat {
-        OpenNOWDesign.clamped(width * 0.42, minimum: 280, maximum: 540)
+        OpenNOWDesign.clamped(width * 0.33, minimum: 260, maximum: 420)
     }
 
     static func launchPanelWidth(for width: CGFloat) -> CGFloat {
@@ -951,17 +951,23 @@ private struct CatalogTopBar: View {
                     Button { showsMainMenu.toggle() } label: {
                         CatalogHamburgerLabel(isOpen: showsMainMenu)
                     }
-                    .frame(width: 44, height: 40)
+                    .frame(width: 32, height: 40)
                     .buttonStyle(.plain)
                     .accessibilityLabel(showsMainMenu ? "Close main menu" : "Open main menu")
-                    Text(mainPageTitle)
-                        .font(.nvidia(size: 17, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .frame(height: 40, alignment: .center)
+                    Text("OpenNOW")
+                        .font(.nvidia(size: 18, weight: .bold))
+                        .foregroundStyle(Color.openNowGreen)
+                        .tracking(-0.4)
+                    if viewModel.selectedMainPage != .games {
+                        Text(mainPageTitle)
+                            .font(.nvidia(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.leading, 4)
+                    }
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, minHeight: CatalogVendorLayout.appBarHeight, alignment: .leading)
-                .padding(.leading, 22)
+                .padding(.leading, 56)
 
                 if viewModel.selectedMainPage == .games {
                     catalogSearchField
@@ -976,6 +982,23 @@ private struct CatalogTopBar: View {
 
                 HStack(spacing: 24) {
                     Spacer()
+                    Button {
+                        viewModel.showCatalogDestination(.library)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "books.vertical.fill")
+                                .font(.nvidia(size: 11, weight: .bold))
+                            Text("LIBRARY")
+                                .font(.nvidia(size: 11, weight: .bold))
+                                .tracking(0.6)
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 11)
+                        .frame(height: 30)
+                        .background(Color.white.opacity(0.045))
+                        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
                     Menu {
                         ForEach(accounts) { account in
                             Button {
@@ -996,16 +1019,13 @@ private struct CatalogTopBar: View {
                             onForget(viewModel.account)
                         }
                     } label: {
-                        HStack(spacing: 12) {
-                            CatalogAccountAvatar(account: viewModel.account, size: 32)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(viewModel.account.displayName)
-                                    .font(.nvidia(size: 15, weight: .medium))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
-                                Text(viewModel.subscriptionStatus.membershipTier)
-                                    .font(.nvidia(size: 12, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.78))
+                        HStack(spacing: 8) {
+                            ZStack(alignment: .bottomTrailing) {
+                                CatalogAccountAvatar(account: viewModel.account, size: 28)
+                                Circle()
+                                    .fill(Color.openNowGreen)
+                                    .frame(width: 7, height: 7)
+                                    .overlay(Circle().stroke(CatalogVendorLayout.appBarBackground, lineWidth: 2))
                             }
                             Image(systemName: "chevron.down")
                                 .font(.nvidia(size: 10, weight: .bold))
@@ -1015,7 +1035,7 @@ private struct CatalogTopBar: View {
                     .buttonStyle(.plain)
                 }
                 .frame(height: CatalogVendorLayout.appBarHeight, alignment: .center)
-                .padding(.trailing, 22)
+                .padding(.trailing, 28)
             }
         }
         .frame(height: CatalogVendorLayout.appBarHeight)
@@ -1062,8 +1082,9 @@ private struct CatalogTopBar: View {
         }
         .padding(.horizontal, 15)
         .frame(height: 40)
-        .background(Color(red: 31 / 255, green: 31 / 255, blue: 31 / 255))
-        .overlay { Rectangle().stroke(Color.white.opacity(0.12), lineWidth: 1) }
+        .background(OpenNOWDesign.Surface.field)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1) }
     }
 }
 
@@ -1117,11 +1138,11 @@ private struct CatalogHamburgerLabel: View {
                 ForEach(0..<3, id: \.self) { index in
                     Capsule()
                         .fill((isOpen || isHovering) ? Color.openNowGreen : Color.white.opacity(0.84))
-                        .frame(width: index == 1 ? 20 : 23, height: 2)
+                        .frame(width: index == 1 ? 16 : 19, height: 2)
                 }
             }
         }
-        .frame(width: 44, height: 40)
+        .frame(width: 32, height: 40)
         .background((isOpen || isHovering) ? Color.black.opacity(0.22) : Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -1883,7 +1904,7 @@ private struct CatalogContentView: View {
         ScrollViewReader { proxy in
             ZStack {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 26) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         if hero != nil && !isGridDestination {
                             CatalogHeroView(
                                 viewModel: viewModel,
@@ -2101,7 +2122,7 @@ private struct CatalogHeroView: View {
                     .transition(.opacity.animation(.easeInOut(duration: 0.2)))
                     CatalogHeroVendorGradientOverlays(imageLeading: imageLeading)
 
-                    VStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 14) {
                         CatalogHeroTitleView(viewModel: viewModel, game: game, scrimColor: scrimColor)
                         VStack(spacing: 2) {
                             Text(game.primaryStoreLabel)
@@ -2115,13 +2136,13 @@ private struct CatalogHeroView: View {
                         Button { viewModel.selectGameFromHero(game) } label: {
                             Text("VIEW DETAILS")
                                 .font(.nvidia(size: 14, weight: .bold))
-                                .frame(width: 142, height: 41)
+                                .frame(width: 132, height: 36)
                         }
                         .buttonStyle(VendorGetInButtonStyle())
                     }
                     .frame(width: textWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.top, proxy.size.width < 760 ? 76 : 102)
+                    .padding(.top, proxy.size.width < 760 ? 46 : 58)
                     .padding(.leading, CatalogVendorLayout.heroTextLeading(for: proxy.size.width))
 
                     HStack {
@@ -2151,7 +2172,7 @@ private struct CatalogHeroView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 34)
+                    .padding(.bottom, 22)
                 }
                 .onAppear { containerWidth = proxy.size.width }
                 .onChange(of: proxy.size.width) { _, width in containerWidth = width }
@@ -2397,15 +2418,15 @@ private struct CatalogRailView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text(section.title)
-                    .font(.nvidia(size: 20, weight: .medium))
+                    .font(.nvidia(size: 16, weight: .bold))
                     .foregroundStyle(.white.opacity(0.96))
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 if canShowAll {
-                    Button("SHOW ALL", action: onShowAll)
+                    Button("VIEW ALL  ›", action: onShowAll)
                         .buttonStyle(.plain)
-                        .font(.nvidia(size: 13, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .font(.nvidia(size: 11, weight: .bold))
+                        .foregroundStyle(Color.openNowGreen.opacity(0.92))
                 }
             }
             .frame(height: 28)
@@ -2625,8 +2646,8 @@ private struct CatalogSeeMoreTile: View {
                     .foregroundStyle(.white.opacity(0.88))
             }
             .frame(width: CatalogVendorLayout.wideTileWidth, height: CatalogVendorLayout.wideTileHeight)
-            .background(Color(red: 43 / 255, green: 43 / 255, blue: 43 / 255))
-            .overlay { Rectangle().stroke(Color.white.opacity(0.24), lineWidth: 2) }
+            .background(OpenNOWDesign.Surface.panelRaised)
+            .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1) }
             .scaleEffect(isHovering ? CatalogVendorLayout.tileScaleFactor : 1.0)
             .animation(.easeOut(duration: 0.2), value: isHovering)
             .padding(.horizontal, CatalogVendorLayout.tileHorizontalMargin)
@@ -3238,8 +3259,8 @@ private struct CatalogGameTile: View {
 
     private var tileContent: some View {
         VStack(spacing: 0) {
+            let isActive = isHovering || isSelected || isFocused
             ZStack(alignment: .topLeading) {
-                let isActive = isHovering || isSelected || isFocused
                 CatalogRemoteImage(url: imageURL, contentMode: .fill)
                     .frame(width: CatalogVendorLayout.wideTileWidth, height: CatalogVendorLayout.wideTileHeight)
                     .clipped()
@@ -3276,11 +3297,27 @@ private struct CatalogGameTile: View {
                     .frame(width: CatalogVendorLayout.wideTileWidth, height: CatalogVendorLayout.wideTileHeight)
                 }
             }
+            if !isActive {
+                HStack(spacing: 6) {
+                    Text(game.title.isEmpty ? "GeForce NOW" : game.title)
+                        .font(.nvidia(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if game.isFavorited {
+                        Image(systemName: "heart.fill")
+                            .font(.nvidia(size: 9, weight: .bold))
+                            .foregroundStyle(Color.openNowGreen)
+                    }
+                }
+                .frame(width: CatalogVendorLayout.wideTileWidth - 12, height: 25, alignment: .leading)
+            }
         }
         .frame(width: CatalogVendorLayout.wideTileWidth, alignment: .top)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(alignment: .top) {
             if isSelected {
-                Rectangle()
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(Color.openNowGreen)
                     .frame(width: CatalogVendorLayout.wideTileWidth, height: 4)
                     .offset(y: CatalogVendorLayout.wideTileHeight - 4)
@@ -3291,7 +3328,7 @@ private struct CatalogGameTile: View {
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .padding(.horizontal, CatalogVendorLayout.tileHorizontalMargin)
         .padding(.top, CatalogVendorLayout.tileTopMargin)
-        .frame(width: CatalogVendorLayout.wideTileWidth + CatalogVendorLayout.tileHorizontalMargin * 2, height: CatalogVendorLayout.wideTileHeight + CatalogVendorLayout.tileTopMargin, alignment: .top)
+        .frame(width: CatalogVendorLayout.wideTileWidth + CatalogVendorLayout.tileHorizontalMargin * 2, height: CatalogVendorLayout.wideTileHeight + CatalogVendorLayout.tileTopMargin + 25, alignment: .top)
         .contentShape(Rectangle())
     }
 }
@@ -3310,7 +3347,7 @@ struct CatalogGameCardBadge: View {
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .frame(height: 24)
-                .background(Color(red: 56 / 255, green: 56 / 255, blue: 56 / 255).opacity(0.94))
+                .background(OpenNOWDesign.Surface.tileTray.opacity(0.94))
         }
         .fixedSize(horizontal: true, vertical: false)
     }
