@@ -1347,6 +1347,80 @@ private actor RecordingNativeNVSTTransport: NativeNVSTTransport {
     #expect(hud["mode"] as? Int == 1)
 }
 
+@Test func nativeNVSTSessionPreservesNegotiatedMouseFeatureFields() throws {
+    let streamingProfileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
+        rawSessionJSON: "{\"streamingProfile\":{\"resolution\":\"1920x1080\",\"fps\":60,\"codec\":\"H264\"}}",
+        sessionInfoJSON: "{}"
+    )
+
+    func normalizedFeatures(rawSessionJSON: String) throws -> [String: Any] {
+        let sessionJSON = try NativeNVSTBifrostTransport.geronimoSessionJSON(
+            allocation: nativeAllocation(rawSessionJSON: rawSessionJSON),
+            streamingProfileJSON: streamingProfileJSON
+        )
+        let session = try #require(JSONSerialization.jsonObject(with: Data(sessionJSON.utf8)) as? [String: Any])
+        return try #require(session["finalizedStreamingFeatures"] as? [String: Any])
+    }
+
+    let finalized = try normalizedFeatures(rawSessionJSON: """
+    {
+      "sessionId": "native-session",
+      "sessionRequestData": {
+        "requestedStreamingFeatures": {
+          "mouseMovementFlags": 1,
+          "qosPolicy": 1,
+          "touchSupport": false
+        }
+      },
+      "finalizedStreamingFeatures": {
+        "mouseMovementFlags": 3,
+        "qosPolicy": 2,
+        "touchSupport": true
+      }
+    }
+    """)
+    #expect(finalized["mouseMovementFlags"] as? Int == 3)
+    #expect(finalized["qosPolicy"] as? Int == 2)
+    #expect(finalized["touchSupport"] as? Bool == true)
+
+    let requested = try normalizedFeatures(rawSessionJSON: """
+    {
+      "sessionId": "native-session",
+      "sessionRequestData": {
+        "requestedStreamingFeatures": {
+          "mouseMovementFlags": 5,
+          "qosPolicy": 7,
+          "touchSupport": true
+        }
+      }
+    }
+    """)
+    #expect(requested["mouseMovementFlags"] as? Int == 5)
+    #expect(requested["qosPolicy"] as? Int == 7)
+    #expect(requested["touchSupport"] as? Bool == true)
+
+    let explicitDefaults = try normalizedFeatures(rawSessionJSON: """
+    {
+      "sessionId": "native-session",
+      "sessionRequestData": {
+        "requestedStreamingFeatures": {
+          "mouseMovementFlags": 5,
+          "qosPolicy": 7,
+          "touchSupport": true
+        }
+      },
+      "finalizedStreamingFeatures": {
+        "mouseMovementFlags": 0,
+        "qosPolicy": 0,
+        "touchSupport": false
+      }
+    }
+    """)
+    #expect(explicitDefaults["mouseMovementFlags"] as? Int == 0)
+    #expect(explicitDefaults["qosPolicy"] as? Int == 0)
+    #expect(explicitDefaults["touchSupport"] as? Bool == false)
+}
+
 @Test func nativeNVSTDoesNotFabricateNetworkSessionIdFromCloudMatchSessionId() throws {
     let profileJSON = try NativeNVSTBifrostTransport.streamingProfileJSON(
         rawSessionJSON: "{\"streamingProfile\":{\"resolution\":\"1920x1080\",\"fps\":60,\"codec\":\"H264\"}}",

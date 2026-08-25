@@ -1480,6 +1480,9 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
     private static func normalizedStreamingFeatures(rawSession: [String: Any], requestData: [String: Any], streamingProfileJSON: String) -> [String: Any] {
         let profile = jsonObject(from: streamingProfileJSON)
         let selectedFeatures = profile["selectedFeatures"] as? [String: Any] ?? [:]
+        let finalizedFeatures = rawSession["finalizedStreamingFeatures"] as? [String: Any] ?? [:]
+        let requestedFeatures = requestData["requestedStreamingFeatures"] as? [String: Any] ?? [:]
+        let inputFeatureSources = [finalizedFeatures, requestedFeatures, selectedFeatures]
         var normalized = (rawSession["finalizedStreamingFeatures"] as? [String: Any])
             ?? (requestData["requestedStreamingFeatures"] as? [String: Any])
             ?? [:]
@@ -1488,7 +1491,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             "bitDepth": int(selectedFeatures["bitDepth"]),
             "cloudGsync": bool(selectedFeatures["cloudGsync"]),
             "enabledL4S": bool(selectedFeatures["l4s"]),
-            "mouseMovementFlags": int(selectedFeatures["mouseMovementFlags"]),
+            "mouseMovementFlags": int(featureValue(in: inputFeatureSources, keys: ["mouseMovementFlags"])),
             "trueHdr": bool(selectedFeatures["trueHdr"]),
             "supportedHidDevices": int(selectedFeatures["supportedHidDevices"]),
             "profile": int(selectedFeatures["profile"]),
@@ -1499,8 +1502,8 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             "denoise": int((selectedFeatures["prefilterParams"] as? [String: Any])?["denoiseLevel"]),
             "sharpen": int((selectedFeatures["prefilterParams"] as? [String: Any])?["sharpnessLevel"]),
             "hudStreamingMode": int((selectedFeatures["hudStreamingParams"] as? [String: Any])?["mode"]),
-            "qosPolicy": int(selectedFeatures["qosPolicy"]),
-            "touchSupport": bool(selectedFeatures["touchSupport"]),
+            "qosPolicy": int(featureValue(in: inputFeatureSources, keys: ["qosPolicy"])),
+            "touchSupport": bool(featureValue(in: inputFeatureSources, keys: ["touchSupport"])),
         ]) { _, selected in selected }
         normalized["hdr"] = bool(selectedFeatures["hdr"])
         return normalized
