@@ -1525,10 +1525,12 @@ public enum OPNStreamPreferences {
                   let type = SCNetworkInterfaceGetInterfaceType(interface) else { return }
             result[name] = type
         }
-        if activeInterfaceNames.contains(where: { CFEqual(interfaceTypes[$0], kSCNetworkInterfaceTypeEthernet) }) {
+        let ethernetType = kSCNetworkInterfaceTypeEthernet as String
+        let wifiType = kSCNetworkInterfaceTypeIEEE80211 as String
+        if activeInterfaceNames.contains(where: { interfaceTypes[$0] as String? == ethernetType }) {
             return "Ethernet"
         }
-        if activeInterfaceNames.contains(where: { CFEqual(interfaceTypes[$0], kSCNetworkInterfaceTypeIEEE80211) }) {
+        if activeInterfaceNames.contains(where: { interfaceTypes[$0] as String? == wifiType }) {
             return "WiFi"
         }
         return "Unknown"
