@@ -131,6 +131,8 @@ final class CatalogViewModel: ObservableObject {
     @Published var selectedCatalogDestination = CatalogDestination.home
     @Published var selectedSettingsPage = CatalogSettingsPage.account
     @Published var searchQuery = ""
+    @Published var selectedGenreFilter = ""
+    @Published var isSearchPresented = false
     @Published var selectedSortId = "a_to_z"
     @Published var selectedFilterIds: [String] = []
     @Published var isLoading = false
@@ -389,6 +391,27 @@ final class CatalogViewModel: ObservableObject {
         selectedCatalogDestination = destination
         selectedGame = nil
         selectedSectionId = ""
+        isSearchPresented = false
+        selectedGenreFilter = ""
+    }
+
+    func showSearch() {
+        selectedMainPage = .games
+        isSearchPresented = true
+    }
+
+    func selectGenreFilter(_ genre: String) {
+        selectedGenreFilter = genre
+        if !searchQuery.trimmed.isEmpty {
+            searchQuery = ""
+            selectedFilterIds = []
+            browseCatalog()
+        }
+    }
+
+    func matchesSelectedGenre(_ game: OPNCatalogGameObject) -> Bool {
+        guard !selectedGenreFilter.isEmpty else { return true }
+        return game.genres.contains { $0.caseInsensitiveCompare(selectedGenreFilter) == .orderedSame }
     }
 
     func showSettings(_ page: CatalogSettingsPage = .account) {
@@ -509,6 +532,8 @@ final class CatalogViewModel: ObservableObject {
     func clearSearchAndFilters() {
         searchQuery = ""
         selectedFilterIds = []
+        selectedGenreFilter = ""
+        isSearchPresented = false
         browseCatalog()
     }
 
@@ -1377,6 +1402,11 @@ final class CatalogViewModel: ObservableObject {
 
     func selectedPlatformHasAccess(in game: OPNCatalogGameObject?) -> Bool {
         selectedPlatformOption(in: game)?.hasAccess == true
+    }
+
+    func storeIconURL(for game: OPNCatalogGameObject) -> URL? {
+        let raw = selectedPlatformOption(in: game)?.iconURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? nil : URL(string: raw)
     }
 
     func platformOptions(for game: OPNCatalogGameObject?) -> [CatalogPlatformOption] {

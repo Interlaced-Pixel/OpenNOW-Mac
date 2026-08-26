@@ -152,7 +152,7 @@ struct ControllerCatalogView: View {
             let key = title.lowercased()
             guard !title.isEmpty, !seen.contains(key), values.count < 8 else { continue }
             seen.insert(key)
-            values.append(ControllerCatalogCategory(id: key, title: title, icon: categoryIcon(for: title)))
+            values.append(ControllerCatalogCategory(id: title, title: CatalogGenreCopy.displayName(title), icon: CatalogGenreCopy.icon(title)))
         }
         return values
     }
@@ -315,7 +315,7 @@ struct ControllerCatalogView: View {
         let sections = viewModel.catalogSections
         if sections.indices.contains(controllerViewModel.selectedRailIndex) {
             let section = sections[controllerViewModel.selectedRailIndex]
-            let games = section.visibleGames(expanded: false)
+            let games = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre)
             if let firstGame = games.first { return firstGame }
         }
         return viewModel.heroRotationGames.first ?? sections.flatMap(\.games).first
@@ -523,7 +523,7 @@ struct ControllerCatalogView: View {
             return
         }
         guard let section = currentSection else { return }
-        let games = section.visibleGames(expanded: false)
+        let games = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre)
         let index = clampedSelectedGameIndex(for: section, gameCount: games.count)
         guard games.indices.contains(index) else { return }
         openDetails(games[index], sectionId: section.id)
@@ -573,7 +573,7 @@ struct ControllerCatalogView: View {
 
     private func moveGame(delta: Int) {
         guard let section = currentSection else { return }
-        let gameCount = section.visibleGames(expanded: false).count
+        let gameCount = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre).count
         guard gameCount > 0 else { return }
         let index = clampedSelectedGameIndex(for: section, gameCount: gameCount)
         controllerViewModel.setSelectedGameIndex(index + delta, for: section, gameCount: gameCount)
@@ -803,23 +803,13 @@ struct ControllerCatalogView: View {
         controllerViewModel.focusArea = .content
         controllerViewModel.selectedRailIndex = 0
         if category.id == "all" {
+            viewModel.selectGenreFilter("")
             viewModel.clearSearchAndFilters()
         } else {
-            viewModel.searchQuery = category.title
-            viewModel.browseCatalog()
+            viewModel.selectGenreFilter(category.id)
         }
     }
 
-    private func categoryIcon(for title: String) -> String {
-        let value = title.lowercased()
-        if value.contains("action") { return "bolt.fill" }
-        if value.contains("rpg") || value.contains("role") { return "person.crop.circle.fill" }
-        if value.contains("strategy") { return "checkerboard.rectangle" }
-        if value.contains("racing") || value.contains("sport") { return "flag.checkered" }
-        if value.contains("horror") { return "moon.fill" }
-        if value.contains("adventure") { return "mountain.2.fill" }
-        return "sparkles"
-    }
 }
 
 private struct ControllerHeader: View {
@@ -1044,7 +1034,7 @@ private struct ControllerGamesPage: View {
     private func heroGame(sections: [CatalogSectionModel]) -> OPNCatalogGameObject? {
         if sections.indices.contains(selectedRailIndex) {
             let section = sections[selectedRailIndex]
-            let games = section.visibleGames(expanded: false)
+            let games = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre)
             if let firstGame = games.first { return firstGame }
         }
         return viewModel.heroRotationGames.first ?? sections.flatMap(\.games).first
@@ -1079,9 +1069,8 @@ private struct ControllerCategoryRail: View {
                             HStack(spacing: 8) {
                                 Image(systemName: category.icon)
                                     .font(.nvidia(size: 12, weight: .bold))
-                                Text(category.title.uppercased())
-                                    .font(.nvidia(size: 11, weight: .bold))
-                                    .tracking(0.6)
+                                Text(category.title)
+                                    .font(.nvidia(size: 12, weight: .bold))
                             }
                             .foregroundStyle(isSelected ? .black.opacity(0.88) : .white.opacity(0.76))
                             .padding(.horizontal, 13)
@@ -1199,7 +1188,9 @@ private struct ControllerGameRail: View {
     let openDetails: (OPNCatalogGameObject) -> Void
     let showAll: () -> Void
 
-    private var games: [OPNCatalogGameObject] { section.visibleGames(expanded: false) }
+    private var games: [OPNCatalogGameObject] {
+        section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre)
+    }
     private var canShowAll: Bool { section.canLoadFullList || section.games.count > games.count }
     private var itemSpacing: CGFloat { 18 }
 
