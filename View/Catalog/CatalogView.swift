@@ -18,19 +18,19 @@ private enum CatalogVendorLayout {
     static let appBarBackground = OpenNOWDesign.Surface.appBar
     static let mallSurface = OpenNOWDesign.Surface.app
     static let tileTray = OpenNOWDesign.Surface.tileTray
-    static let sectionHeaderMargin: CGFloat = 22
-    static let carouselContainerMargin: CGFloat = 18
-    static let tileHorizontalMargin: CGFloat = 6
-    static let tileTopMargin: CGFloat = 8
+    static let sectionHeaderMargin: CGFloat = 24
+    static let carouselContainerMargin: CGFloat = 20
+    static let tileHorizontalMargin: CGFloat = 8
+    static let tileTopMargin: CGFloat = 6
     static let cardTrayHeight: CGFloat = 38
-    static let wideTileWidth: CGFloat = 214
-    static let wideTileHeight: CGFloat = 124
-    static let tileScaleFactor: CGFloat = 1.03
-    static let heroAspectRatio: CGFloat = 0.30
-    static let heroFallbackHeight: CGFloat = 292
+    static let wideTileWidth: CGFloat = 198
+    static let wideTileHeight: CGFloat = 118
+    static let tileScaleFactor: CGFloat = 1.02
+    static let heroAspectRatio: CGFloat = 0.38
+    static let heroFallbackHeight: CGFloat = 280
     static let detailPanelHeight: CGFloat = 540
-    static let inspectorWidth: CGFloat = 338
-    static let sidebarWidth: CGFloat = 196
+    static let inspectorWidth: CGFloat = 292
+    static let sidebarWidth: CGFloat = 208
     static let mainMenuWidth: CGFloat = 344
 
     static func heroHeight(for width: CGFloat) -> CGFloat {
@@ -263,7 +263,7 @@ struct CatalogView: View {
                 }
             }
         }
-        .background(Color.gfnBackgroundGreen)
+        .background(OpenNOWDesign.Catalog.canvas)
         .background(WindowTopInsetReader { windowTopInset = $0 })
         .background(StreamWindowAspectConfigurator(
             aspectRatio: viewModel.streamProfile.aspectRatio,
@@ -951,7 +951,7 @@ private struct VendorLaunchStepHeader: View {
                 .font(.nvidia(size: 12, weight: .bold))
                 .foregroundStyle(.black)
                 .frame(width: 26, height: 26)
-                .background(Color.openNowGreen)
+                .background(OpenNOWDesign.Catalog.action)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.nvidia(size: 16, weight: .bold))
@@ -1199,7 +1199,7 @@ private struct CatalogSidebar: View {
                         .foregroundStyle(.white)
                     Text(" G")
                         .font(.nvidia(size: 20, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen)
+                        .foregroundStyle(OpenNOWDesign.Catalog.brand)
                 }
                 Text("BY GEFORCE NOW")
                     .font(.nvidia(size: 8, weight: .bold))
@@ -1250,14 +1250,14 @@ private struct CatalogSidebar: View {
                 HStack(spacing: 8) {
                     Image(systemName: "icloud.and.arrow.down")
                         .font(.nvidia(size: 13, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen)
+                        .foregroundStyle(OpenNOWDesign.Catalog.ready)
                     Text("Cloud Sync")
                         .font(.nvidia(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.84))
                 }
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(viewModel.isCatalogRefreshInProgress ? Color.orange : Color.openNowGreen)
+                        .fill(viewModel.isCatalogRefreshInProgress ? OpenNOWDesign.Catalog.warning : OpenNOWDesign.Catalog.ready)
                         .frame(width: 6, height: 6)
                     Text(viewModel.isCatalogRefreshInProgress ? "Updating library" : "Up to date")
                         .font(.nvidia(size: 10, weight: .medium))
@@ -1266,13 +1266,13 @@ private struct CatalogSidebar: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(OpenNOWDesign.Surface.panel)
+            .background(OpenNOWDesign.Catalog.elevated.opacity(0.72))
             .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(OpenNOWDesign.Stroke.subtle, lineWidth: 1)
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 18)
+            .padding(.bottom, 14)
 
             Menu {
                 ForEach(accounts) { account in
@@ -1302,9 +1302,13 @@ private struct CatalogSidebar: View {
                             .foregroundStyle(.white.opacity(0.84))
                             .lineLimit(1)
                         Text(viewModel.subscriptionStatus.membershipTier)
-                            .font(.nvidia(size: 9, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.45))
+                            .font(.nvidia(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.92))
                             .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .frame(height: 16)
+                            .background(OpenNOWDesign.Catalog.selection.opacity(0.55))
+                            .clipShape(Capsule())
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up.chevron.down")
@@ -1321,10 +1325,10 @@ private struct CatalogSidebar: View {
         }
         .frame(width: CatalogVendorLayout.sidebarWidth)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(OpenNOWDesign.Surface.appBar)
+        .background(OpenNOWDesign.Catalog.sidebar)
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.white.opacity(0.10))
+                .fill(Color.white.opacity(0.06))
                 .frame(width: 1)
         }
     }
@@ -1367,12 +1371,16 @@ private struct CatalogSidebarRow: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 38)
-            .background(isActive ? Color.openNowGreen.opacity(0.20) : (isHovering ? Color.white.opacity(0.07) : .clear))
+            .background(isActive ? OpenNOWDesign.Catalog.selectionFill : (isHovering ? Color.white.opacity(0.05) : .clear))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(isActive ? Color.openNowGreen : .clear)
+                    .fill(isActive ? OpenNOWDesign.Catalog.selection : .clear)
                     .frame(width: 3, height: 22)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isActive ? OpenNOWDesign.Catalog.selectionStroke : .clear, lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
@@ -1624,7 +1632,7 @@ private struct CatalogMainMenuPlaytimeCard: View {
                         .foregroundStyle(.black.opacity(0.86))
                         .padding(.horizontal, 8)
                         .frame(height: 20)
-                        .background(Color.openNowGreen)
+                        .background(OpenNOWDesign.Catalog.action)
                 }
                 Text(activeSession?.remainingText ?? status.remainingPlaytimeText)
                     .font(.nvidia(size: 22, weight: .bold))
@@ -2197,7 +2205,7 @@ private struct CatalogContentView: View {
             ZStack {
                 HStack(spacing: 0) {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
+                        LazyVStack(alignment: .leading, spacing: 20) {
                         if viewModel.isSearchPresented {
                             catalogSearchBar
                                 .padding(.horizontal, CatalogVendorLayout.sectionHeaderMargin)
@@ -2226,6 +2234,7 @@ private struct CatalogContentView: View {
                         }
                         CatalogCategoryRail(viewModel: viewModel, sections: sections)
                             .padding(.horizontal, CatalogVendorLayout.sectionHeaderMargin)
+                            .padding(.top, 4)
 
                         if !viewModel.errorMessage.isEmpty {
                             CatalogMessageView(message: viewModel.errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -2258,11 +2267,21 @@ private struct CatalogContentView: View {
                     .padding(.bottom, 44)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.gfnBackgroundGreen)
+                    .background(OpenNOWDesign.Catalog.content)
 
                     if viewModel.selectedGame != nil {
                         CatalogGameInspector(viewModel: viewModel)
                             .frame(width: CatalogVendorLayout.inspectorWidth)
+                            .background(OpenNOWDesign.Catalog.inspector)
+                            .overlay(alignment: .leading) {
+                                LinearGradient(
+                                    colors: [.black.opacity(0.35), .clear],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: 18)
+                                .allowsHitTesting(false)
+                            }
                             .onHover { isPointerInsideDetailPanel = $0 }
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
@@ -2298,7 +2317,7 @@ private struct CatalogContentView: View {
                 selectDefaultGameIfNeeded(heroes: heroes, sections: sections)
             }
         }
-        .background(Color.gfnBackgroundGreen)
+        .background(OpenNOWDesign.Catalog.canvas)
         .onReceive(heroTimer) { _ in
             guard !reduceMotion, heroAutoScrollEnabled, heroes.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -2391,7 +2410,7 @@ private struct CatalogContentView: View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.nvidia(size: 14, weight: .bold))
-                .foregroundStyle(Color.openNowGreen)
+                .foregroundStyle(OpenNOWDesign.Catalog.selection)
             TextField("Search games, stores, or genres", text: $viewModel.searchQuery)
                 .textFieldStyle(.plain)
                 .font(.nvidia(size: 14, weight: .medium))
@@ -2411,10 +2430,10 @@ private struct CatalogContentView: View {
         .padding(.horizontal, 14)
         .frame(height: 42)
         .background(OpenNOWDesign.Surface.field)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OpenNOWDesign.Stroke.regular, lineWidth: 1)
         }
     }
 }
@@ -2452,14 +2471,15 @@ private struct CatalogCategoryRail: View {
                             Text(category.title)
                                 .font(.nvidia(size: 12, weight: .bold))
                         }
-                        .foregroundStyle(isSelected ? .black.opacity(0.88) : .white.opacity(0.78))
+                        .foregroundStyle(isSelected ? OpenNOWDesign.Catalog.selection : .white.opacity(0.78))
                         .padding(.horizontal, 14)
                         .frame(height: 34)
-                        .background(isSelected ? Color.openNowGreen : Color.white.opacity(0.07))
+                        .background(isSelected ? OpenNOWDesign.Catalog.selectionFill : Color.white.opacity(0.05))
                         .overlay {
                             Capsule()
-                                .stroke(isSelected ? Color.openNowGreen : Color.white.opacity(0.12), lineWidth: 1)
+                                .stroke(isSelected ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.10), lineWidth: isSelected ? 1.5 : 1)
                         }
+                        .shadow(color: isSelected ? OpenNOWDesign.Catalog.selection.opacity(0.22) : .clear, radius: 10, y: 0)
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -2488,7 +2508,7 @@ private struct CatalogExperienceHeader: View {
             HStack(spacing: 9) {
                 Image(systemName: "icloud.and.arrow.down")
                     .font(.nvidia(size: 13, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen)
+                    .foregroundStyle(OpenNOWDesign.Catalog.ready)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("LIBRARY SYNC")
                         .font(.nvidia(size: 10, weight: .bold))
@@ -2504,7 +2524,7 @@ private struct CatalogExperienceHeader: View {
             .background(OpenNOWDesign.Surface.panel.opacity(0.82))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.openNowGreen.opacity(0.28), lineWidth: 1)
+                    .stroke(OpenNOWDesign.Catalog.ready.opacity(0.28), lineWidth: 1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2605,7 +2625,7 @@ private struct CatalogHeroView: View {
                                 .foregroundStyle(.black.opacity(0.88))
                                 .padding(.horizontal, 16)
                                 .frame(height: 38)
-                                .background(Color.openNowGreen)
+                                .background(OpenNOWDesign.Catalog.action)
                                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
@@ -2631,7 +2651,7 @@ private struct CatalogHeroView: View {
                         ForEach(Array(games.enumerated()), id: \.element.catalogIdentity) { index, _ in
                             Button { onSelectSlide(index) } label: {
                                 Circle()
-                                    .fill(index == activeIndex ? Color.openNowGreen : Color.white.opacity(0.46))
+                                    .fill(index == activeIndex ? OpenNOWDesign.Catalog.selection : Color.white.opacity(0.38))
                                     .frame(width: index == activeIndex ? 9 : 7, height: index == activeIndex ? 9 : 7)
                             }
                             .buttonStyle(.plain)
@@ -2644,13 +2664,7 @@ private struct CatalogHeroView: View {
                 .onChange(of: proxy.size.width) { _, width in containerWidth = width }
             }
             .frame(height: CatalogVendorLayout.heroHeight(for: containerWidth))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            }
-            .padding(.horizontal, CatalogVendorLayout.sectionHeaderMargin)
-            .padding(.top, viewModel.isSearchPresented ? 4 : 16)
+            .padding(.top, viewModel.isSearchPresented ? 8 : 0)
         }
     }
 
@@ -2724,7 +2738,7 @@ private struct CatalogBrowseControlsView: View {
                 if viewModel.hasMoreCatalogResults {
                     Text("SHOWING TOP RESULTS")
                         .font(.nvidia(size: 12, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen.opacity(0.88))
+                        .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.88))
                 }
                 Spacer()
                 if !viewModel.searchQuery.trimmed.isEmpty || viewModel.selectedFilterCount > 0 {
@@ -2784,7 +2798,7 @@ private struct CatalogBrowseControlsView: View {
                                 .foregroundStyle(.black.opacity(0.88))
                                 .padding(.horizontal, 11)
                                 .frame(height: 32)
-                                .background(Color.openNowGreen)
+                                .background(OpenNOWDesign.Catalog.action)
                             }
                             .buttonStyle(.plain)
                         }
@@ -2908,10 +2922,10 @@ private struct CatalogRailView: View {
     private var canShowAll: Bool { section.canLoadFullList || section.games.count > games.count }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(section.title)
-                    .font(.nvidia(size: 16, weight: .bold))
+                    .font(.nvidia(size: 18, weight: .bold))
                     .foregroundStyle(.white.opacity(0.96))
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
@@ -2919,10 +2933,10 @@ private struct CatalogRailView: View {
                     Button("VIEW ALL  ›", action: onShowAll)
                         .buttonStyle(.plain)
                         .font(.nvidia(size: 11, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen.opacity(0.92))
+                        .foregroundStyle(OpenNOWDesign.Text.tertiary)
                 }
             }
-            .frame(height: 28)
+            .frame(height: 24)
             .padding(.horizontal, CatalogVendorLayout.sectionHeaderMargin)
 
             ScrollViewReader { proxy in
@@ -3051,7 +3065,7 @@ private struct CatalogDestinationGridView: View {
                     .accessibilityAddTraits(.isHeader)
                 Text("\(section.games.count) game\(section.games.count == 1 ? "" : "s")")
                     .font(.nvidia(size: 12, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen.opacity(0.86))
+                    .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.86))
                     .tracking(0.8)
                 Spacer(minLength: 0)
             }
@@ -3181,7 +3195,7 @@ private struct CatalogPanelActionTile: View {
                         Text(tile.subtitle.uppercased())
                             .font(.nvidia(size: 10, weight: .bold))
                             .tracking(0.8)
-                            .foregroundStyle(Color.openNowGreen)
+                            .foregroundStyle(OpenNOWDesign.Catalog.selection)
                             .lineLimit(1)
                     }
                     Text(tile.title.isEmpty ? (tile.kind == "filter" ? "Browse Games" : "Featured") : tile.title)
@@ -3194,12 +3208,12 @@ private struct CatalogPanelActionTile: View {
                         .foregroundStyle(.black.opacity(0.88))
                         .padding(.horizontal, 10)
                         .frame(height: 25)
-                        .background(Color.openNowGreen)
+                        .background(OpenNOWDesign.Catalog.action)
                 }
                 .padding(14)
             }
             .frame(width: CatalogVendorLayout.wideTileWidth, height: CatalogVendorLayout.wideTileHeight)
-            .overlay { Rectangle().stroke(isHovering ? Color.openNowGreen : Color.white.opacity(0.16), lineWidth: isHovering ? 2 : 1) }
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(isHovering ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.16), lineWidth: isHovering ? 2 : 1) }
             .scaleEffect(isHovering ? CatalogVendorLayout.tileScaleFactor : 1.0)
             .animation(.easeOut(duration: 0.2), value: isHovering)
             .padding(.horizontal, CatalogVendorLayout.tileHorizontalMargin)
@@ -3266,7 +3280,7 @@ private struct CatalogShowAllOverlay: View {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
                             .font(.nvidia(size: 14, weight: .bold))
-                            .foregroundStyle(Color.openNowGreen)
+                            .foregroundStyle(OpenNOWDesign.Catalog.selection)
                         TextField("Search titles, genres, publishers, stores, controls, ratings, tags", text: $searchQuery)
                             .textFieldStyle(.plain)
                             .font(.nvidia(size: 14, weight: .medium))
@@ -3710,7 +3724,7 @@ private struct CatalogGameTile: View {
             }
         }
         .onHover { isHovering = $0 }
-        .openNowFocusRing(isFocused)
+        .catalogFocusRing(isFocused)
         .animation(.easeOut(duration: 0.16), value: isHovering)
     }
 
@@ -3723,11 +3737,11 @@ private struct CatalogGameTile: View {
                     .font(.nvidia(size: 11, weight: .bold))
                     .tracking(0.9)
             }
-            .foregroundStyle(game.isLaunchPatching ? (isQueuedForPatching ? Color.openNowGreen.opacity(0.92) : .white.opacity(0.86)) : .black.opacity(0.88))
+            .foregroundStyle(game.isLaunchPatching ? (isQueuedForPatching ? OpenNOWDesign.Catalog.warning.opacity(0.92) : .white.opacity(0.86)) : .black.opacity(0.88))
             .padding(.horizontal, 13)
             .frame(height: 30)
-            .background(game.isLaunchPatching ? Color.black.opacity(0.62) : Color.openNowGreen)
-            .overlay { Rectangle().stroke(game.isLaunchPatching ? (isQueuedForPatching ? Color.openNowGreen.opacity(0.55) : Color.white.opacity(0.30)) : Color.openNowGreen, lineWidth: 1) }
+            .background(game.isLaunchPatching ? Color.black.opacity(0.62) : OpenNOWDesign.Catalog.action)
+            .overlay { Rectangle().stroke(game.isLaunchPatching ? (isQueuedForPatching ? OpenNOWDesign.Catalog.warning.opacity(0.55) : Color.white.opacity(0.30)) : OpenNOWDesign.Catalog.action, lineWidth: 1) }
             .shadow(color: .black.opacity(0.38), radius: 9, x: 0, y: 4)
         }
         .buttonStyle(.plain)
@@ -3786,10 +3800,10 @@ private struct CatalogGameTile: View {
                         ForEach(statusChips, id: \.label) { chip in
                             Text(chip.label)
                                 .font(.nvidia(size: 9, weight: .bold))
-                                .foregroundStyle(chip.emphasized ? .black.opacity(0.86) : .white.opacity(0.92))
+                                .foregroundStyle(chip.tone.foreground)
                                 .padding(.horizontal, 7)
                                 .frame(height: 18)
-                                .background(chip.emphasized ? Color.openNowGreen : Color.black.opacity(0.55))
+                                .background(chip.tone.background)
                                 .clipShape(Capsule())
                         }
                         Spacer(minLength: 0)
@@ -3798,12 +3812,12 @@ private struct CatalogGameTile: View {
                 }
             }
             .frame(width: CatalogVendorLayout.wideTileWidth, height: CatalogVendorLayout.wideTileHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? Color.openNowGreen : Color.white.opacity(0.10), lineWidth: isSelected ? 2.5 : 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 1)
             }
-            .shadow(color: isSelected ? Color.openNowGreen.opacity(0.28) : .clear, radius: 10, y: 0)
+            .shadow(color: isSelected ? OpenNOWDesign.Catalog.selection.opacity(0.30) : .clear, radius: 12, y: 0)
 
             HStack(spacing: 6) {
                 Text(game.title.isEmpty ? "GeForce NOW" : game.title)
@@ -3814,7 +3828,7 @@ private struct CatalogGameTile: View {
                 if game.isFavorited {
                     Image(systemName: "heart.fill")
                         .font(.nvidia(size: 10, weight: .bold))
-                        .foregroundStyle(Color.openNowGreen)
+                        .foregroundStyle(OpenNOWDesign.Catalog.selection)
                 }
             }
             .frame(width: CatalogVendorLayout.wideTileWidth, alignment: .leading)
@@ -3828,17 +3842,39 @@ private struct CatalogGameTile: View {
         .contentShape(Rectangle())
     }
 
-    private var statusChips: [(label: String, emphasized: Bool)] {
+    private var statusChips: [(label: String, tone: CatalogStatusChipTone)] {
         if game.isLaunchPatching {
-            return [(isQueuedForPatching ? "Queued" : "Patching", false)]
+            return [(isQueuedForPatching ? "Queued" : "Patching", .warning)]
         }
         if game.isInLibrary || game.variants.contains(where: { $0.inLibrary || $0.librarySelected }) {
-            return [("In Library", false), ("Cloud Ready", true)]
+            return [("In Library", .selection), ("Cloud Ready", .ready)]
         }
         if game.isFreeToPlay {
-            return [("Free to Play", true)]
+            return [("Free to Play", .ready)]
         }
-        return [("Ownership Required", false)]
+        return [("Ownership Required", .warning)]
+    }
+}
+
+private enum CatalogStatusChipTone {
+    case selection
+    case ready
+    case warning
+
+    var foreground: Color {
+        switch self {
+        case .selection: return .white.opacity(0.92)
+        case .ready: return .black.opacity(0.86)
+        case .warning: return .white.opacity(0.92)
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .selection: return OpenNOWDesign.Catalog.selection.opacity(0.72)
+        case .ready: return OpenNOWDesign.Catalog.ready
+        case .warning: return OpenNOWDesign.Catalog.warning.opacity(0.88)
+        }
     }
 }
 
@@ -3848,7 +3884,7 @@ struct CatalogGameCardBadge: View {
     var body: some View {
         HStack(spacing: 0) {
             MallRibbonShape()
-                .fill(Color.openNowGreen)
+                .fill(OpenNOWDesign.Catalog.selection)
                 .frame(width: 7, height: 24)
             Text(label)
                 .font(.nvidia(size: 13, weight: .bold))
@@ -3961,7 +3997,7 @@ private struct CatalogGameInspector: View {
     var body: some View {
         if let game = viewModel.selectedGame {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .top, spacing: 12) {
                         CatalogRemoteImage(url: viewModel.optimizedImageURL(game.bestDetailImageURL, width: 420), contentMode: .fill)
                             .frame(width: 86, height: 86)
@@ -4000,10 +4036,10 @@ private struct CatalogGameInspector: View {
                             Spacer(minLength: 0)
                             Text("Selected")
                                 .font(.nvidia(size: 10, weight: .bold))
-                                .foregroundStyle(.black.opacity(0.84))
+                                .foregroundStyle(.white.opacity(0.92))
                                 .padding(.horizontal, 8)
                                 .frame(height: 22)
-                                .background(Color.openNowGreen)
+                                .background(OpenNOWDesign.Catalog.selection.opacity(0.72))
                                 .clipShape(Capsule())
                         }
                         .padding(.horizontal, 12)
@@ -4033,7 +4069,7 @@ private struct CatalogGameInspector: View {
                         ))
                         .toggleStyle(.switch)
                         .labelsHidden()
-                        .tint(Color.openNowGreen)
+                        .tint(OpenNOWDesign.Catalog.selection)
                     }
                     .padding(.horizontal, 12)
                     .frame(height: 44)
@@ -4056,7 +4092,7 @@ private struct CatalogGameInspector: View {
                         .foregroundStyle(.black.opacity(0.88))
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(Color.openNowGreen)
+                        .background(OpenNOWDesign.Catalog.action)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -4072,7 +4108,7 @@ private struct CatalogGameInspector: View {
                 .padding(18)
             }
             .scrollIndicators(.hidden)
-            .background(OpenNOWDesign.Surface.panel)
+            .background(Color.clear)
             .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(Color.white.opacity(0.10))
@@ -4088,7 +4124,7 @@ private struct CatalogGameInspector: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Image(systemName: isPatching ? "clock.arrow.circlepath" : (isReady || owned ? "checkmark.circle.fill" : "lock.fill"))
-                    .foregroundStyle(isReady || owned ? Color.openNowGreen : .white.opacity(0.64))
+                    .foregroundStyle(isReady || owned ? OpenNOWDesign.Catalog.ready : .white.opacity(0.64))
                 Text(owned ? "In Library" : statusTitle(game: game))
                     .font(.nvidia(size: 13, weight: .bold))
                     .foregroundStyle(.white.opacity(0.90))
@@ -4099,7 +4135,7 @@ private struct CatalogGameInspector: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isReady || owned ? Color.openNowGreen.opacity(0.12) : Color.white.opacity(0.06))
+        .background(isReady || owned ? OpenNOWDesign.Catalog.elevated.opacity(0.55) : OpenNOWDesign.Catalog.elevated.opacity(0.40))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -4107,7 +4143,7 @@ private struct CatalogGameInspector: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.nvidia(size: 13, weight: .bold))
-                .foregroundStyle(ready ? Color.openNowGreen : .white.opacity(0.58))
+                .foregroundStyle(ready ? OpenNOWDesign.Catalog.ready : .white.opacity(0.58))
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -4291,7 +4327,7 @@ private struct GameDetailPanel: View {
                                     withAnimation(.easeInOut(duration: 0.18)) { activeImageIndex = index }
                                 } label: {
                                     Circle()
-                                        .fill(index == imageIndex ? Color.openNowGreen : Color.white.opacity(0.62))
+                                        .fill(index == imageIndex ? OpenNOWDesign.Catalog.selection : Color.white.opacity(0.62))
                                         .frame(width: index == imageIndex ? 12 : 9, height: index == imageIndex ? 12 : 9)
                                 }
                                 .buttonStyle(.plain)
@@ -4347,8 +4383,8 @@ private struct GameDetailPanel: View {
                     .foregroundStyle(chip == "IN LIBRARY" ? .black.opacity(0.88) : .white.opacity(0.82))
                     .padding(.horizontal, 10)
                     .frame(height: 27)
-                    .background(chip == "IN LIBRARY" ? Color.openNowGreen : Color.white.opacity(0.09))
-                    .overlay { Rectangle().stroke(chip == "IN LIBRARY" ? Color.openNowGreen : Color.white.opacity(0.12), lineWidth: 1) }
+                    .background(chip == "IN LIBRARY" ? OpenNOWDesign.Catalog.selection.opacity(0.72) : Color.white.opacity(0.09))
+                    .overlay { Rectangle().stroke(chip == "IN LIBRARY" ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.12), lineWidth: 1) }
             }
         }
     }
@@ -4487,13 +4523,13 @@ private struct GameDetailPanel: View {
             }
             Image(systemName: variantStatusIcon(game))
                 .font(.nvidia(size: 11, weight: .bold))
-                .foregroundStyle(variantStatusIsReady(game) ? Color.openNowGreen : .white.opacity(0.74))
+                .foregroundStyle(variantStatusIsReady(game) ? OpenNOWDesign.Catalog.ready : .white.opacity(0.74))
             Text(variantStatusLabel(game))
                 .font(.nvidia(size: 12, weight: .bold))
                 .foregroundStyle(.white.opacity(0.72))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(variantStatusIsReady(game) ? Color.openNowGreen.opacity(0.12) : Color.white.opacity(0.07))
+                .background(variantStatusIsReady(game) ? OpenNOWDesign.Catalog.ready.opacity(0.12) : Color.white.opacity(0.07))
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             Spacer(minLength: 0)
         }
@@ -4759,8 +4795,8 @@ private struct GameDetailPanel: View {
                     .foregroundStyle(option.isSelected ? .black.opacity(0.88) : .white.opacity(0.82))
                     .padding(.horizontal, 11)
                     .frame(height: 32)
-                    .background(option.isSelected ? Color.openNowGreen : Color.white.opacity(0.09))
-                    .overlay { Rectangle().stroke(option.isSelected ? Color.openNowGreen : Color.white.opacity(0.14), lineWidth: 1) }
+                    .background(option.isSelected ? OpenNOWDesign.Catalog.selection.opacity(0.72) : Color.white.opacity(0.09))
+                    .overlay { Rectangle().stroke(option.isSelected ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.14), lineWidth: 1) }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(option.title)
@@ -5205,7 +5241,7 @@ struct CatalogImageFallback: View {
             LinearGradient(colors: [Color.white.opacity(0.10), Color.white.opacity(0.025)], startPoint: .topLeading, endPoint: .bottomTrailing)
             Image(systemName: "play.rectangle.fill")
                 .font(.nvidia(size: 34, weight: .bold))
-                .foregroundStyle(Color.openNowGreen.opacity(0.78))
+                .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.78))
         }
     }
 }
@@ -5220,13 +5256,13 @@ struct CatalogMessageView: View {
         HStack(alignment: .center, spacing: 14) {
             ZStack {
                 Rectangle()
-                    .fill(Color.openNowGreen.opacity(0.13))
+                    .fill(OpenNOWDesign.Catalog.selectionFill)
                 Image(systemName: systemImage)
                     .font(.nvidia(size: 15, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen)
+                    .foregroundStyle(OpenNOWDesign.Catalog.selection)
             }
             .frame(width: 36, height: 36)
-            .overlay { Rectangle().stroke(Color.openNowGreen.opacity(0.30), lineWidth: 1) }
+            .overlay { Rectangle().stroke(OpenNOWDesign.Catalog.selectionStroke.opacity(0.48), lineWidth: 1) }
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(presentation.title)
@@ -5257,7 +5293,7 @@ struct CatalogMessageView: View {
         }
         .padding(14)
         .background(Color.white.opacity(0.060))
-        .overlay(alignment: .leading) { Rectangle().fill(Color.openNowGreen).frame(width: 3) }
+        .overlay(alignment: .leading) { Rectangle().fill(OpenNOWDesign.Catalog.selection).frame(width: 3) }
         .overlay { Rectangle().stroke(Color.white.opacity(0.10), lineWidth: 1) }
     }
 

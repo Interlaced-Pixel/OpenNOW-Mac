@@ -822,7 +822,7 @@ private struct ControllerHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("OPENNOW")
                     .font(.nvidia(size: 12, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen)
+                    .foregroundStyle(OpenNOWDesign.Catalog.brand)
                     .tracking(1.8)
                 Text(headerTitle)
                     .font(.nvidia(size: 22, weight: .bold))
@@ -831,7 +831,7 @@ private struct ControllerHeader: View {
             Spacer(minLength: 0)
             HStack(spacing: 8) {
                 Circle()
-                    .fill(syncIsActive ? Color.orange : Color.openNowGreen)
+                    .fill(syncIsActive ? OpenNOWDesign.Catalog.warning : OpenNOWDesign.Catalog.ready)
                     .frame(width: 7, height: 7)
                 Text(syncLabel)
                     .font(.nvidia(size: 10, weight: .bold))
@@ -840,10 +840,10 @@ private struct ControllerHeader: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 30)
-            .background((syncIsActive ? Color.orange : Color.openNowGreen).opacity(0.10))
+            .background((syncIsActive ? OpenNOWDesign.Catalog.warning : OpenNOWDesign.Catalog.ready).opacity(0.10))
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke((syncIsActive ? Color.orange : Color.openNowGreen).opacity(0.28), lineWidth: 1)
+                    .stroke((syncIsActive ? OpenNOWDesign.Catalog.warning : OpenNOWDesign.Catalog.ready).opacity(0.28), lineWidth: 1)
             }
             ControllerDeviceBadge(glyphs: glyphs)
             CatalogAccountAvatar(account: viewModel.account, size: 34)
@@ -882,7 +882,7 @@ private struct ControllerDeviceBadge: View {
         HStack(spacing: 9) {
             Image(systemName: glyphs.usesControllerGlyphs ? "gamecontroller.fill" : "keyboard")
                 .font(.nvidia(size: 13, weight: .bold))
-                .foregroundStyle(Color.openNowGreen)
+                .foregroundStyle(OpenNOWDesign.Catalog.selection)
             Text(glyphs.deviceName)
                 .font(.nvidia(size: 12, weight: .bold))
                 .foregroundStyle(.white.opacity(0.72))
@@ -926,14 +926,14 @@ private struct ControllerNavigationBar: View {
                                 .font(.nvidia(size: 12, weight: .bold))
                                 .tracking(0.8)
                         }
-                        .foregroundStyle(selected || active ? .black.opacity(0.86) : .white.opacity(0.78))
+                        .foregroundStyle(selected || active ? .white : .white.opacity(0.78))
                         .padding(.horizontal, 14)
                         .frame(height: 40)
-                        .background(selected ? Color.openNowGreen : (active ? Color.openNowGreen.opacity(0.14) : Color.white.opacity(0.065)))
+                        .background(selected ? OpenNOWDesign.Catalog.selectionFill : (active ? OpenNOWDesign.Catalog.selectionFill.opacity(0.75) : Color.white.opacity(0.065)))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(selected ? .white.opacity(0.82) : (active ? Color.openNowGreen.opacity(0.72) : Color.white.opacity(0.10)), lineWidth: selected ? 2 : 1)
+                                .stroke(selected ? OpenNOWDesign.Catalog.selectionStroke : (active ? OpenNOWDesign.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(0.10)), lineWidth: selected ? 2 : 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -1053,7 +1053,7 @@ private struct ControllerCategoryRail: View {
                 Text("EXPLORE BY GENRE")
                     .font(.nvidia(size: 11, weight: .bold))
                     .tracking(1.2)
-                    .foregroundStyle(Color.openNowGreen.opacity(0.88))
+                    .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.88))
                 Spacer(minLength: 0)
                 Text("D-PAD TO MOVE")
                     .font(.nvidia(size: 10, weight: .bold))
@@ -1072,13 +1072,13 @@ private struct ControllerCategoryRail: View {
                                 Text(category.title)
                                     .font(.nvidia(size: 12, weight: .bold))
                             }
-                            .foregroundStyle(isSelected ? .black.opacity(0.88) : .white.opacity(0.76))
+                            .foregroundStyle(isSelected ? OpenNOWDesign.Catalog.selection : .white.opacity(0.76))
                             .padding(.horizontal, 13)
                             .frame(height: 36)
-                            .background(isSelected ? Color.openNowGreen : Color.white.opacity(0.065))
+                            .background(isSelected ? OpenNOWDesign.Catalog.selectionFill : Color.white.opacity(0.065))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .stroke(isFocused && isSelected ? .white.opacity(0.9) : (isSelected ? Color.openNowGreen : Color.white.opacity(0.12)), lineWidth: isFocused && isSelected ? 2 : 1)
+                                    .stroke(isFocused && isSelected ? OpenNOWDesign.Catalog.selectionStroke : (isSelected ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.12)), lineWidth: isFocused && isSelected ? 2 : 1)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1091,7 +1091,7 @@ private struct ControllerCategoryRail: View {
         .background(Color.black.opacity(0.20))
         .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(isFocused ? Color.openNowGreen.opacity(0.65) : Color.white.opacity(0.08), lineWidth: isFocused ? 2 : 1)
+                .stroke(isFocused ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.08), lineWidth: isFocused ? 2 : 1)
         }
     }
 }
@@ -1113,7 +1113,7 @@ private struct ControllerHeroBillboard: View {
                     Text("READY TO PLAY IN THE CLOUD")
                         .font(.nvidia(size: 11, weight: .bold))
                         .tracking(1.6)
-                        .foregroundStyle(Color.openNowGreen)
+                        .foregroundStyle(OpenNOWDesign.Catalog.ready)
                     Text(game.title.isEmpty ? "GeForce NOW" : game.title)
                         .font(.nvidia(size: height < 260 ? 31 : 36, weight: .bold))
                         .foregroundStyle(.white)
@@ -1164,7 +1164,7 @@ private struct ControllerBrowseSummary: View {
                 .foregroundStyle(.white.opacity(0.66))
             Text("SORT: \(viewModel.selectedSortLabel.uppercased())")
                 .font(.nvidia(size: 12, weight: .bold))
-                .foregroundStyle(Color.openNowGreen.opacity(0.90))
+                .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.90))
             if viewModel.selectedFilterCount > 0 {
                 Text("\(viewModel.selectedFilterCount) FILTER\(viewModel.selectedFilterCount == 1 ? "" : "S")")
                     .font(.nvidia(size: 12, weight: .bold))
@@ -1202,7 +1202,7 @@ private struct ControllerGameRail: View {
                     .foregroundStyle(isFocused ? .white : .white.opacity(0.84))
                 Text("\(section.games.count) GAMES")
                     .font(.nvidia(size: 11, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen.opacity(0.82))
+                    .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.82))
                 Spacer(minLength: 0)
                 if canShowAll {
                     Button("SHOW ALL", action: showAll)
@@ -1299,7 +1299,7 @@ private struct ControllerGameTile: View {
                         if game.isLaunchPatching {
                             Image(systemName: isQueuedForPatching ? "clock.fill" : "wrench.and.screwdriver.fill")
                                 .font(.nvidia(size: 12, weight: .bold))
-                                .foregroundStyle(Color.openNowGreen)
+                                .foregroundStyle(OpenNOWDesign.Catalog.ready)
                         }
                         Text(game.title.isEmpty ? "GeForce NOW" : game.title)
                             .font(.nvidia(size: 16, weight: .bold))
@@ -1314,8 +1314,8 @@ private struct ControllerGameTile: View {
                 .padding(15)
             }
             .frame(width: tileSize.width, height: tileSize.height)
-            .overlay { Rectangle().stroke(isFocused ? Color.openNowGreen : Color.white.opacity(0.12), lineWidth: isFocused ? 4 : 1) }
-            .shadow(color: isFocused ? Color.openNowGreen.opacity(0.18) : .black.opacity(0.20), radius: isFocused ? 12 : 8, y: 8)
+            .overlay { Rectangle().stroke(isFocused ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.12), lineWidth: isFocused ? 4 : 1) }
+            .shadow(color: isFocused ? OpenNOWDesign.Catalog.selection.opacity(0.18) : .black.opacity(0.20), radius: isFocused ? 12 : 8, y: 8)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(game.title.isEmpty ? "Game" : game.title)
@@ -1349,7 +1349,7 @@ private struct ControllerEmbeddedPage<Content: View>: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title.uppercased())
                     .font(.nvidia(size: 11, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen)
+                    .foregroundStyle(OpenNOWDesign.Catalog.selection)
                     .tracking(1.4)
                 Text(subtitle)
                     .font(.nvidia(size: 15, weight: .medium))
@@ -1408,7 +1408,7 @@ private struct ControllerSearchOverlay: View {
         HStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
                 .font(.nvidia(size: 18, weight: .bold))
-                .foregroundStyle(rowIndex == 0 ? Color.openNowGreen : .white.opacity(0.62))
+                .foregroundStyle(rowIndex == 0 ? OpenNOWDesign.Catalog.selection : .white.opacity(0.62))
             TextField("Search games, stores, genres, publishers, controls, ratings, or tags", text: $viewModel.searchQuery)
                 .textFieldStyle(.plain)
                 .font(.nvidia(size: 20, weight: .medium))
@@ -1424,7 +1424,7 @@ private struct ControllerSearchOverlay: View {
         .padding(.horizontal, 18)
         .frame(height: 58)
         .background(Color.white.opacity(rowIndex == 0 ? 0.12 : 0.075))
-        .overlay { Rectangle().stroke(rowIndex == 0 ? Color.openNowGreen : Color.white.opacity(0.13), lineWidth: rowIndex == 0 ? 2 : 1) }
+        .overlay { Rectangle().stroke(rowIndex == 0 ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.13), lineWidth: rowIndex == 0 ? 2 : 1) }
     }
 
     private var sortRow: some View {
@@ -1535,6 +1535,8 @@ private struct ControllerGameDetailOverlay: View {
                         HStack(spacing: 12) {
                             ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
                                 Button { perform(action) } label: {
+                                    let isPrimary = action == .primary
+                                    let isHighlighted = index == selectedActionIndex
                                     HStack(spacing: 9) {
                                         Image(systemName: action.icon)
                                             .font(.nvidia(size: 14, weight: .bold))
@@ -1542,11 +1544,16 @@ private struct ControllerGameDetailOverlay: View {
                                             .font(.nvidia(size: 12, weight: .bold))
                                             .tracking(0.8)
                                     }
-                                    .foregroundStyle(index == selectedActionIndex ? .black.opacity(0.88) : .white.opacity(0.86))
+                                    .foregroundStyle(isHighlighted ? (isPrimary ? .black.opacity(0.88) : .white) : .white.opacity(0.86))
                                     .padding(.horizontal, 15)
                                     .frame(height: 44)
-                                    .background(index == selectedActionIndex ? Color.openNowGreen : Color.white.opacity(0.09))
-                                    .overlay { Rectangle().stroke(index == selectedActionIndex ? .white.opacity(0.86) : Color.white.opacity(0.14), lineWidth: index == selectedActionIndex ? 2 : 1) }
+                                    .background(isHighlighted ? (isPrimary ? OpenNOWDesign.Catalog.action : OpenNOWDesign.Catalog.selectionFill) : Color.white.opacity(0.09))
+                                    .overlay {
+                                        Rectangle().stroke(
+                                            isHighlighted ? (isPrimary ? OpenNOWDesign.Catalog.action : OpenNOWDesign.Catalog.selectionStroke) : Color.white.opacity(0.14),
+                                            lineWidth: isHighlighted ? 2 : 1
+                                        )
+                                    }
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1658,9 +1665,9 @@ private struct ControllerCloudStatusCard: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.nvidia(size: 17, weight: .bold))
-                .foregroundStyle(isReady ? Color.openNowGreen : .white.opacity(0.78))
+                .foregroundStyle(isReady ? OpenNOWDesign.Catalog.ready : .white.opacity(0.78))
                 .frame(width: 28, height: 28)
-                .background(isReady ? Color.openNowGreen.opacity(0.14) : Color.white.opacity(0.08))
+                .background(isReady ? OpenNOWDesign.Catalog.ready.opacity(0.14) : Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -1678,7 +1685,7 @@ private struct ControllerCloudStatusCard: View {
         .background(Color.white.opacity(0.065))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isReady ? Color.openNowGreen.opacity(0.42) : Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(isReady ? OpenNOWDesign.Catalog.ready.opacity(0.42) : Color.white.opacity(0.12), lineWidth: 1)
         }
     }
 }
@@ -1766,25 +1773,25 @@ private struct ControllerActionMenuOverlay: View {
                                         if item.isRefresh, isRefreshingCatalog {
                                             ProgressView()
                                                 .controlSize(.small)
-                                                .tint(index == selectedIndex ? .black.opacity(0.86) : Color.openNowGreen)
+                                                .tint(index == selectedIndex ? OpenNOWDesign.Catalog.selection : OpenNOWDesign.Catalog.selection.opacity(0.72))
                                                 .scaleEffect(0.82)
                                                 .frame(width: 28)
                                         } else {
                                             Image(systemName: item.icon)
                                                 .font(.nvidia(size: 15, weight: .bold))
-                                                .foregroundStyle(index == selectedIndex ? .black.opacity(0.86) : Color.openNowGreen)
+                                                .foregroundStyle(index == selectedIndex ? OpenNOWDesign.Catalog.selection : OpenNOWDesign.Catalog.selection.opacity(0.72))
                                                 .frame(width: 28)
                                         }
                                         Text(item.isRefresh && isRefreshingCatalog ? "Refreshing Catalog" : item.title)
                                             .font(.nvidia(size: 15, weight: .bold))
-                                            .foregroundStyle(index == selectedIndex ? .black.opacity(0.88) : .white.opacity(0.88))
-                                            .lineLimit(1)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 48)
-                                    .background(index == selectedIndex ? Color.openNowGreen : Color.white.opacity(0.055))
-                                    .overlay { Rectangle().stroke(index == selectedIndex ? .white.opacity(0.78) : Color.white.opacity(0.10), lineWidth: index == selectedIndex ? 2 : 1) }
+                                    .foregroundStyle(index == selectedIndex ? .white : .white.opacity(0.88))
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(height: 48)
+                            .background(index == selectedIndex ? OpenNOWDesign.Catalog.selectionFill : Color.white.opacity(0.055))
+                            .overlay { Rectangle().stroke(index == selectedIndex ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.10), lineWidth: index == selectedIndex ? 2 : 1) }
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(item.isRefresh && isRefreshingCatalog)
@@ -1796,7 +1803,7 @@ private struct ControllerActionMenuOverlay: View {
                 }
                 .frame(width: min(420, layout.contentWidth), alignment: .topLeading)
                 .background(Color(red: 18 / 255, green: 18 / 255, blue: 18 / 255).opacity(0.98))
-                .overlay(alignment: .leading) { Rectangle().fill(Color.openNowGreen).frame(width: 3) }
+                .overlay(alignment: .leading) { Rectangle().fill(OpenNOWDesign.Catalog.selection).frame(width: 3) }
                 .shadow(color: .black.opacity(0.54), radius: 34, x: -14, y: 20)
                 .padding(.trailing, layout.trailingInset)
             }
@@ -1862,12 +1869,12 @@ private struct ControllerCompactGameCard: View {
                     .lineLimit(1)
                 Text(game.primaryStoreLabel.isEmpty ? (game.isInLibrary ? "In Library" : "Cloud ready") : game.primaryStoreLabel)
                     .font(.nvidia(size: 11, weight: .bold))
-                    .foregroundStyle(Color.openNowGreen.opacity(0.84))
+                    .foregroundStyle(OpenNOWDesign.Catalog.ready.opacity(0.84))
                     .lineLimit(1)
             }
             .padding(10)
             .background(Color.white.opacity(isFocused ? 0.12 : 0.055))
-            .overlay { Rectangle().stroke(isFocused ? Color.openNowGreen : Color.white.opacity(0.10), lineWidth: isFocused ? 3 : 1) }
+            .overlay { Rectangle().stroke(isFocused ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.10), lineWidth: isFocused ? 3 : 1) }
         }
         .buttonStyle(.plain)
     }
@@ -1884,11 +1891,11 @@ private struct ControllerOptionChip: View {
             Text(title.uppercased())
                 .font(.nvidia(size: 12, weight: .bold))
                 .tracking(0.6)
-                .foregroundStyle(isSelected || isFocused ? .black.opacity(0.88) : .white.opacity(0.82))
+                .foregroundStyle(isSelected || isFocused ? .white.opacity(0.92) : .white.opacity(0.82))
                 .padding(.horizontal, 13)
                 .frame(height: 36)
-                .background(isSelected || isFocused ? Color.openNowGreen : Color.white.opacity(0.075))
-                .overlay { Rectangle().stroke(isFocused ? .white.opacity(0.82) : (isSelected ? Color.openNowGreen : Color.white.opacity(0.12)), lineWidth: isFocused ? 2 : 1) }
+                .background(isSelected || isFocused ? OpenNOWDesign.Catalog.selectionFill : Color.white.opacity(0.075))
+                .overlay { Rectangle().stroke(isFocused ? OpenNOWDesign.Catalog.selectionStroke : (isSelected ? OpenNOWDesign.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(0.12)), lineWidth: isFocused ? 2 : 1) }
         }
         .buttonStyle(.plain)
     }
@@ -1903,7 +1910,7 @@ private struct ControllerOverlaySectionTitle: View {
         Text(title.uppercased())
             .font(.nvidia(size: 12, weight: .bold))
             .tracking(1.1)
-            .foregroundStyle(Color.openNowGreen.opacity(0.86))
+            .foregroundStyle(OpenNOWDesign.Catalog.selection.opacity(0.86))
     }
 }
 
@@ -1915,11 +1922,11 @@ private struct ControllerMetadataPill: View {
         Text(text.uppercased())
             .font(.nvidia(size: 11, weight: .bold))
             .tracking(0.7)
-            .foregroundStyle(highlighted ? .black.opacity(0.88) : .white.opacity(0.82))
+            .foregroundStyle(highlighted ? .white.opacity(0.92) : .white.opacity(0.82))
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(highlighted ? Color.openNowGreen : Color.white.opacity(0.10))
-            .overlay { Rectangle().stroke(highlighted ? Color.openNowGreen : Color.white.opacity(0.14), lineWidth: 1) }
+            .background(highlighted ? OpenNOWDesign.Catalog.selection.opacity(0.72) : Color.white.opacity(0.10))
+            .overlay { Rectangle().stroke(highlighted ? OpenNOWDesign.Catalog.selectionStroke : Color.white.opacity(0.14), lineWidth: 1) }
     }
 }
 
@@ -2082,7 +2089,7 @@ private struct ControllerCatalogBackground: View {
 
     var body: some View {
         ZStack {
-            Color.gfnBackgroundGreen.ignoresSafeArea()
+            OpenNOWDesign.Catalog.canvas.ignoresSafeArea()
             if let game {
                 CatalogRemoteImage(url: viewModel.optimizedImageURL(game.bestDetailImageURL, width: 1280), contentMode: .fill)
                     .ignoresSafeArea()

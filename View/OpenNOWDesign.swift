@@ -32,6 +32,23 @@ enum OpenNOWDesign {
 
     enum Radius {
         static let avatar: CGFloat = 12
+        static let card: CGFloat = 12
+        static let pill: CGFloat = 999
+    }
+
+    enum Catalog {
+        static let canvas = Color(red: 11 / 255, green: 12 / 255, blue: 16 / 255)
+        static let content = Color(red: 14 / 255, green: 16 / 255, blue: 22 / 255)
+        static let sidebar = Color(red: 8 / 255, green: 9 / 255, blue: 13 / 255)
+        static let inspector = Color(red: 17 / 255, green: 19 / 255, blue: 26 / 255)
+        static let elevated = Color(red: 24 / 255, green: 28 / 255, blue: 36 / 255)
+        static let selection = Color(red: 138 / 255, green: 92 / 255, blue: 255 / 255)
+        static let selectionFill = selection.opacity(0.14)
+        static let selectionStroke = selection.opacity(0.62)
+        static let action = Color(red: 118 / 255, green: 210 / 255, blue: 28 / 255)
+        static let ready = Color(red: 76 / 255, green: 201 / 255, blue: 89 / 255)
+        static let warning = Color(red: 232 / 255, green: 148 / 255, blue: 58 / 255)
+        static let brand = Color(red: 118 / 255, green: 230 / 255, blue: 26 / 255)
     }
 
     static let accent = Color.openNowGreen
@@ -46,6 +63,13 @@ extension View {
         overlay {
             Rectangle()
                 .stroke(isFocused ? Color.openNowGreen : .clear, lineWidth: 2)
+        }
+    }
+
+    func catalogFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = 12) -> some View {
+        overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(isFocused ? OpenNOWDesign.Catalog.selectionStroke : .clear, lineWidth: 2)
         }
     }
 }
