@@ -115,9 +115,7 @@ struct CatalogView: View {
 
     @Binding private var pendingGameShortcut: GFNGameShortcut?
 
-    @AppStorage(InterfacePreferences.controllerModeEnabledKey) private var controllerModeEnabled = false
     @StateObject private var viewModel: CatalogViewModel
-    @State private var showsMainMenu = false
     @State private var windowTopInset = CatalogVendorLayout.windowTopInset
     @State private var isShowingAccountActionBlockedAlert = false
     @State private var accountPendingForget: LoginAccount?
@@ -178,77 +176,15 @@ struct CatalogView: View {
                 .ignoresSafeArea()
                 .transition(.opacity)
             } else {
-                if controllerModeEnabled {
-                    ControllerCatalogView(
-                        viewModel: viewModel,
-                        accounts: accounts,
-                        onSwitch: guardedSwitch,
-                        onAddAccount: guardedAddAccount,
-                        onSignOut: guardedSignOut,
-                        onForget: requestForget
-                    )
-                        .transition(.opacity)
-                } else {
-                    GeometryReader { proxy in
-                        let topInset = boundedWindowTopInset(for: proxy.size.height)
-                        let contentHeight = max(proxy.size.height - topInset, 0)
-                        VStack(spacing: 0) {
-                            Color.clear
-                                .frame(height: topInset)
-                            HStack(spacing: 0) {
-                                CatalogSidebar(
-                                    viewModel: viewModel,
-                                    accounts: accounts,
-                                    onSwitch: guardedSwitch,
-                                    onAddAccount: guardedAddAccount,
-                                    onSignOut: guardedSignOut,
-                                    onForget: requestForget
-                                )
-                                VStack(spacing: 0) {
-                                    if viewModel.selectedMainPage != .games {
-                                        CatalogTopBar(
-                                            viewModel: viewModel,
-                                            accounts: accounts,
-                                            showsMainMenu: $showsMainMenu,
-                                            onSwitch: guardedSwitch,
-                                            onAddAccount: guardedAddAccount,
-                                            onSignOut: guardedSignOut,
-                                            onForget: requestForget
-                                        )
-                                    }
-                                    if viewModel.selectedMainPage == .settings {
-                                        SettingsView(
-                                            viewModel: viewModel,
-                                            accounts: accounts,
-                                            onSwitch: guardedSwitch,
-                                            onAddAccount: guardedAddAccount,
-                                            onSignOut: guardedSignOut,
-                                            onForget: requestForget
-                                        )
-                                    } else if viewModel.selectedMainPage == .recordings {
-                                        RecordingsView()
-                                    } else {
-                                        CatalogContentView(viewModel: viewModel)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            }
-                            .frame(width: proxy.size.width, height: contentHeight, alignment: .topLeading)
-                        }
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                    }
-                    .transition(.opacity)
-
-                    if showsMainMenu {
-                        CatalogMainMenuOverlay(viewModel: viewModel, isPresented: $showsMainMenu, onSignOut: guardedSignOut, windowTopInset: windowTopInset)
-                            .transition(.opacity)
-                            .zIndex(12)
-                    }
-                }
-
-                if controllerModeEnabled == false {
-                    EmptyView()
-                }
+                HybridCatalogView(
+                    viewModel: viewModel,
+                    accounts: accounts,
+                    onSwitch: guardedSwitch,
+                    onAddAccount: guardedAddAccount,
+                    onSignOut: guardedSignOut,
+                    onForget: requestForget
+                )
+                .transition(.opacity)
 
                 if viewModel.isLaunchFlowVisible {
                     VendorLaunchFlowOverlay(viewModel: viewModel)
