@@ -1,0 +1,242 @@
+import Foundation
+
+public typealias GameLaunchPlanCompletion = @MainActor @Sendable (_ success: Bool, _ message: String, _ plan: GameLaunchPlan?) -> Void
+public typealias GameLaunchSessionStopCompletion = @MainActor @Sendable (_ success: Bool, _ message: String) -> Void
+
+private final class GameLaunchBridgeSendableValue<T>: @unchecked Sendable {
+    let value: T
+
+    init(_ value: T) {
+        self.value = value
+    }
+}
+
+public struct PreparedLaunchConfiguration: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let title: String
+    public let applicationID: String
+    public let accessToken: String
+    public let accountLinked: Bool
+    public let selectedStore: String
+    public let resumeSessionID: String
+    public let resumeServer: String
+    public let metadata: [String: String]
+
+    public init(id: UUID = UUID(), title: String, applicationID: String, accessToken: String, accountLinked: Bool, selectedStore: String, resumeSessionID: String = "", resumeServer: String = "", metadata: [String: String] = [:]) {
+        self.id = id
+        self.title = title
+        self.applicationID = applicationID
+        self.accessToken = accessToken
+        self.accountLinked = accountLinked
+        self.selectedStore = selectedStore
+        self.resumeSessionID = resumeSessionID
+        self.resumeServer = resumeServer
+        self.metadata = metadata
+    }
+
+    public var resumesExistingSession: Bool {
+        !resumeSessionID.isEmpty && !resumeServer.isEmpty
+    }
+
+    var progressConfiguration: StreamLaunchConfiguration {
+        StreamLaunchConfiguration(
+            id: id,
+            title: title,
+            applicationID: applicationID,
+            accessToken: accessToken,
+            accountLinked: accountLinked,
+            selectedStore: selectedStore,
+            resumeSessionID: resumeSessionID,
+            resumeServer: resumeServer,
+            metadata: metadata
+        )
+    }
+}
+
+public struct ActiveStreamSessionDescriptor: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let appId: Int
+    public let serverIp: String
+    public let streamingBaseUrl: String
+    public let title: String
+
+    public init(sessionId: String, appId: Int, serverIp: String, streamingBaseUrl: String, title: String) {
+        self.id = sessionId
+        self.appId = appId
+        self.serverIp = serverIp
+        self.streamingBaseUrl = streamingBaseUrl
+        self.title = title.isEmpty ? "Current Stream" : title
+    }
+}
+
+public enum GameLaunchPlan: Equatable, Sendable {
+    case ready(PreparedLaunchConfiguration)
+    case activeSession(active: ActiveStreamSessionDescriptor, resume: PreparedLaunchConfiguration, replacement: PreparedLaunchConfiguration)
+}
+
+@MainActor
+public final class GameLaunchBridge {
+    public static let shared = GameLaunchBridge()
+
+    private init() {}
+
+    public func prepareLaunchPlan(game: CatalogGameObject, accessToken: String, idToken: String, userId: String, idpId: String = "", variantIndex: Int, completion: @escaping GameLaunchPlanCompletion) {
+        let token = idToken.isEmpty ? accessToken : idToken
+        guard !token.isEmpty else {
+            completion(false, "Sign in again before launching a game.", nil)
+            return
+        }
+
+        let selectedVariantIndex = resolvedVariantIndex(for: game, requestedIndex: variantIndex)
+        let selectedVariant = selectedVariantIndex >= 0 && selectedVariantIndex < game.variants.count ? game.variants[selectedVariantIndex] : nil
+        let isPatching = game.isPatching || selectedVariant?.isPatching == true
+        guard !isPatching else {
+            completion(false, "GeForce NOW is patching this game. Try again after patching finishes.", nil)
+            return
+        }
+        configureServices(token: token, userId: userId)
+        let gameValue = game.swiftValue
+        let gameBox = GameLaunchBridgeSendableValue(game)
+        GameService.shared.resolveLaunchAppId(game: gameValue, variantIndex: selectedVariantIndex) { [weak self] appId in
+            Task { @MainActor in
+                guard let self else { return }
+                let game = gameBox.value
+                let selectedVariant = selectedVariantIndex >= 0 && selectedVariantIndex < game.variants.count ? game.variants[selectedVariantIndex] : nil
+                self.prepareResolvedLaunchPlan(game: game, selectedVariant: selectedVariant, appId: appId, token: token, userId: userId, idpId: idpId, completion: completion)
+            }
+        }
+    }
+
+    private func prepareResolvedLaunchPlan(game: CatalogGameObject, selectedVariant: CatalogGameVariantObject?, appId: String, token: String, userId: String, idpId: String, completion: @escaping GameLaunchPlanCompletion) {
+        guard let launchAppId = LaunchAppId.resolve(appId) else {
+            completion(false, "This game does not include a launchable GeForce NOW app id.", nil)
+            return
+        }
+        let appId = launchAppId.stringValue
+        let title = game.title.isEmpty ? "GeForce NOW" : game.title
+        let accountLinked = selectedVariant.map { Self.variantOwnedForLaunch($0, in: game) } ?? game.isInLibrary
+        let selectedStore = selectedVariant?.appStore ?? ""
+        let launchMetadata = Self.launchMetadata(for: game, selectedVariant: selectedVariant, userId: userId, idpId: idpId)
+        let replacement = PreparedLaunchConfiguration(
+            title: title,
+            applicationID: appId,
+            accessToken: token,
+            accountLinked: accountLinked,
+            selectedStore: selectedStore,
+            metadata: launchMetadata
+        )
+        let streamingBaseUrl = StreamPreferences.loadSelectedStreamingBaseUrl(forGame: appId)
+        let gameBox = GameLaunchBridgeSendableValue(game)
+        ActiveSessionService.fetchActiveSessions(accessToken: token, streamingBaseUrl: streamingBaseUrl) { [weak self] ok, sessions, _ in
+            let sessionsBox = GameLaunchBridgeSendableValue(sessions)
+            Task { @MainActor in
+                guard let self else { return }
+                let game = gameBox.value
+                let sessions = sessionsBox.value
+                if ok {
+                    let matchingSessions = sessions.filter { self.activeSession($0, matches: game, appId: appId) }
+                    if let requestedSession = matchingSessions.first(where: \.isResumable) ?? matchingSessions.first {
+                        completion(true, "A GeForce NOW session is already active for \(title).", self.activeSessionPlan(activeSession: requestedSession, activeTitle: title, fallbackAppId: appId, token: token, launchMetadata: launchMetadata, replacement: replacement))
+                        return
+                    }
+                    if let activeSession = sessions.first(where: \.isResumable) ?? sessions.first {
+                        let activeTitle = activeSession.appId > 0 ? "App ID \(activeSession.appId)" : "Current Stream"
+                        completion(true, "Another GeForce NOW session is already active.", self.activeSessionPlan(activeSession: activeSession, activeTitle: activeTitle, fallbackAppId: appId, token: token, launchMetadata: launchMetadata, replacement: replacement))
+                        return
+                    }
+                }
+
+                completion(true, "Launching \(title)...", .ready(replacement))
+            }
+        }
+    }
+
+    private func activeSessionPlan(activeSession: ActiveSessionObject, activeTitle: String, fallbackAppId: String, token: String, launchMetadata: [String: String], replacement: PreparedLaunchConfiguration) -> GameLaunchPlan {
+        let active = ActiveStreamSessionDescriptor(sessionId: activeSession.sessionId, appId: activeSession.appId, serverIp: activeSession.serverIp, streamingBaseUrl: activeSession.streamingBaseUrl, title: activeTitle)
+        let isResumable = activeSession.isResumable
+        let resume = PreparedLaunchConfiguration(
+            title: active.title,
+            applicationID: activeSession.appId > 0 ? String(activeSession.appId) : fallbackAppId,
+            accessToken: token,
+            accountLinked: true,
+            selectedStore: "",
+            resumeSessionID: isResumable ? activeSession.sessionId : "",
+            resumeServer: isResumable ? activeSession.serverIp : "",
+            metadata: launchMetadata
+        )
+        return .activeSession(active: active, resume: resume, replacement: replacement)
+    }
+
+    public func stopActiveSession(_ session: ActiveStreamSessionDescriptor, accessToken: String, completion: @escaping GameLaunchSessionStopCompletion) {
+        guard !accessToken.isEmpty else {
+            completion(false, "Sign in again before ending the active session.")
+            return
+        }
+        ActiveSessionService.stopSession(accessToken: accessToken, sessionId: session.id, serverIp: session.serverIp, streamingBaseUrl: session.streamingBaseUrl) { success, error in
+            Task { @MainActor in
+                completion(success, success ? "Session ended." : (error.isEmpty ? "Unable to end the active session." : error))
+            }
+        }
+    }
+
+    private func configureServices(token: String, userId: String) {
+        GameService.shared.setAccessToken(token)
+        GameService.shared.setAccountLinkingToken(token)
+        GameService.shared.setUserId(userId)
+        GameService.shared.setVpcId("GFN-PC")
+    }
+
+    private func resolvedVariantIndex(for game: CatalogGameObject, requestedIndex: Int) -> Int {
+        if requestedIndex >= 0, requestedIndex < game.variants.count { return requestedIndex }
+        if let index = game.variants.firstIndex(where: { $0.librarySelected }) { return index }
+        if let index = game.variants.firstIndex(where: { $0.inLibrary }) { return index }
+        return game.variants.isEmpty ? -1 : 0
+    }
+
+    private static func variantOwnedForLaunch(_ variant: CatalogGameVariantObject, in game: CatalogGameObject) -> Bool {
+        variant.inLibrary || variant.librarySelected || GameRemediation.gameServiceStatusOwnedForLaunch(variant.serviceStatus) || (game.variants.count == 1 && game.isInLibrary)
+    }
+
+    private func activeSession(_ session: ActiveSessionObject, matches game: CatalogGameObject, appId: String) -> Bool {
+        guard session.appId > 0 else { return false }
+        let activeAppId = String(session.appId)
+        return activeAppId == appId || activeAppId == game.id || activeAppId == game.launchAppId || game.variants.contains { $0.id == activeAppId }
+    }
+
+    private static func launchMetadata(for game: CatalogGameObject, selectedVariant: CatalogGameVariantObject? = nil, userId: String = "", idpId: String = "") -> [String: String] {
+        var imageUrls: [String] = []
+        var seen = Set<String>()
+
+        func append(_ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(trimmed) else { return }
+            seen.insert(trimmed)
+            imageUrls.append(trimmed)
+        }
+
+        func appendValues(forKey key: String) {
+            for value in game.imageUrlsByType[key] ?? [] { append(value) }
+            for value in game.imageUrlsByType[key.lowercased()] ?? [] { append(value) }
+        }
+
+        appendValues(forKey: "SCREENSHOTS")
+        for value in game.screenshotUrls { append(value) }
+        appendValues(forKey: "HERO_IMAGE")
+        appendValues(forKey: "MARQUEE_HERO_IMAGE")
+        appendValues(forKey: "FEATURE_IMAGE")
+        append(game.heroImageUrl)
+        append(game.imageUrl)
+
+        var metadata: [String: String] = [:]
+        if !userId.isEmpty { metadata["userId"] = userId }
+        if !idpId.isEmpty { metadata["idpId"] = idpId }
+        let selectedControls = selectedVariant?.supportedControls ?? []
+        let supportedControls = selectedControls.isEmpty ? game.supportedControls : selectedControls
+        if !supportedControls.isEmpty { metadata["supportedControls"] = supportedControls.joined(separator: ",") }
+        if !game.contentRatings.isEmpty { metadata["contentRating"] = game.contentRatings.joined(separator: ",") }
+        if game.displaysOwnRatingDuringGameplay { metadata["gameDisplayOwnRating"] = "true" }
+        if let selectedVariant, !selectedVariant.appStore.isEmpty { metadata["storeName"] = selectedVariant.appStore }
+        if !imageUrls.isEmpty { metadata["loadingScreenshotUrls"] = imageUrls.joined(separator: "\n") }
+        return metadata
+    }
+}

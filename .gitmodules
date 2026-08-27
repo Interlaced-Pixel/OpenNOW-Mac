@@ -1,0 +1,4 @@
+[submodule "GFN"]
+	path = GFN
+	url = https://github.com/Interlaced-Pixel/PixelNOW-GFN-private.git
+	branch = main

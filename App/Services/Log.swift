@@ -1,0 +1,74 @@
+import Foundation
+import OSLog
+
+enum Log {
+    enum Category: String {
+        case app = "App"
+        case auth = "Auth"
+        case cache = "Cache"
+        case catalog = "Catalog"
+        case launch = "Launch"
+        case shortcut = "GFNShortcut"
+        case stream = "WebRTC"
+    }
+
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.interlaced-pixel.PixelNOW"
+
+    static func debug(_ category: Category, _ message: String) {
+        let sanitized = Sentry.sanitizedLogMessage(message)
+        Logger(subsystem: subsystem, category: category.rawValue).debug("\(sanitized, privacy: .public)")
+        Sentry.logDebugMessage(formattedMessage(category: category, level: "debug", message: message))
+    }
+
+    static func info(_ category: Category, _ message: String) {
+        let sanitized = Sentry.sanitizedLogMessage(message)
+        Logger(subsystem: subsystem, category: category.rawValue).info("\(sanitized, privacy: .public)")
+        Sentry.logInfoMessage(formattedMessage(category: category, level: "info", message: message))
+    }
+
+    static func warning(_ category: Category, _ message: String) {
+        let sanitized = Sentry.sanitizedLogMessage(message)
+        Logger(subsystem: subsystem, category: category.rawValue).warning("\(sanitized, privacy: .public)")
+        Sentry.logWarningMessage(formattedMessage(category: category, level: "warning", message: message))
+    }
+
+    static func error(_ category: Category, _ message: String) {
+        let sanitized = Sentry.sanitizedLogMessage(message)
+        Logger(subsystem: subsystem, category: category.rawValue).error("\(sanitized, privacy: .public)")
+        Sentry.logErrorMessage(formattedMessage(category: category, level: "error", message: message))
+    }
+
+    static func fatal(_ category: Category, _ message: String) {
+        let sanitized = Sentry.sanitizedLogMessage(message)
+        Logger(subsystem: subsystem, category: category.rawValue).fault("\(sanitized, privacy: .public)")
+        Sentry.logFatalMessage(formattedMessage(category: category, level: "fatal", message: message))
+    }
+
+    private static func formattedMessage(category: Category, level: String, message: String) -> String {
+        Sentry.formattedLogMessage(level: level, area: category.rawValue, message: message)
+    }
+}
+
+@MainActor
+final class FileOpenCoordinator {
+    static let shared = FileOpenCoordinator()
+
+    private var pendingFileURLs: [URL] = []
+
+    private init() {}
+
+    func enqueue(_ url: URL) {
+        pendingFileURLs.append(url)
+        Log.info(.shortcut, "Queued opened file: \(url.path)")
+        NotificationCenter.default.post(name: .didOpenFile, object: url)
+    }
+
+    func drainPendingFileURLs() -> [URL] {
+        let urls = pendingFileURLs
+        pendingFileURLs.removeAll()
+        if !urls.isEmpty {
+            Log.info(.shortcut, "Draining \(urls.count) pending opened file(s)")
+        }
+        return urls
+    }
+}

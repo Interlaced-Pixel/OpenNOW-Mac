@@ -1,0 +1,63 @@
+// swift-tools-version: 6.0
+
+import PackageDescription
+import Foundation
+
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+
+let package = Package(
+    name: "PixelNOW",
+    platforms: [
+        .macOS(.v15)
+    ],
+    products: [
+        .library(name: "PixelNOW", targets: ["PixelNOW"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", exact: "9.18.0")
+    ],
+    targets: [
+        .target(
+            name: "PixelNOW",
+            dependencies: [
+                .product(name: "Sentry", package: "sentry-cocoa"),
+                "NativeGeronimoShim"
+            ],
+            path: ".",
+            exclude: [
+                "AGENTS.md",
+                "LICENSE",
+                "README.md",
+                "PixelNOWApp.swift",
+                "App/Stream/webrtc/WebRTCMediaStreamSurface.swift",
+                "PixelNOW.xcodeproj",
+                "App/Stream/nvst/NativeGeronimo",
+                "Resources",
+                "View",
+                "ViewModel",
+                "WebRTC.framework",
+                "build",
+                "scripts",
+                "tools",
+                "vendor"
+            ],
+            sources: [
+                "Model",
+                "App",
+                "GFN"
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-F", packageRoot, "-Xcc", "-Wno-incomplete-umbrella"])
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-F", packageRoot, "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", packageRoot])
+            ]
+        ),
+        .target(
+            name: "NativeGeronimoShim",
+            path: "App/Stream/nvst/NativeGeronimo",
+            sources: ["NativeNVSTGeronimoShim.mm"],
+            publicHeadersPath: "."
+        )
+    ]
+)

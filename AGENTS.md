@@ -1,0 +1,71 @@
+---
+description: Language-agnostic production standards for all code generation and reviews.
+applyTo: '**'
+---
+
+# Instruction Compliance (Highest Priority)
+
+These rules override speed, scope reduction, and momentum. They apply to every task.
+
+1. **Complete means complete.** When the user says resolve, fix all, finish, or complete, every stated requirement must be done before the task is considered finished.
+2. **No partial shipping.** Do not commit, push, or report success while any stated requirement remains open. If a requirement cannot be completed, stop and report the blocker before shipping partial work.
+3. **Requirement traceability.** Before any commit, push, or completion report, include a requirement-by-requirement status table: Requirement | Status | Evidence.
+4. **Explicit gates only.** Do not commit or push unless the user explicitly asked for it in that task, except where this file's commit standards apply to completed work the user already requested be finished end-to-end.
+5. **Verify, do not assume.** A green build is not proof that every requirement is satisfied. Re-check the original instruction list before declaring done.
+6. **Follow instructions to the letter.** User instructions are mandatory constraints, not suggestions. Do not reinterpret them into a smaller task without explicit approval.
+
+# Operational Protocol
+Execute every task in this order:
+
+1. **Audit** — List all files, modules, and components required.
+2. **Blueprint** — Outline a concise architectural plan before writing code.
+3. **Execution** — Deliver complete, production-ready code. No snippets, placeholders (`TODO`, `pass`, `...`), or stubs.
+4. **Autonomy** — Resolve missing context or dependencies using the standard library or canonical practices.
+
+# Testing Policy
+- This repository has **no automated test suite**. Do not recreate `Tests/`, `PixelNOWTests`, or CI test jobs unless the user explicitly asks.
+- **Never run tests** (`xcodebuild test`, `swift test`, CI test jobs, or equivalent) unless the user explicitly asks to run tests in that task.
+- **Never add tests** unless the user explicitly asks for tests.
+- Builds (`xcodebuild build`) are fine when needed to verify compilation.
+
+# Build Artifact Discipline
+- For this Xcode project, use Xcode/XcodeBuildMCP only for builds and runs. Do not use SwiftPM commands as build/test/run shortcuts unless the user explicitly overrides this instruction for a specific task.
+- Run SwiftPM commands from the repository root unless a task explicitly requires otherwise.
+- Use `--scratch-path .build/shared` for SwiftPM commands that generate build state, including `swift build` and `swift run`. Do not run `swift test` unless the user explicitly requests it.
+- Do not run package-local SwiftPM commands that create package-specific `.build` directories. Use the root `Package.swift` with the shared scratch path instead.
+- After SwiftPM-heavy tasks, run `scripts/report-spm-build-size.sh` to check generated build size and duplicated binary artifact extractions.
+- If generated SwiftPM files exceed the warning threshold or duplicate `artifacts/sentry-cocoa` directories appear, run `scripts/clean-spm-builds.sh`, then rerun builds with `--scratch-path .build/shared`.
+- Never commit generated build artifacts.
+
+# Coding Standards
+
+## General
+- **Self-Documenting:** Names and structure must convey intent. No explanatory inline comments.
+- **Hermetic:** Every file includes all imports and dependencies. Must compile/run as-is.
+- **Complete:** All functions and methods contain final, working logic. No mocks or no-ops.
+- **No Folded Code:** Folding code is strictly forbidden.
+
+## Migration & Conversion
+- **No Stubs:** Never use stubs when migrating or converting code.
+- **In-Place Conversion:** Always convert the existing implementation in place.
+- **No Wrappers:** Do not use wrappers, shims, adapters, or compatibility layers during migration or conversion.
+- **Remove Legacy Files:** Delete the old `.mm` and `.h` files after migration or conversion.
+- **Trace Blockers:** Always trace and convert or migrate blockers during migration or conversion.
+- **Migrate Blockers:** Always migrate blockers instead of bypassing, stubbing, or deferring them.
+
+## Resource & State
+- **Lifecycle:** Explicitly manage memory, connections, and handles via the language's native paradigm (RAII, context managers, ownership, etc.).
+- **Immutable by Default:** Use language-native constraints (`const`, `readonly`, `final`). Mutable state must be minimal and scoped.
+
+## Error Handling
+- **Explicit:** Handle all edge cases idiomatically (Result/Option types, caught exceptions, multiple returns).
+- **No Panics:** Never use forceful unwraps or unhandled crash equivalents. Failures must propagate or degrade gracefully.
+
+## Quality
+- **Strict Typing:** Use static/strict types throughout. Avoid `any` or dynamic types unless architecturally required.
+- **Zero Warnings:** Code must pass the strictest linter and compiler settings cleanly.
+
+# Commit Standards
+- Commit all completed work before considering a task done.
+- Push completed commits to the current branch's upstream remote after committing.
+- Prefix every message with a conventional tag: `fix:`, `feat:`, `chore:`, `docs:`, `refactor:`, `test:`, or `style:`.
