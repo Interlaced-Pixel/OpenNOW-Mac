@@ -112,7 +112,7 @@ struct HybridCatalogView: View {
                 select: select,
                 launch: { performPrimaryAction(for: $0) }
             )
-            .frame(maxHeight: 330)
+            .frame(height: 150)
 
             Spacer(minLength: 12)
         }
@@ -246,9 +246,9 @@ private struct CurvedPosterRail: View {
                             .id(displayIdentity(cycle: cycle, game: game))
                         }
                     }
-                    .padding(.horizontal, max(0, geometry.size.width / 2 - 99))
                     .scrollTargetLayout()
                 }
+                .safeAreaPadding(.horizontal, max(0, geometry.size.width / 2 - 99))
                 .scrollTargetBehavior(.viewAligned)
                 .scrollPosition(id: $scrolledDisplayIdentity)
                 .onAppear {
@@ -285,11 +285,11 @@ private struct CurvedPosterRail: View {
     }
 
     private func curveOffset(distance: CGFloat) -> CGFloat {
-        min(abs(distance) * abs(distance) * 4, 72)
+        0
     }
 
     private func curveScale(distance: CGFloat) -> CGFloat {
-        max(0.82, 1 - abs(distance) * 0.035)
+        1
     }
 
     private func displayIdentity(cycle: Int, game: CatalogGameObject) -> String {
@@ -317,6 +317,8 @@ private struct PosterGameCard: View {
     let scale: CGFloat
     let select: () -> Void
     let launch: () -> Void
+
+    @State private var isPulsing = false
 
     var body: some View {
         Button(action: select) {
@@ -346,18 +348,27 @@ private struct PosterGameCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color.white : Color.white.opacity(0.18), lineWidth: isSelected ? 3 : 1)
-                    .shadow(color: isSelected ? Color.accentColor.opacity(0.95) : .clear, radius: 14)
+                    .stroke(isSelected ? Color.white : Color.white.opacity(0.18), lineWidth: isSelected ? (isPulsing ? 4 : 2) : 1)
+                    .shadow(color: isSelected ? Color.accentColor.opacity(isPulsing ? 1.0 : 0.4) : .clear, radius: isSelected ? (isPulsing ? 20 : 8) : 0)
             }
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
-        .scaleEffect(scale)
+        .scaleEffect(isSelected ? (isPulsing ? 1.05 : 1.0) : scale)
         .offset(y: verticalOffset)
         .onTapGesture(count: 2, perform: launch)
         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isSelected)
+        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: isPulsing)
         .accessibilityLabel(game.title.isEmpty ? "Untitled game" : game.title)
         .accessibilityHint("Click to select. Double-click to launch.")
+        .onAppear {
+            if isSelected {
+                isPulsing = true
+            }
+        }
+        .onChange(of: isSelected) { _, selected in
+            isPulsing = selected
+        }
     }
 }
 
