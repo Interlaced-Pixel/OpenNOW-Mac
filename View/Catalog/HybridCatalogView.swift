@@ -1,3 +1,5 @@
+import CryptoKit
+import SwiftData
 import SwiftUI
 
 struct HybridCatalogView: View {
@@ -7,6 +9,9 @@ struct HybridCatalogView: View {
     let onAddAccount: () -> Void
     let onSignOut: () -> Void
     let onForget: (LoginAccount) -> Void
+
+    @State private var selectedIdentity = ""
+    @State private var backgroundIndex = 0
 
     private var games: [CatalogGameObject] {
         var result: [CatalogGameObject] = []
@@ -19,15 +24,16 @@ struct HybridCatalogView: View {
         return result
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            navigationBar
-            Divider()
+    private var selectedGame: CatalogGameObject? {
+        games.first { gameIdentity($0) == selectedIdentity } ?? games.first
+    }
 
-            if viewModel.selectedMainPage == .recordings {
-                RecordingsView()
-            } else if viewModel.selectedMainPage == .settings {
-                SettingsView(
+    var body: some View {
+        ZStack {
+            DynamicGameBackground(game: selectedGame, imageIndex: backgroundIndex)
+
+            VStack(spacing: 0) {
+                TopNavigationGlassBar(
                     viewModel: viewModel,
                     accounts: accounts,
                     onSwitch: onSwitch,
@@ -35,126 +41,101 @@ struct HybridCatalogView: View {
                     onSignOut: onSignOut,
                     onForget: onForget
                 )
-            } else {
-                gamesPage
-            }
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .task { viewModel.loadIfNeeded() }
-    }
 
-    private var navigationBar: some View {
-        HStack(spacing: 12) {
-            Text("PixelNOW")
-                .font(.headline)
-
-            Divider()
-                .frame(height: 22)
-
-            Button("Games") { viewModel.showGames() }
-                .buttonStyle(.plain)
-                .foregroundStyle(viewModel.selectedMainPage == .games ? .primary : .secondary)
-
-            Button("Library") { viewModel.showCatalogDestination(.library) }
-                .buttonStyle(.plain)
-                .foregroundStyle(isLibrarySelected ? .primary : .secondary)
-
-            Button("Favorites") { viewModel.showCatalogDestination(.favorites) }
-                .buttonStyle(.plain)
-                .foregroundStyle(isFavoritesSelected ? .primary : .secondary)
-
-            Button("Recordings") { viewModel.showRecordings() }
-                .buttonStyle(.plain)
-                .foregroundStyle(viewModel.selectedMainPage == .recordings ? .primary : .secondary)
-
-            Button("Settings") { viewModel.showSettings() }
-                .buttonStyle(.plain)
-                .foregroundStyle(viewModel.selectedMainPage == .settings ? .primary : .secondary)
-
-            Spacer()
-
-            Button {
-                viewModel.refresh()
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .disabled(viewModel.isCatalogRefreshInProgress)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-    }
-
-    private var gamesPage: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    TextField("Search games", text: $viewModel.searchQuery)
-                        .textFieldStyle(.roundedBorder)
-
-                    if !viewModel.searchQuery.isEmpty {
-                        Button("Clear") { viewModel.clearSearchAndFilters() }
-                    }
-                }
-
-                if !viewModel.errorMessage.isEmpty {
-                    Text(viewModel.errorMessage)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if viewModel.isLoading && games.isEmpty {
-                    ProgressView("Loading games…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if games.isEmpty {
-                    ContentUnavailableView("No games", systemImage: "gamecontroller", description: Text("No games are available for this view."))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if viewModel.selectedMainPage == .recordings {
+                    RecordingsView()
+                } else if viewModel.selectedMainPage == .settings {
+                    SettingsView(
+                        viewModel: viewModel,
+                        accounts: accounts,
+                        onSwitch: onSwitch,
+                        onAddAccount: onAddAccount,
+                        onSignOut: onSignOut,
+                        onForget: onForget
+                    )
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                            ForEach(games, id: \.uuid) { game in
-                                BasicGameCard(
-                                    game: game,
-                                    isSelected: viewModel.selectedGame?.id == game.id,
-                                    isFavorite: viewModel.isFavorite(game),
-                                    play: { performPrimaryAction(for: game) },
-                                    select: { viewModel.selectGame(game) },
-                                    toggleFavorite: {
-                                        viewModel.selectGame(game)
-                                        viewModel.toggleFavoriteSelectedGame()
-                                    }
-                                )
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
+                    catalogContent
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            if viewModel.selectedGame != nil {
-                Divider()
-                BasicGameInspector(viewModel: viewModel, play: { performPrimaryAction(for: viewModel.selectedGame) })
-                    .frame(width: 300)
+            if viewModel.selectedMainPage == .games {
+                AccountGlassControl(
+                    account: viewModel.account,
+                    accounts: accounts,
+                    onSwitch: onSwitch,
+                    onAddAccount: onAddAccount,
+                    onSignOut: onSignOut,
+                    onForget: onForget
+                )
             }
+        }
+        .task { viewModel.loadIfNeeded() }
+        .task(id: gameIdentity(selectedGame)) {
+            backgroundIndex = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(9))
+                guard !Task.isCancelled else { return }
+                backgroundIndex += 1
+            }
+        }
+        .onAppear {
+            if selectedIdentity.isEmpty, let firstGame = games.first {
+                select(firstGame)
+            }
+        }
+        .onChange(of: games.map(gameIdentity)) { _, _ in
+            guard let selectedGame else { return }
+            select(selectedGame)
         }
     }
 
-    private var isLibrarySelected: Bool {
-        viewModel.selectedMainPage == .games && viewModel.selectedCatalogDestination == .library
+    private var catalogContent: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            if let selectedGame {
+                FloatingGameDetails(
+                    viewModel: viewModel,
+                    game: selectedGame,
+                    play: { performPrimaryAction(for: selectedGame) },
+                    toggleFavorite: {
+                        viewModel.selectGame(selectedGame)
+                        viewModel.toggleFavoriteSelectedGame()
+                    }
+                )
+                .transition(.opacity)
+            }
+
+            CurvedPosterRail(
+                games: games,
+                selectedIdentity: selectedIdentity,
+                select: select,
+                launch: { performPrimaryAction(for: $0) }
+            )
+            .frame(maxHeight: 330)
+
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 28)
+        .animation(.easeInOut(duration: 0.35), value: selectedIdentity)
     }
 
-    private var isFavoritesSelected: Bool {
-        viewModel.selectedMainPage == .games && viewModel.selectedCatalogDestination == .favorites
+    private func gameIdentity(_ game: CatalogGameObject?) -> String {
+        guard let game else { return "" }
+        return gameIdentity(game)
     }
 
     private func gameIdentity(_ game: CatalogGameObject) -> String {
         [game.id, game.uuid, game.title].joined(separator: "|")
     }
 
-    private func performPrimaryAction(for game: CatalogGameObject?) {
-        guard let game else { return }
+    private func select(_ game: CatalogGameObject) {
+        selectedIdentity = gameIdentity(game)
         viewModel.selectGame(game)
+    }
+
+    private func performPrimaryAction(for game: CatalogGameObject) {
+        select(game)
         if game.isLaunchPatching {
             viewModel.queuePatchingLaunch(game: game)
         } else if game.cardPrimaryActionIsLaunchable {
@@ -165,101 +146,319 @@ struct HybridCatalogView: View {
     }
 }
 
-private struct BasicGameCard: View {
-    let game: CatalogGameObject
-    let isSelected: Bool
-    let isFavorite: Bool
-    let play: () -> Void
-    let select: () -> Void
-    let toggleFavorite: () -> Void
+private struct DynamicGameBackground: View {
+    let game: CatalogGameObject?
+    let imageIndex: Int
+
+    private var imageURLs: [URL] {
+        guard let game else { return [] }
+        var values: [String] = []
+        var seen = Set<String>()
+
+        func append(_ value: String) {
+            guard !value.isEmpty, seen.insert(value).inserted, let url = URL(string: value) else { return }
+            values.append(url.absoluteString)
+        }
+
+        for key in ["HERO_IMAGE", "MARQUEE_HERO_IMAGE", "FEATURE_IMAGE", "KEY_ART", "TV_BANNER"] {
+            for value in game.imageUrlsByType[key] ?? [] { append(value) }
+            for value in game.imageUrlsByType[key.lowercased()] ?? [] { append(value) }
+        }
+        append(game.heroImageUrl)
+        for value in game.screenshotUrls { append(value) }
+        append(game.imageUrl)
+        return values.compactMap(URL.init(string:))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button(action: select) {
-                HStack(alignment: .top, spacing: 10) {
-                    CatalogRemoteImage(url: URL(string: game.bestTileImageURL), contentMode: .fill)
-                        .frame(width: 82, height: 82)
-                        .clipped()
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(game.title.isEmpty ? "Untitled game" : game.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        Text(game.genres.prefix(2).joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
+        ZStack {
+            Color.black
+            if let url = imageURLs.isEmpty ? nil : imageURLs[imageIndex % imageURLs.count] {
+                CatalogRemoteImage(url: url, contentMode: .fill)
+                    .id(url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 1.1), value: url)
+                    .overlay(Color.black.opacity(0.38))
             }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 8) {
-                Button(action: play) {
-                    Text(game.isLaunchPatching ? "Queue" : (game.cardPrimaryActionIsLaunchable ? "Play" : "Mark Owned"))
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(action: toggleFavorite) {
-                    Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "heart.fill" : "heart")
-                }
-                .buttonStyle(.bordered)
-                .labelStyle(.iconOnly)
-                .help(isFavorite ? "Remove from favorites" : "Add to favorites")
-            }
+            LinearGradient(
+                colors: [.black.opacity(0.72), .black.opacity(0.10), .black.opacity(0.74)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            LinearGradient(
+                colors: [.black.opacity(0.58), .clear, .black.opacity(0.60)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: 1)
-        }
+        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
     }
 }
 
-private struct BasicGameInspector: View {
-    @ObservedObject var viewModel: CatalogViewModel
-    let play: () -> Void
+private struct CurvedPosterRail: View {
+    let games: [CatalogGameObject]
+    let selectedIdentity: String
+    let select: (CatalogGameObject) -> Void
+    let launch: (CatalogGameObject) -> Void
 
     var body: some View {
-        if let game = viewModel.selectedGame {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("Details")
-                            .font(.title3.weight(.semibold))
-                        Spacer()
-                        Button("Close") { viewModel.selectGame(nil) }
+        GeometryReader { geometry in
+            ScrollViewReader { scrollProxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .bottom, spacing: 14) {
+                        ForEach(Array(games.enumerated()), id: \.element.uuid) { index, game in
+                            let distance = distanceFromCenter(for: index)
+                            PosterGameCard(
+                                game: game,
+                                isSelected: gameIdentity(game) == selectedIdentity,
+                                verticalOffset: curveOffset(distance: distance),
+                                scale: curveScale(distance: distance),
+                                select: { select(game) },
+                                launch: { launch(game) }
+                            )
+                            .id(gameIdentity(game))
+                        }
                     }
-
-                    CatalogRemoteImage(url: URL(string: game.bestDetailImageURL), contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 150)
-
-                    Text(game.title.isEmpty ? "Untitled game" : game.title)
-                        .font(.title2.weight(.semibold))
-
-                    if !game.developerName.isEmpty {
-                        Text(game.developerName)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text(game.shortDescription.isEmpty ? game.longDescription : game.shortDescription)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Button(game.cardPrimaryActionIsLaunchable ? "Play" : "Mark Owned", action: play)
-                        .buttonStyle(.borderedProminent)
+                    .frame(minWidth: geometry.size.width, alignment: .center)
+                    .padding(.horizontal, max(0, geometry.size.width / 2 - 92))
                 }
-                .padding(20)
+                .scrollTargetBehavior(.viewAligned)
+                .onChange(of: selectedIdentity) { _, identity in
+                    guard !identity.isEmpty else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        scrollProxy.scrollTo(identity, anchor: .center)
+                    }
+                }
             }
+        }
+    }
+
+    private func gameIdentity(_ game: CatalogGameObject) -> String {
+        [game.id, game.uuid, game.title].joined(separator: "|")
+    }
+
+    private func distanceFromCenter(for index: Int) -> CGFloat {
+        let selectedIndex = games.firstIndex { gameIdentity($0) == selectedIdentity } ?? 0
+        return CGFloat(index - selectedIndex)
+    }
+
+    private func curveOffset(distance: CGFloat) -> CGFloat {
+        min(abs(distance) * abs(distance) * 4, 72)
+    }
+
+    private func curveScale(distance: CGFloat) -> CGFloat {
+        max(0.82, 1 - abs(distance) * 0.035)
+    }
+}
+
+private struct PosterGameCard: View {
+    let game: CatalogGameObject
+    let isSelected: Bool
+    let verticalOffset: CGFloat
+    let scale: CGFloat
+    let select: () -> Void
+    let launch: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            ZStack(alignment: .bottom) {
+                CatalogRemoteImage(url: URL(string: game.bestTileImageURL), contentMode: .fill)
+                    .frame(width: 170, height: 246)
+                    .clipped()
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.90)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+
+                Text(game.title.isEmpty ? "Untitled game" : game.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .shadow(color: .black, radius: 4)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 12)
+                    .frame(width: 170)
+            }
+            .frame(width: 170, height: 246)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.white : Color.white.opacity(0.18), lineWidth: isSelected ? 3 : 1)
+                    .shadow(color: isSelected ? Color.accentColor.opacity(0.95) : .clear, radius: 14)
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .scaleEffect(scale)
+        .offset(y: verticalOffset)
+        .onTapGesture(count: 2, perform: launch)
+        .animation(.easeInOut(duration: 0.35), value: selectedIdentity)
+        .accessibilityLabel(game.title.isEmpty ? "Untitled game" : game.title)
+        .accessibilityHint("Click to select. Double-click to launch.")
+    }
+
+    private var selectedIdentity: String { isSelected ? game.uuid : "" }
+}
+
+private struct FloatingGameDetails: View {
+    @ObservedObject var viewModel: CatalogViewModel
+    let game: CatalogGameObject
+    let play: () -> Void
+    let toggleFavorite: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(game.title.isEmpty ? "Untitled game" : game.title)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+
+            if !game.developerName.isEmpty {
+                Text(game.developerName)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            Text(game.shortDescription.isEmpty ? game.longDescription : game.shortDescription)
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.78))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .frame(maxWidth: 620)
+
+            HStack(spacing: 10) {
+                Button(game.isLaunchPatching ? "Queue" : (game.cardPrimaryActionIsLaunchable ? "Play" : "Mark Owned"), action: play)
+                    .buttonStyle(.borderedProminent)
+                Button(action: toggleFavorite) {
+                    Image(systemName: viewModel.isFavorite(game) ? "heart.fill" : "heart")
+                }
+                .buttonStyle(.bordered)
+                .help(viewModel.isFavorite(game) ? "Remove from favorites" : "Add to favorites")
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .frame(maxWidth: 700)
+    }
+}
+
+private struct TopNavigationGlassBar: View {
+    @ObservedObject var viewModel: CatalogViewModel
+    let accounts: [LoginAccount]
+    let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
+    let onSignOut: () -> Void
+    let onForget: (LoginAccount) -> Void
+
+    var body: some View {
+        HStack(spacing: 18) {
+            Button("Games") { viewModel.showGames() }
+            Button("Library") { viewModel.showCatalogDestination(.library) }
+            Button("Favorites") { viewModel.showCatalogDestination(.favorites) }
+            Button("Recordings") { viewModel.showRecordings() }
+            Button("Settings") { viewModel.showSettings() }
+            Button { viewModel.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                .disabled(viewModel.isCatalogRefreshInProgress)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .modifier(LiquidGlassModifier(cornerRadius: 24))
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 14)
+        .safeAreaPadding(.horizontal, 20)
+    }
+}
+
+private struct AccountGlassControl: View {
+    let account: LoginAccount
+    let accounts: [LoginAccount]
+    let onSwitch: (LoginAccount) -> Void
+    let onAddAccount: () -> Void
+    let onSignOut: () -> Void
+    let onForget: (LoginAccount) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(accounts, id: \.persistentModelID) { candidate in
+                Button("Switch to \(candidate.displayName)") { onSwitch(candidate) }
+            }
+            Divider()
+            Button("Add Account", action: onAddAccount)
+            Button("Forget Account", role: .destructive) { onForget(account) }
+            Button("Sign Out", role: .destructive, action: onSignOut)
+        } label: {
+            HStack(spacing: 10) {
+                GravatarView(account: account, size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.displayName.isEmpty ? "Account" : account.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(account.membershipTier)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .modifier(LiquidGlassModifier(cornerRadius: 18))
+        .frame(maxWidth: 240, alignment: .leading)
+        .safeAreaPadding(.leading, 18)
+        .safeAreaPadding(.bottom, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(.bottom, 18)
+    }
+}
+
+private struct GravatarView: View {
+    let account: LoginAccount
+    let size: CGFloat
+
+    private var url: URL? {
+        let email = account.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !email.isEmpty else { return nil }
+        let hash = Insecure.MD5.hash(data: Data(email.utf8)).map { String(format: "%02x", $0) }.joined()
+        return URL(string: "https://www.gravatar.com/avatar/\(hash)?s=\(Int(size * 3))&d=404")
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.white.opacity(0.18))
+            if let url {
+                CatalogRemoteImage(url: url, contentMode: .fill)
+                    .clipShape(Circle())
+            } else {
+                Text(String(account.displayName.prefix(1)).uppercased())
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+}
+
+private struct LiquidGlassModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
     }
 }
