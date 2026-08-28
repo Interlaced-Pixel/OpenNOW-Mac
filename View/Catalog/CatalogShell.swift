@@ -13,13 +13,51 @@ struct CatalogShell: View {
     @FocusState private var catalogHasFocus: Bool
 
     var body: some View {
-        ZStack(alignment: .top) {
-            DynamicGameBackground(game: store.selectedGame, imageIndex: backgroundIndex)
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                DynamicGameBackground(game: store.selectedGame, imageIndex: backgroundIndex)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
 
-            if viewModel.selectedMainPage == .recordings {
-                RecordingsView()
-            } else if viewModel.selectedMainPage == .settings {
-                SettingsView(
+                if viewModel.selectedMainPage == .recordings {
+                    RecordingsView()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if viewModel.selectedMainPage == .settings {
+                    SettingsView(
+                        viewModel: viewModel,
+                        accounts: accounts,
+                        onSwitch: onSwitch,
+                        onAddAccount: onAddAccount,
+                        onSignOut: onSignOut,
+                        onForget: onForget
+                    )
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                } else {
+                    VStack(spacing: 20) {
+                        GameDetailOverlayPanel(
+                            game: store.selectedGame,
+                            isFavorite: {
+                                if let g = store.selectedGame { return viewModel.isFavorite(g) }
+                                return false
+                            }(),
+                            play: { if let g = store.selectedGame { performPrimaryAction(for: g) } },
+                            toggleFavorite: {
+                                if let g = store.selectedGame {
+                                    viewModel.selectGame(g)
+                                    viewModel.toggleFavoriteSelectedGame()
+                                }
+                            }
+                        )
+
+                        GameRailView(store: store) { game in
+                            performPrimaryAction(for: game)
+                        }
+                    }
+                    .frame(width: geometry.size.width, height: 390)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height - 215)
+                }
+            }
+            .overlay(alignment: .top) {
+                CatalogChrome(
                     viewModel: viewModel,
                     accounts: accounts,
                     onSwitch: onSwitch,
@@ -27,38 +65,7 @@ struct CatalogShell: View {
                     onSignOut: onSignOut,
                     onForget: onForget
                 )
-            } else {
-                VStack(spacing: 0) {
-                    GameDetailOverlayPanel(
-                        viewModel: viewModel,
-                        game: store.selectedGame,
-                        play: { if let g = store.selectedGame { performPrimaryAction(for: g) } },
-                        toggleFavorite: {
-                            if let g = store.selectedGame {
-                                viewModel.selectGame(g)
-                                viewModel.toggleFavoriteSelectedGame()
-                            }
-                        }
-                    )
-                    .padding(.bottom, 20)
-
-                    GameRailView(store: store) { game in
-                        performPrimaryAction(for: game)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 20)
             }
-        }
-        .overlay(alignment: .top) {
-            CatalogChrome(
-                viewModel: viewModel,
-                accounts: accounts,
-                onSwitch: onSwitch,
-                onAddAccount: onAddAccount,
-                onSignOut: onSignOut,
-                onForget: onForget
-            )
         }
         .focusable(true)
         .focusEffectDisabled()

@@ -1,34 +1,34 @@
 import SwiftUI
 
 struct GameDetailOverlayPanel: View {
-    @ObservedObject var viewModel: CatalogViewModel
     let game: CatalogGameObject?
+    let isFavorite: Bool
     let play: () -> Void
     let toggleFavorite: () -> Void
+
+    private static let panelWidth: CGFloat = 700
+    private static let panelHeight: CGFloat = 220
 
     var body: some View {
         ZStack {
             panelContent
-                .id(game?.id)
+                .id(game?.id ?? "")
                 .transition(.opacity)
+                .animation(.easeInOut(duration: 0.18), value: game?.id ?? "")
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .frame(height: 220)
-        .frame(maxWidth: 700)
+        .frame(width: Self.panelWidth, height: Self.panelHeight)
         .modifier(LiquidGlassModifier(cornerRadius: 22))
-        .animation(.easeInOut(duration: 0.18), value: game?.id)
     }
 
     @ViewBuilder
     private var panelContent: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Text(game?.title ?? "")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .frame(height: 54, alignment: .bottom)
+                .frame(width: 652, height: 54, alignment: .bottom)
 
             HStack(spacing: 14) {
                 if let dev = game?.developerName, !dev.isEmpty {
@@ -55,25 +55,27 @@ struct GameDetailOverlayPanel: View {
                 .foregroundStyle(.white.opacity(0.78))
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
-                .frame(maxWidth: 620, minHeight: 60, maxHeight: 60, alignment: .top)
+                .frame(width: 652, height: 56, alignment: .top)
 
             HStack(spacing: 12) {
-                let actionText = game?.isLaunchPatching == true ? "Queue" : ((game?.cardPrimaryActionIsLaunchable ?? false) ? "Play" : "Mark Owned")
+                let actionText = game?.isLaunchPatching == true ? "Queue"
+                    : ((game?.cardPrimaryActionIsLaunchable ?? false) ? "Play" : "Mark Owned")
                 Button(actionText, action: play)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(game == nil)
 
                 Button(action: toggleFavorite) {
-                    Image(systemName: (game != nil && viewModel.isFavorite(game!)) ? "heart.fill" : "heart")
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(game == nil)
-                .help((game != nil && viewModel.isFavorite(game!)) ? "Remove from favorites" : "Add to favorites")
+                .help(isFavorite ? "Remove from favorites" : "Add to favorites")
             }
-            .padding(.top, 4)
-            .frame(height: 48)
+            .frame(height: 44)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
     }
 }
