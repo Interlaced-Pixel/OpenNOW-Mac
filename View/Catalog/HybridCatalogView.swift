@@ -1,13 +1,54 @@
-//
-//  ControllerCatalogView.swift
-//  PixelNOW
-//
-
 import AppKit
+import Combine
 import SwiftData
 import SwiftUI
 
-private enum ControllerDetailAction: Equatable {
+
+// MARK: - Enums & Models
+
+enum HybridFocusArea {
+    case navigation
+    case categories
+    case content
+}
+
+enum HybridNavigationItem: CaseIterable, Equatable, Identifiable {
+    case home
+    case library
+    case favorites
+    case search
+    case recordings
+    case settings
+    case actions
+
+    var id: String { title }
+
+    var title: String {
+        switch self {
+        case .home: return "Home"
+        case .library: return "Library"
+        case .favorites: return "Favorites"
+        case .search: return "Search"
+        case .recordings: return "Recordings"
+        case .settings: return "Settings"
+        case .actions: return "Actions"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .home: return "gamecontroller.fill"
+        case .library: return "rectangle.stack.fill"
+        case .favorites: return "heart.fill"
+        case .search: return "magnifyingglass"
+        case .recordings: return "play.rectangle.fill"
+        case .settings: return "gearshape.fill"
+        case .actions: return "ellipsis.circle.fill"
+        }
+    }
+}
+
+enum HybridDetailAction: Equatable {
     case primary
     case favorite
     case store
@@ -50,7 +91,7 @@ private enum ControllerDetailAction: Equatable {
     }
 }
 
-private enum ControllerActionMenuItem {
+enum HybridActionMenuItem {
     case refresh
     case clearSearch
     case home
@@ -103,7 +144,59 @@ private enum ControllerActionMenuItem {
     }
 }
 
-private struct ControllerLayoutMetrics {
+// MARK: - HybridCatalogViewModel
+
+@MainActor
+final class HybridCatalogViewModel: ObservableObject {
+    @Published var focusArea = HybridFocusArea.navigation
+    @Published var selectedNavigationIndex = 0
+    @Published var selectedCategoryIndex = 0
+    @Published var selectedRailIndex = 0
+    @Published var selectedGameIndices: [String: Int] = [:]
+    @Published var isActionMenuVisible = false
+    @Published var actionMenuIndex = 0
+    @Published var isSearchVisible = false
+    @Published var searchRowIndex = 0
+    @Published var searchFilterOptionIndices: [String: Int] = [:]
+    @Published var searchResultIndex = 0
+    @Published var searchResultColumnCount = 4
+    @Published var isDetailVisible = false
+    @Published var detailActionIndex = 0
+    @Published var showAllSection: CatalogSectionModel?
+    @Published var showAllIndex = 0
+    @Published var showAllColumnCount = 4
+
+    let navigationItems = HybridNavigationItem.allCases
+
+    var hasHybridOverlay: Bool {
+        isActionMenuVisible || isSearchVisible || isDetailVisible || showAllSection != nil
+    }
+
+    func selectedGameIndex(for section: CatalogSectionModel, gameCount: Int) -> Int {
+        guard gameCount > 0 else { return 0 }
+        return min(max(selectedGameIndices[section.id] ?? 0, 0), gameCount - 1)
+    }
+
+    func setSelectedGameIndex(_ index: Int, for section: CatalogSectionModel, gameCount: Int) {
+        guard gameCount > 0 else {
+            selectedGameIndices[section.id] = 0
+            return
+        }
+        selectedGameIndices[section.id] = min(max(index, 0), gameCount - 1)
+    }
+
+    func clampRailSelection(sectionCount: Int) {
+        selectedRailIndex = min(max(selectedRailIndex, 0), max(sectionCount - 1, 0))
+    }
+
+    func clampCategorySelection(categoryCount: Int) {
+        selectedCategoryIndex = min(max(selectedCategoryIndex, 0), max(categoryCount - 1, 0))
+    }
+}
+
+// MARK: - Layout Metrics
+
+struct HybridLayoutMetrics {
     let size: CGSize
     let safeAreaInsets: EdgeInsets
 
@@ -132,7 +225,9 @@ private struct ControllerLayoutMetrics {
     }
 }
 
-struct ControllerCatalogView: View {
+// MARK: - Main View
+
+struct HybridCatalogView: View {
     @ObservedObject var viewModel: CatalogViewModel
     let accounts: [LoginAccount]
     let onSwitch: (LoginAccount) -> Void
@@ -141,40 +236,45 @@ struct ControllerCatalogView: View {
     let onForget: (LoginAccount) -> Void
 
     @StateObject private var inputRouter = ControllerInputRouter()
-    @StateObject private var controllerViewModel = ControllerCatalogViewModel()
+    @StateObject private var hybridViewModel = HybridCatalogViewModel()
+    @State private var hoveredGameId: String?
 
-    private var navigationItems: [ControllerNavigationItem] { controllerViewModel.navigationItems }
-    private var categories: [ControllerCatalogCategory] {
-        var values = [ControllerCatalogCategory(id: "all", title: "All Games", icon: "square.grid.2x2.fill")]
+    private var navigationItems: [HybridNavigationItem] { hybridViewModel.navigationItems }
+    private var categories: [HybridCatalogCategory] {
+        var values = [HybridCatalogCategory(id: "all", title: "All Games", icon: "square.grid.2x2.fill")]
         var seen = Set<String>()
         for genre in viewModel.catalogSections.flatMap({ $0.games.flatMap(\.genres) }) {
             let title = genre.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = title.lowercased()
             guard !title.isEmpty, !seen.contains(key), values.count < 8 else { continue }
             seen.insert(key)
-            values.append(ControllerCatalogCategory(id: title, title: CatalogGenreCopy.displayName(title), icon: CatalogGenreCopy.icon(title)))
+            values.append(HybridCatalogCategory(id: title, title: CatalogGenreCopy.displayName(title), icon: CatalogGenreCopy.icon(title)))
         }
         return values
     }
 
+    private var catalogSections: [CatalogSectionModel] {
+        viewModel.catalogSections
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let layout = ControllerLayoutMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
+            let layout = HybridLayoutMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
             ZStack {
-                ControllerCatalogBackground(viewModel: viewModel, game: focusedHeroGame)
+                HybridBackground(viewModel: viewModel, game: focusedHeroGame)
 
                 VStack(spacing: 0) {
-                    ControllerHeader(viewModel: viewModel, glyphs: inputRouter.glyphs, layout: layout)
-                    ControllerNavigationBar(
+                    HybridHeader(viewModel: viewModel, glyphs: inputRouter.glyphs, layout: layout)
+                    HybridNavigationBar(
                         items: navigationItems,
-                        selectedIndex: controllerViewModel.selectedNavigationIndex,
-                        isFocused: controllerViewModel.focusArea == .navigation && !hasModalOverlay,
+                        selectedIndex: hybridViewModel.selectedNavigationIndex,
+                        isFocused: hybridViewModel.focusArea == .navigation && !hasModalOverlay,
                         activeItem: activeNavigationItem,
                         layout: layout,
                         select: selectNavigationItem
                     )
-                    controllerPage(layout: layout)
-                    ControllerHintBar(hints: hints, glyphs: inputRouter.glyphs, layout: layout)
+                    hybridPage(layout: layout)
+                    HybridHintBar(hints: hints, glyphs: inputRouter.glyphs, layout: layout)
                 }
                 .frame(width: layout.contentWidth, height: proxy.size.height, alignment: .top)
                 .padding(.leading, layout.leadingInset)
@@ -182,30 +282,31 @@ struct ControllerCatalogView: View {
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 .clipped()
 
-                if controllerViewModel.isSearchVisible {
-                    ControllerSearchOverlay(
+                if hybridViewModel.isSearchVisible {
+                    HybridSearchOverlay(
                         viewModel: viewModel,
                         glyphs: inputRouter.glyphs,
-                        rowIndex: controllerViewModel.searchRowIndex,
-                        filterOptionIndices: controllerViewModel.searchFilterOptionIndices,
-                        resultIndex: controllerViewModel.searchResultIndex,
-                        resultColumnCount: $controllerViewModel.searchResultColumnCount,
+                        rowIndex: hybridViewModel.searchRowIndex,
+                        filterOptionIndices: hybridViewModel.searchFilterOptionIndices,
+                        resultIndex: hybridViewModel.searchResultIndex,
+                        resultColumnCount: $hybridViewModel.searchResultColumnCount,
                         layout: layout,
                         selectSort: { index in setSort(at: index) },
                         selectFilter: { group, index in setFilterOption(group: group, index: index) },
                         selectResult: { game in openDetails(game, sectionId: "catalog-results") },
                         close: { closeSearchOverlay() },
-                        clear: { viewModel.clearSearchAndFilters() }
+                        clear: { viewModel.clearSearchAndFilters() },
+                        hoveredGameId: $hoveredGameId
                     )
                     .transition(.opacity)
                     .zIndex(30)
                 }
 
-                if controllerViewModel.isDetailVisible, let game = viewModel.selectedGame {
-                    ControllerGameDetailOverlay(
+                if hybridViewModel.isDetailVisible, let game = viewModel.selectedGame {
+                    HybridDetailOverlay(
                         viewModel: viewModel,
                         game: game,
-                        selectedActionIndex: controllerViewModel.detailActionIndex,
+                        selectedActionIndex: hybridViewModel.detailActionIndex,
                         actions: detailActions(for: game),
                         glyphs: inputRouter.glyphs,
                         layout: layout,
@@ -217,24 +318,25 @@ struct ControllerCatalogView: View {
                 }
 
                 if let showAllSection = currentShowAllSection {
-                    ControllerShowAllOverlay(
+                    HybridShowAllOverlay(
                         viewModel: viewModel,
                         section: showAllSection,
-                        selectedIndex: controllerViewModel.showAllIndex,
-                        columnCount: $controllerViewModel.showAllColumnCount,
+                        selectedIndex: hybridViewModel.showAllIndex,
+                        columnCount: $hybridViewModel.showAllColumnCount,
                         glyphs: inputRouter.glyphs,
                         layout: layout,
                         select: { game in openDetails(game, sectionId: showAllSection.id) },
-                        close: closeShowAll
+                        close: closeShowAll,
+                        hoveredGameId: $hoveredGameId
                     )
                     .transition(.opacity)
                     .zIndex(26)
                 }
 
-                if controllerViewModel.isActionMenuVisible {
-                    ControllerActionMenuOverlay(
+                if hybridViewModel.isActionMenuVisible {
+                    HybridActionMenuOverlay(
                         items: actionMenuItems,
-                        selectedIndex: controllerViewModel.actionMenuIndex,
+                        selectedIndex: hybridViewModel.actionMenuIndex,
                         glyphs: inputRouter.glyphs,
                         layout: layout,
                         isRefreshingCatalog: viewModel.isCatalogRefreshInProgress,
@@ -248,7 +350,7 @@ struct ControllerCatalogView: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
         }
-        .background(ControllerKeyboardInputBridge { command in inputRouter.sendKeyboardCommand(command) })
+        .background(HybridKeyboardInputBridge { command in inputRouter.sendKeyboardCommand(command) })
         .onAppear {
             inputRouter.onCommand = handleInput
             synchronizeNavigationSelection()
@@ -256,34 +358,35 @@ struct ControllerCatalogView: View {
         .onDisappear { inputRouter.onCommand = nil }
         .onChange(of: viewModel.selectedMainPage) { _, _ in synchronizeNavigationSelection() }
         .onChange(of: viewModel.selectedCatalogDestination) { _, _ in synchronizeNavigationSelection() }
-        .onChange(of: viewModel.catalogSections.map(\.id)) { _, _ in clampRailSelection() }
+        .onChange(of: catalogSections.map(\.id)) { _, _ in clampRailSelection() }
         .onChange(of: categories.map(\.id)) { _, _ in clampCategorySelection() }
         .onChange(of: viewModel.catalogGames.map(\.catalogIdentity)) { _, _ in
-            controllerViewModel.searchResultIndex = min(controllerViewModel.searchResultIndex, max(viewModel.catalogGames.count - 1, 0))
+            hybridViewModel.searchResultIndex = min(hybridViewModel.searchResultIndex, max(viewModel.catalogGames.count - 1, 0))
         }
     }
 
-    @ViewBuilder private func controllerPage(layout: ControllerLayoutMetrics) -> some View {
+    @ViewBuilder private func hybridPage(layout: HybridLayoutMetrics) -> some View {
         switch viewModel.selectedMainPage {
         case .games:
-            ControllerGamesPage(
+            HybridGamesPage(
                 viewModel: viewModel,
-                focusArea: controllerViewModel.focusArea,
+                focusArea: hybridViewModel.focusArea,
                 categories: categories,
-                selectedCategoryIndex: controllerViewModel.selectedCategoryIndex,
-                selectedRailIndex: controllerViewModel.selectedRailIndex,
-                selectedGameIndices: $controllerViewModel.selectedGameIndices,
+                selectedCategoryIndex: hybridViewModel.selectedCategoryIndex,
+                selectedRailIndex: hybridViewModel.selectedRailIndex,
+                selectedGameIndices: $hybridViewModel.selectedGameIndices,
                 layout: layout,
                 openDetails: openDetails,
                 showAll: openShowAll,
-                selectCategory: selectCategory
+                selectCategory: selectCategory,
+                hoveredGameId: $hoveredGameId
             )
         case .recordings:
-            ControllerEmbeddedPage(title: "Recordings", subtitle: "Saved gameplay videos", layout: layout) {
+            HybridEmbeddedPage(title: "Recordings", subtitle: "Saved gameplay videos", layout: layout) {
                 RecordingsView()
             }
         case .settings:
-            ControllerEmbeddedPage(title: "Settings", subtitle: "Streaming, account, interface, and system options", layout: layout) {
+            HybridEmbeddedPage(title: "Settings", subtitle: "Streaming, account, interface, and system options", layout: layout) {
                 SettingsView(
                     viewModel: viewModel,
                     accounts: accounts,
@@ -297,10 +400,10 @@ struct ControllerCatalogView: View {
     }
 
     private var hasModalOverlay: Bool {
-        controllerViewModel.hasControllerOverlay || viewModel.isLaunchFlowVisible || viewModel.isStorePickerVisible
+        hybridViewModel.hasHybridOverlay || viewModel.isLaunchFlowVisible || viewModel.isStorePickerVisible
     }
 
-    private var activeNavigationItem: ControllerNavigationItem {
+    private var activeNavigationItem: HybridNavigationItem {
         if viewModel.selectedMainPage == .recordings { return .recordings }
         if viewModel.selectedMainPage == .settings { return .settings }
         switch viewModel.selectedCatalogDestination {
@@ -311,28 +414,28 @@ struct ControllerCatalogView: View {
     }
 
     private var focusedHeroGame: CatalogGameObject? {
-        if controllerViewModel.isDetailVisible, let selectedGame = viewModel.selectedGame { return selectedGame }
-        let sections = viewModel.catalogSections
-        if sections.indices.contains(controllerViewModel.selectedRailIndex) {
-            let section = sections[controllerViewModel.selectedRailIndex]
+        if hybridViewModel.isDetailVisible, let selectedGame = viewModel.selectedGame { return selectedGame }
+        let sections = catalogSections
+        if sections.indices.contains(hybridViewModel.selectedRailIndex) {
+            let section = sections[hybridViewModel.selectedRailIndex]
             let games = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre)
             if let firstGame = games.first { return firstGame }
         }
         return viewModel.heroRotationGames.first ?? sections.flatMap(\.games).first
     }
 
-    private var hints: [ControllerHint] {
-        if controllerViewModel.isActionMenuVisible { return [.move, .select, .back] }
-        if controllerViewModel.isSearchVisible { return [.move, .select, .back, .clear] }
-        if controllerViewModel.isDetailVisible { return [.move, .select, .back, .search] }
-        if controllerViewModel.showAllSection != nil { return [.move, .select, .back] }
-        if controllerViewModel.focusArea == .categories { return [.move, .select, .back, .search, .menu] }
-        if controllerViewModel.focusArea == .content { return [.move, .select, .back, .search, .showAll, .menu] }
+    private var hints: [HybridHint] {
+        if hybridViewModel.isActionMenuVisible { return [.move, .select, .back] }
+        if hybridViewModel.isSearchVisible { return [.move, .select, .back, .clear] }
+        if hybridViewModel.isDetailVisible { return [.move, .select, .back, .search] }
+        if hybridViewModel.showAllSection != nil { return [.move, .select, .back] }
+        if hybridViewModel.focusArea == .categories { return [.move, .select, .back, .search, .menu] }
+        if hybridViewModel.focusArea == .content { return [.move, .select, .back, .search, .showAll, .menu] }
         return [.move, .select, .back, .search, .menu]
     }
 
-    private var actionMenuItems: [ControllerActionMenuItem] {
-        var items: [ControllerActionMenuItem] = [.refresh]
+    private var actionMenuItems: [HybridActionMenuItem] {
+        var items: [HybridActionMenuItem] = [.refresh]
         if viewModel.isBrowseMode { items.append(.clearSearch) }
         items.append(contentsOf: [.home, .library, .favorites, .recordings, .settings])
         for account in accounts {
@@ -353,10 +456,10 @@ struct ControllerCatalogView: View {
 
     private func handleInput(_ command: ControllerInputCommand) {
         if handleSharedOverlayInput(command) { return }
-        if controllerViewModel.isActionMenuVisible { handleActionMenuInput(command); return }
-        if controllerViewModel.isSearchVisible { handleSearchInput(command); return }
-        if controllerViewModel.showAllSection != nil { handleShowAllInput(command); return }
-        if controllerViewModel.isDetailVisible { handleDetailInput(command); return }
+        if hybridViewModel.isActionMenuVisible { handleActionMenuInput(command); return }
+        if hybridViewModel.isSearchVisible { handleSearchInput(command); return }
+        if hybridViewModel.showAllSection != nil { handleShowAllInput(command); return }
+        if hybridViewModel.isDetailVisible { handleDetailInput(command); return }
         handlePageInput(command)
     }
 
@@ -403,16 +506,16 @@ struct ControllerCatalogView: View {
         case .confirm:
             confirmFocusedItem()
         case .back:
-            if controllerViewModel.focusArea == .categories {
-                controllerViewModel.focusArea = .navigation
+            if hybridViewModel.focusArea == .categories {
+                hybridViewModel.focusArea = .navigation
             } else if viewModel.selectedMainPage != .games || viewModel.selectedCatalogDestination != .home {
                 viewModel.showCatalogDestination(.home)
-                controllerViewModel.focusArea = .content
+                hybridViewModel.focusArea = .content
             }
         case .search:
             openSearchOverlay()
         case .actions:
-            if controllerViewModel.focusArea == .content, let section = currentSection {
+            if hybridViewModel.focusArea == .content, let section = currentSection {
                 openShowAll(section)
             } else {
                 openActionMenu()
@@ -429,11 +532,11 @@ struct ControllerCatalogView: View {
     private func handleActionMenuInput(_ command: ControllerInputCommand) {
         let items = actionMenuItems
         switch command {
-        case .move(.up): controllerViewModel.actionMenuIndex = max(controllerViewModel.actionMenuIndex - 1, 0)
-        case .move(.down): controllerViewModel.actionMenuIndex = min(controllerViewModel.actionMenuIndex + 1, max(items.count - 1, 0))
+        case .move(.up): hybridViewModel.actionMenuIndex = max(hybridViewModel.actionMenuIndex - 1, 0)
+        case .move(.down): hybridViewModel.actionMenuIndex = min(hybridViewModel.actionMenuIndex + 1, max(items.count - 1, 0))
         case .confirm:
-            guard items.indices.contains(controllerViewModel.actionMenuIndex) else { return }
-            executeActionMenuItem(items[controllerViewModel.actionMenuIndex])
+            guard items.indices.contains(hybridViewModel.actionMenuIndex) else { return }
+            executeActionMenuItem(items[hybridViewModel.actionMenuIndex])
         case .back, .menu, .actions: closeActionMenu()
         default: break
         }
@@ -441,8 +544,8 @@ struct ControllerCatalogView: View {
 
     private func handleSearchInput(_ command: ControllerInputCommand) {
         switch command {
-        case .move(.up): controllerViewModel.searchRowIndex = max(controllerViewModel.searchRowIndex - 1, 0)
-        case .move(.down): controllerViewModel.searchRowIndex = min(controllerViewModel.searchRowIndex + 1, max(searchRowCount - 1, 0))
+        case .move(.up): hybridViewModel.searchRowIndex = max(hybridViewModel.searchRowIndex - 1, 0)
+        case .move(.down): hybridViewModel.searchRowIndex = min(hybridViewModel.searchRowIndex + 1, max(searchRowCount - 1, 0))
         case .move(.left): moveSearchSelection(delta: -1)
         case .move(.right): moveSearchSelection(delta: 1)
         case .confirm: confirmSearchSelection()
@@ -455,13 +558,13 @@ struct ControllerCatalogView: View {
     private func handleShowAllInput(_ command: ControllerInputCommand) {
         guard let section = currentShowAllSection else { return }
         switch command {
-        case .move(.left): controllerViewModel.showAllIndex = max(controllerViewModel.showAllIndex - 1, 0)
-        case .move(.right): controllerViewModel.showAllIndex = min(controllerViewModel.showAllIndex + 1, max(section.games.count - 1, 0))
-        case .move(.up): controllerViewModel.showAllIndex = max(controllerViewModel.showAllIndex - controllerViewModel.showAllColumnCount, 0)
-        case .move(.down): controllerViewModel.showAllIndex = min(controllerViewModel.showAllIndex + controllerViewModel.showAllColumnCount, max(section.games.count - 1, 0))
+        case .move(.left): hybridViewModel.showAllIndex = max(hybridViewModel.showAllIndex - 1, 0)
+        case .move(.right): hybridViewModel.showAllIndex = min(hybridViewModel.showAllIndex + 1, max(section.games.count - 1, 0))
+        case .move(.up): hybridViewModel.showAllIndex = max(hybridViewModel.showAllIndex - hybridViewModel.showAllColumnCount, 0)
+        case .move(.down): hybridViewModel.showAllIndex = min(hybridViewModel.showAllIndex + hybridViewModel.showAllColumnCount, max(section.games.count - 1, 0))
         case .confirm:
-            guard section.games.indices.contains(controllerViewModel.showAllIndex) else { return }
-            openDetails(section.games[controllerViewModel.showAllIndex], sectionId: section.id)
+            guard section.games.indices.contains(hybridViewModel.showAllIndex) else { return }
+            openDetails(section.games[hybridViewModel.showAllIndex], sectionId: section.id)
         case .back, .actions, .menu: closeShowAll()
         case .search: openSearchOverlay()
         default: break
@@ -472,11 +575,11 @@ struct ControllerCatalogView: View {
         guard let game = viewModel.selectedGame else { return }
         let actions = detailActions(for: game)
         switch command {
-        case .move(.left), .move(.up): controllerViewModel.detailActionIndex = max(controllerViewModel.detailActionIndex - 1, 0)
-        case .move(.right), .move(.down): controllerViewModel.detailActionIndex = min(controllerViewModel.detailActionIndex + 1, max(actions.count - 1, 0))
+        case .move(.left), .move(.up): hybridViewModel.detailActionIndex = max(hybridViewModel.detailActionIndex - 1, 0)
+        case .move(.right), .move(.down): hybridViewModel.detailActionIndex = min(hybridViewModel.detailActionIndex + 1, max(actions.count - 1, 0))
         case .confirm:
-            guard actions.indices.contains(controllerViewModel.detailActionIndex) else { return }
-            executeDetailAction(actions[controllerViewModel.detailActionIndex])
+            guard actions.indices.contains(hybridViewModel.detailActionIndex) else { return }
+            executeDetailAction(actions[hybridViewModel.detailActionIndex])
         case .back: closeDetails()
         case .search: openSearchOverlay()
         case .actions, .menu: openActionMenu()
@@ -485,12 +588,12 @@ struct ControllerCatalogView: View {
     }
 
     private func moveFocus(_ direction: ControllerInputDirection) {
-        switch controllerViewModel.focusArea {
+        switch hybridViewModel.focusArea {
         case .navigation:
             switch direction {
-            case .left: controllerViewModel.selectedNavigationIndex = max(controllerViewModel.selectedNavigationIndex - 1, 0)
-            case .right: controllerViewModel.selectedNavigationIndex = min(controllerViewModel.selectedNavigationIndex + 1, max(navigationItems.count - 1, 0))
-            case .down: controllerViewModel.focusArea = .content
+            case .left: hybridViewModel.selectedNavigationIndex = max(hybridViewModel.selectedNavigationIndex - 1, 0)
+            case .right: hybridViewModel.selectedNavigationIndex = min(hybridViewModel.selectedNavigationIndex + 1, max(navigationItems.count - 1, 0))
+            case .down: hybridViewModel.focusArea = .content
             case .up: break
             }
         case .content:
@@ -498,28 +601,28 @@ struct ControllerCatalogView: View {
             case .left: moveGame(delta: -1)
             case .right: moveGame(delta: 1)
             case .up:
-                if controllerViewModel.selectedRailIndex == 0 { controllerViewModel.focusArea = .navigation } else { moveRail(delta: -1) }
+                if hybridViewModel.selectedRailIndex == 0 { hybridViewModel.focusArea = .navigation } else { moveRail(delta: -1) }
             case .down: moveRail(delta: 1)
             }
         case .categories:
             switch direction {
-            case .left: controllerViewModel.selectedCategoryIndex = max(controllerViewModel.selectedCategoryIndex - 1, 0)
-            case .right: controllerViewModel.selectedCategoryIndex = min(controllerViewModel.selectedCategoryIndex + 1, max(categories.count - 1, 0))
-            case .up: controllerViewModel.focusArea = .navigation
-            case .down: controllerViewModel.focusArea = .content
+            case .left: hybridViewModel.selectedCategoryIndex = max(hybridViewModel.selectedCategoryIndex - 1, 0)
+            case .right: hybridViewModel.selectedCategoryIndex = min(hybridViewModel.selectedCategoryIndex + 1, max(categories.count - 1, 0))
+            case .up: hybridViewModel.focusArea = .navigation
+            case .down: hybridViewModel.focusArea = .content
             }
         }
     }
 
     private func confirmFocusedItem() {
-        if controllerViewModel.focusArea == .navigation {
-            guard navigationItems.indices.contains(controllerViewModel.selectedNavigationIndex) else { return }
-            selectNavigationItem(navigationItems[controllerViewModel.selectedNavigationIndex])
+        if hybridViewModel.focusArea == .navigation {
+            guard navigationItems.indices.contains(hybridViewModel.selectedNavigationIndex) else { return }
+            selectNavigationItem(navigationItems[hybridViewModel.selectedNavigationIndex])
             return
         }
-        if controllerViewModel.focusArea == .categories {
-            guard categories.indices.contains(controllerViewModel.selectedCategoryIndex) else { return }
-            selectCategory(categories[controllerViewModel.selectedCategoryIndex])
+        if hybridViewModel.focusArea == .categories {
+            guard categories.indices.contains(hybridViewModel.selectedCategoryIndex) else { return }
+            selectCategory(categories[hybridViewModel.selectedCategoryIndex])
             return
         }
         guard let section = currentSection else { return }
@@ -529,46 +632,46 @@ struct ControllerCatalogView: View {
         openDetails(games[index], sectionId: section.id)
     }
 
-    private func selectNavigationItem(_ item: ControllerNavigationItem) {
-        controllerViewModel.selectedNavigationIndex = navigationItems.firstIndex(of: item) ?? controllerViewModel.selectedNavigationIndex
+    private func selectNavigationItem(_ item: HybridNavigationItem) {
+        hybridViewModel.selectedNavigationIndex = navigationItems.firstIndex(of: item) ?? hybridViewModel.selectedNavigationIndex
         switch item {
         case .home:
             viewModel.showCatalogDestination(.home)
-            controllerViewModel.focusArea = .categories
+            hybridViewModel.focusArea = .categories
         case .library:
             viewModel.showCatalogDestination(.library)
-            controllerViewModel.focusArea = .categories
+            hybridViewModel.focusArea = .categories
         case .favorites:
             viewModel.showCatalogDestination(.favorites)
-            controllerViewModel.focusArea = .categories
+            hybridViewModel.focusArea = .categories
         case .search:
             openSearchOverlay()
         case .recordings:
             viewModel.showRecordings()
-            controllerViewModel.focusArea = .navigation
+            hybridViewModel.focusArea = .navigation
         case .settings:
             viewModel.showSettings(.interface)
-            controllerViewModel.focusArea = .navigation
+            hybridViewModel.focusArea = .navigation
         case .actions:
             openActionMenu()
         }
     }
 
     private var currentSection: CatalogSectionModel? {
-        let sections = viewModel.catalogSections
-        guard sections.indices.contains(controllerViewModel.selectedRailIndex) else { return nil }
-        return sections[controllerViewModel.selectedRailIndex]
+        let sections = catalogSections
+        guard sections.indices.contains(hybridViewModel.selectedRailIndex) else { return nil }
+        return sections[hybridViewModel.selectedRailIndex]
     }
 
     private var currentShowAllSection: CatalogSectionModel? {
-        guard let section = controllerViewModel.showAllSection else { return nil }
-        return viewModel.catalogSections.first { $0.id == section.id } ?? section
+        guard let section = hybridViewModel.showAllSection else { return nil }
+        return catalogSections.first { $0.id == section.id } ?? section
     }
 
     private func moveRail(delta: Int) {
-        let sections = viewModel.catalogSections
+        let sections = catalogSections
         guard !sections.isEmpty else { return }
-        controllerViewModel.selectedRailIndex = min(max(controllerViewModel.selectedRailIndex + delta, 0), sections.count - 1)
+        hybridViewModel.selectedRailIndex = min(max(hybridViewModel.selectedRailIndex + delta, 0), sections.count - 1)
     }
 
     private func moveGame(delta: Int) {
@@ -576,65 +679,65 @@ struct ControllerCatalogView: View {
         let gameCount = section.visibleGames(expanded: false).filter(viewModel.matchesSelectedGenre).count
         guard gameCount > 0 else { return }
         let index = clampedSelectedGameIndex(for: section, gameCount: gameCount)
-        controllerViewModel.setSelectedGameIndex(index + delta, for: section, gameCount: gameCount)
+        hybridViewModel.setSelectedGameIndex(index + delta, for: section, gameCount: gameCount)
     }
 
     private func clampedSelectedGameIndex(for section: CatalogSectionModel, gameCount: Int) -> Int {
-        controllerViewModel.selectedGameIndex(for: section, gameCount: gameCount)
+        hybridViewModel.selectedGameIndex(for: section, gameCount: gameCount)
     }
 
     private func openDetails(_ game: CatalogGameObject, sectionId: String) {
         viewModel.selectGame(game, inSection: sectionId)
-        controllerViewModel.detailActionIndex = 0
-        controllerViewModel.isDetailVisible = true
-        controllerViewModel.isSearchVisible = false
-        controllerViewModel.showAllSection = nil
+        hybridViewModel.detailActionIndex = 0
+        hybridViewModel.isDetailVisible = true
+        hybridViewModel.isSearchVisible = false
+        hybridViewModel.showAllSection = nil
     }
 
     private func closeDetails() {
-        controllerViewModel.isDetailVisible = false
+        hybridViewModel.isDetailVisible = false
         viewModel.selectGame(nil)
     }
 
     private func openSearchOverlay() {
-        controllerViewModel.isSearchVisible = true
-        controllerViewModel.isActionMenuVisible = false
-        controllerViewModel.searchRowIndex = min(controllerViewModel.searchRowIndex, max(searchRowCount - 1, 0))
+        hybridViewModel.isSearchVisible = true
+        hybridViewModel.isActionMenuVisible = false
+        hybridViewModel.searchRowIndex = min(hybridViewModel.searchRowIndex, max(searchRowCount - 1, 0))
     }
 
     private func closeSearchOverlay() {
-        controllerViewModel.isSearchVisible = false
+        hybridViewModel.isSearchVisible = false
     }
 
     private func openActionMenu() {
-        controllerViewModel.actionMenuIndex = min(controllerViewModel.actionMenuIndex, max(actionMenuItems.count - 1, 0))
-        controllerViewModel.isActionMenuVisible = true
+        hybridViewModel.actionMenuIndex = min(hybridViewModel.actionMenuIndex, max(actionMenuItems.count - 1, 0))
+        hybridViewModel.isActionMenuVisible = true
     }
 
     private func closeActionMenu() {
-        controllerViewModel.isActionMenuVisible = false
+        hybridViewModel.isActionMenuVisible = false
     }
 
     private func openShowAll(_ section: CatalogSectionModel) {
-        controllerViewModel.showAllSection = section
-        controllerViewModel.showAllIndex = clampedSelectedGameIndex(for: section, gameCount: section.games.count)
+        hybridViewModel.showAllSection = section
+        hybridViewModel.showAllIndex = clampedSelectedGameIndex(for: section, gameCount: section.games.count)
         viewModel.loadFullSectionIfNeeded(section)
     }
 
     private func closeShowAll() {
-        controllerViewModel.showAllSection = nil
-        controllerViewModel.showAllIndex = 0
+        hybridViewModel.showAllSection = nil
+        hybridViewModel.showAllIndex = 0
     }
 
-    private func detailActions(for game: CatalogGameObject) -> [ControllerDetailAction] {
-        var actions: [ControllerDetailAction] = [.primary, .favorite]
+    private func detailActions(for game: CatalogGameObject) -> [HybridDetailAction] {
+        var actions: [HybridDetailAction] = [.primary, .favorite]
         if game.variants.count > 1 { actions.append(.store) }
         if viewModel.selectedVariant(in: game) != nil { actions.append(.ownership) }
         actions.append(contentsOf: [.share, .shortcut, .visitStore, .close])
         return actions
     }
 
-    private func executeDetailAction(_ action: ControllerDetailAction) {
+    private func executeDetailAction(_ action: HybridDetailAction) {
         guard let game = viewModel.selectedGame else { return }
         let selectedVariant = viewModel.selectedVariant(in: game)
         switch action {
@@ -672,7 +775,7 @@ struct ControllerCatalogView: View {
     }
 
     private func moveSearchSelection(delta: Int) {
-        if controllerViewModel.searchRowIndex == 1 {
+        if hybridViewModel.searchRowIndex == 1 {
             let count = viewModel.sortOptions.count
             guard count > 0 else { return }
             let index = selectedSortIndex()
@@ -681,38 +784,38 @@ struct ControllerCatalogView: View {
         }
         let filterStart = 2
         let filterEnd = filterStart + viewModel.visibleFilterGroups.count
-        if controllerViewModel.searchRowIndex >= filterStart, controllerViewModel.searchRowIndex < filterEnd {
-            let group = viewModel.visibleFilterGroups[controllerViewModel.searchRowIndex - filterStart]
+        if hybridViewModel.searchRowIndex >= filterStart, hybridViewModel.searchRowIndex < filterEnd {
+            let group = viewModel.visibleFilterGroups[hybridViewModel.searchRowIndex - filterStart]
             guard !group.options.isEmpty else { return }
-            let index = min(max((controllerViewModel.searchFilterOptionIndices[group.id] ?? 0) + delta, 0), group.options.count - 1)
-            controllerViewModel.searchFilterOptionIndices[group.id] = index
+            let index = min(max((hybridViewModel.searchFilterOptionIndices[group.id] ?? 0) + delta, 0), group.options.count - 1)
+            hybridViewModel.searchFilterOptionIndices[group.id] = index
             return
         }
-        if controllerViewModel.searchRowIndex == filterEnd, !viewModel.catalogGames.isEmpty {
-            controllerViewModel.searchResultIndex = min(max(controllerViewModel.searchResultIndex + delta, 0), viewModel.catalogGames.count - 1)
+        if hybridViewModel.searchRowIndex == filterEnd, !viewModel.catalogGames.isEmpty {
+            hybridViewModel.searchResultIndex = min(max(hybridViewModel.searchResultIndex + delta, 0), viewModel.catalogGames.count - 1)
         }
     }
 
     private func confirmSearchSelection() {
-        if controllerViewModel.searchRowIndex == 0 {
+        if hybridViewModel.searchRowIndex == 0 {
             viewModel.browseCatalog()
             return
         }
-        if controllerViewModel.searchRowIndex == 1 {
+        if hybridViewModel.searchRowIndex == 1 {
             setSort(at: selectedSortIndex())
             return
         }
         let filterStart = 2
         let filterEnd = filterStart + viewModel.visibleFilterGroups.count
-        if controllerViewModel.searchRowIndex >= filterStart, controllerViewModel.searchRowIndex < filterEnd {
-            let group = viewModel.visibleFilterGroups[controllerViewModel.searchRowIndex - filterStart]
-            let index = controllerViewModel.searchFilterOptionIndices[group.id] ?? 0
+        if hybridViewModel.searchRowIndex >= filterStart, hybridViewModel.searchRowIndex < filterEnd {
+            let group = viewModel.visibleFilterGroups[hybridViewModel.searchRowIndex - filterStart]
+            let index = hybridViewModel.searchFilterOptionIndices[group.id] ?? 0
             guard group.options.indices.contains(index) else { return }
             viewModel.toggleFilter(group.options[index].id)
             return
         }
-        if controllerViewModel.searchRowIndex == filterEnd, viewModel.catalogGames.indices.contains(controllerViewModel.searchResultIndex) {
-            openDetails(viewModel.catalogGames[controllerViewModel.searchResultIndex], sectionId: "catalog-results")
+        if hybridViewModel.searchRowIndex == filterEnd, viewModel.catalogGames.indices.contains(hybridViewModel.searchResultIndex) {
+            openDetails(viewModel.catalogGames[hybridViewModel.searchResultIndex], sectionId: "catalog-results")
         }
     }
 
@@ -727,11 +830,11 @@ struct ControllerCatalogView: View {
 
     private func setFilterOption(group: CatalogFilterGroupObject, index: Int) {
         guard group.options.indices.contains(index) else { return }
-        controllerViewModel.searchFilterOptionIndices[group.id] = index
+        hybridViewModel.searchFilterOptionIndices[group.id] = index
         viewModel.toggleFilter(group.options[index].id)
     }
 
-    private func executeActionMenuItem(_ item: ControllerActionMenuItem) {
+    private func executeActionMenuItem(_ item: HybridActionMenuItem) {
         if !item.isRefresh { closeActionMenu() }
         switch item {
         case .refresh:
@@ -786,22 +889,22 @@ struct ControllerCatalogView: View {
 
     private func synchronizeNavigationSelection() {
         let item = activeNavigationItem
-        controllerViewModel.selectedNavigationIndex = navigationItems.firstIndex(of: item) ?? 0
+        hybridViewModel.selectedNavigationIndex = navigationItems.firstIndex(of: item) ?? 0
         clampRailSelection()
     }
 
     private func clampRailSelection() {
-        controllerViewModel.clampRailSelection(sectionCount: viewModel.catalogSections.count)
+        hybridViewModel.clampRailSelection(sectionCount: catalogSections.count)
     }
 
     private func clampCategorySelection() {
-        controllerViewModel.clampCategorySelection(categoryCount: categories.count)
+        hybridViewModel.clampCategorySelection(categoryCount: categories.count)
     }
 
-    private func selectCategory(_ category: ControllerCatalogCategory) {
-        controllerViewModel.selectedCategoryIndex = categories.firstIndex(of: category) ?? 0
-        controllerViewModel.focusArea = .content
-        controllerViewModel.selectedRailIndex = 0
+    private func selectCategory(_ category: HybridCatalogCategory) {
+        hybridViewModel.selectedCategoryIndex = categories.firstIndex(of: category) ?? 0
+        hybridViewModel.focusArea = .content
+        hybridViewModel.selectedRailIndex = 0
         if category.id == "all" {
             viewModel.selectGenreFilter("")
             viewModel.clearSearchAndFilters()
@@ -809,13 +912,34 @@ struct ControllerCatalogView: View {
             viewModel.selectGenreFilter(category.id)
         }
     }
-
 }
 
-private struct ControllerHeader: View {
+// MARK: - Sub-views
+
+private struct HybridBackground: View {
+    @ObservedObject var viewModel: CatalogViewModel
+    let game: CatalogGameObject?
+
+    var body: some View {
+        ZStack {
+            Design.Catalog.canvas.ignoresSafeArea()
+            if let game {
+                CatalogRemoteImage(url: viewModel.optimizedImageURL(game.bestDetailImageURL, width: 1280), contentMode: .fill)
+                    .ignoresSafeArea()
+                    .blur(radius: 44)
+                    .opacity(0.26)
+            }
+            LinearGradient(colors: [.black.opacity(0.84), .black.opacity(0.38), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+        }
+    }
+}
+
+private struct HybridHeader: View {
     @ObservedObject var viewModel: CatalogViewModel
     let glyphs: ControllerInputGlyphSet
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 16) {
@@ -845,13 +969,16 @@ private struct ControllerHeader: View {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .stroke((syncIsActive ? Design.Catalog.warning : Design.Catalog.ready).opacity(0.28), lineWidth: 1)
             }
-            ControllerDeviceBadge(glyphs: glyphs)
+            HybridDeviceBadge(glyphs: glyphs)
             CatalogAccountAvatar(account: viewModel.account, size: 34)
+                .onHover { hovering in isHovered = hovering }
+                .scaleEffect(isHovered ? 1.05 : 1.0)
+                .animation(.easeOut(duration: 0.2), value: isHovered)
         }
         .frame(width: layout.contentWidth)
         .frame(height: 72)
         .background {
-            Color.black.opacity(0.30)
+            Color.clear
             WindowDragArea()
         }
     }
@@ -875,7 +1002,7 @@ private struct ControllerHeader: View {
     }
 }
 
-private struct ControllerDeviceBadge: View {
+private struct HybridDeviceBadge: View {
     let glyphs: ControllerInputGlyphSet
 
     var body: some View {
@@ -898,19 +1025,20 @@ private struct ControllerDeviceBadge: View {
     }
 }
 
-private struct ControllerCatalogCategory: Identifiable, Equatable {
+private struct HybridCatalogCategory: Identifiable, Equatable {
     let id: String
     let title: String
     let icon: String
 }
 
-private struct ControllerNavigationBar: View {
-    let items: [ControllerNavigationItem]
+private struct HybridNavigationBar: View {
+    let items: [HybridNavigationItem]
     let selectedIndex: Int
     let isFocused: Bool
-    let activeItem: ControllerNavigationItem
-    let layout: ControllerLayoutMetrics
-    let select: (ControllerNavigationItem) -> Void
+    let activeItem: HybridNavigationItem
+    let layout: HybridLayoutMetrics
+    let select: (HybridNavigationItem) -> Void
+    @State private var hoveredItemId: String?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -918,6 +1046,7 @@ private struct ControllerNavigationBar: View {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     let selected = index == selectedIndex && isFocused
                     let active = activeItem == item
+                    let isHovered = hoveredItemId == item.id
                     Button { select(item) } label: {
                         HStack(spacing: 9) {
                             Image(systemName: item.icon)
@@ -926,15 +1055,19 @@ private struct ControllerNavigationBar: View {
                                 .font(.nvidia(size: 12, weight: .bold))
                                 .tracking(0.8)
                         }
-                        .foregroundStyle(selected || active ? .white : .white.opacity(0.78))
+                        .foregroundStyle(selected || active || isHovered ? .white : .white.opacity(0.78))
                         .padding(.horizontal, 14)
                         .frame(height: 40)
-                        .background(selected ? Design.Catalog.selectionFill : (active ? Design.Catalog.selectionFill.opacity(0.75) : Color.white.opacity(0.065)))
+                        .background(selected ? Design.Catalog.selectionFill : (active ? Design.Catalog.selectionFill.opacity(0.75) : Color.white.opacity(isHovered ? 0.1 : 0.065)))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(selected ? Design.Catalog.selectionStroke : (active ? Design.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(0.10)), lineWidth: selected ? 2 : 1)
+                                .stroke(selected ? Design.Catalog.selectionStroke : (active ? Design.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(isHovered ? 0.2 : 0.10)), lineWidth: selected ? 2 : 1)
                         }
+                        .onHover { hovering in
+                            hoveredItemId = hovering ? item.id : nil
+                        }
+                        .onTapGesture { select(item) }
                     }
                     .buttonStyle(.plain)
                 }
@@ -943,21 +1076,22 @@ private struct ControllerNavigationBar: View {
             .padding(.vertical, 10)
         }
         .frame(width: layout.contentWidth)
-        .background(Color.black.opacity(0.18))
+        .glassmorphismPanel()
     }
 }
 
-private struct ControllerGamesPage: View {
+private struct HybridGamesPage: View {
     @ObservedObject var viewModel: CatalogViewModel
-    let focusArea: ControllerCatalogFocusArea
-    let categories: [ControllerCatalogCategory]
+    let focusArea: HybridFocusArea
+    let categories: [HybridCatalogCategory]
     let selectedCategoryIndex: Int
     let selectedRailIndex: Int
     @Binding var selectedGameIndices: [String: Int]
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
     let openDetails: (CatalogGameObject, String) -> Void
     let showAll: (CatalogSectionModel) -> Void
-    let selectCategory: (ControllerCatalogCategory) -> Void
+    let selectCategory: (HybridCatalogCategory) -> Void
+    @Binding var hoveredGameId: String?
 
     var body: some View {
         let sections = viewModel.catalogSections
@@ -965,11 +1099,11 @@ private struct ControllerGamesPage: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: layout.compactHeight ? 20 : 24) {
-                        ControllerHeroBillboard(viewModel: viewModel, game: heroGame(sections: sections), height: layout.heroHeight)
+                        HybridHeroBillboard(viewModel: viewModel, game: heroGame(sections: sections), height: layout.heroHeight)
                             .frame(width: layout.contentWidth)
                             .padding(.top, layout.compactHeight ? 10 : 14)
 
-                        ControllerCategoryRail(
+                        HybridCategoryRail(
                             categories: categories,
                             selectedIndex: selectedCategoryIndex,
                             isFocused: focusArea == .categories,
@@ -983,17 +1117,18 @@ private struct ControllerGamesPage: View {
                         }
 
                         if viewModel.isBrowseMode {
-                            ControllerBrowseSummary(viewModel: viewModel)
+                            HybridBrowseSummary(viewModel: viewModel)
                                 .frame(width: layout.contentWidth)
                         }
 
                         ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                            ControllerGameRail(
+                            HybridGameRail(
                                 viewModel: viewModel,
                                 section: section,
                                 selectedIndex: binding(for: section),
                                 isFocused: focusArea == .content && selectedRailIndex == index,
                                 layout: layout,
+                                hoveredGameId: $hoveredGameId,
                                 openDetails: { game in openDetails(game, section.id) },
                                 showAll: { showAll(section) }
                             )
@@ -1041,11 +1176,12 @@ private struct ControllerGamesPage: View {
     }
 }
 
-private struct ControllerCategoryRail: View {
-    let categories: [ControllerCatalogCategory]
+private struct HybridCategoryRail: View {
+    let categories: [HybridCatalogCategory]
     let selectedIndex: Int
     let isFocused: Bool
-    let select: (ControllerCatalogCategory) -> Void
+    let select: (HybridCatalogCategory) -> Void
+    @State private var hoveredCategoryId: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1055,7 +1191,7 @@ private struct ControllerCategoryRail: View {
                     .tracking(1.2)
                     .foregroundStyle(Design.Catalog.selection.opacity(0.88))
                 Spacer(minLength: 0)
-                Text("D-PAD TO MOVE")
+                Text("D-PAD OR MOUSE TO MOVE")
                     .font(.nvidia(size: 10, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(.white.opacity(0.38))
@@ -1065,6 +1201,7 @@ private struct ControllerCategoryRail: View {
                 HStack(spacing: 10) {
                     ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
                         let isSelected = index == selectedIndex
+                        let isHovered = hoveredCategoryId == category.id
                         Button { select(category) } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: category.icon)
@@ -1072,14 +1209,16 @@ private struct ControllerCategoryRail: View {
                                 Text(category.title)
                                     .font(.nvidia(size: 12, weight: .bold))
                             }
-                            .foregroundStyle(isSelected ? Design.Catalog.selection : .white.opacity(0.76))
+                            .foregroundStyle(isSelected || isHovered ? Design.Catalog.selection : .white.opacity(0.76))
                             .padding(.horizontal, 13)
                             .frame(height: 36)
-                            .background(isSelected ? Design.Catalog.selectionFill : Color.white.opacity(0.065))
+                            .background(isSelected ? Design.Catalog.selectionFill : Color.white.opacity(isHovered ? 0.1 : 0.065))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .stroke(isFocused && isSelected ? Design.Catalog.selectionStroke : (isSelected ? Design.Catalog.selectionStroke : Color.white.opacity(0.12)), lineWidth: isFocused && isSelected ? 2 : 1)
+                                    .stroke(isFocused && isSelected ? Design.Catalog.selectionStroke : (isSelected ? Design.Catalog.selectionStroke : Color.white.opacity(isHovered ? 0.2 : 0.12)), lineWidth: isFocused && isSelected ? 2 : 1)
                             }
+                            .onHover { hovering in hoveredCategoryId = hovering ? category.id : nil }
+                            .onTapGesture { select(category) }
                         }
                         .buttonStyle(.plain)
                     }
@@ -1096,7 +1235,7 @@ private struct ControllerCategoryRail: View {
     }
 }
 
-private struct ControllerHeroBillboard: View {
+private struct HybridHeroBillboard: View {
     @ObservedObject var viewModel: CatalogViewModel
     let game: CatalogGameObject?
     let height: CGFloat
@@ -1120,11 +1259,11 @@ private struct ControllerHeroBillboard: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.68)
                     HStack(spacing: 10) {
-                        if !game.ratingLabel.isEmpty { ControllerMetadataPill(text: game.ratingLabel) }
-                        if game.supportsGamepad { ControllerMetadataPill(text: "Gamepad") }
-                        if game.isInLibrary { ControllerMetadataPill(text: "In Library", highlighted: true) }
-                        if game.isFreeToPlay { ControllerMetadataPill(text: "Free to Play") }
-                        if let badge = game.cardBadgeLabel { ControllerMetadataPill(text: badge) }
+                        if !game.ratingLabel.isEmpty { HybridMetadataPill(text: game.ratingLabel) }
+                        if game.supportsGamepad { HybridMetadataPill(text: "Gamepad") }
+                        if game.isInLibrary { HybridMetadataPill(text: "In Library", highlighted: true) }
+                        if game.isFreeToPlay { HybridMetadataPill(text: "Free to Play") }
+                        if let badge = game.cardBadgeLabel { HybridMetadataPill(text: badge) }
                     }
                     Text(heroDescription(game))
                         .font(.nvidia(size: 13, weight: .medium))
@@ -1154,7 +1293,7 @@ private struct ControllerHeroBillboard: View {
     }
 }
 
-private struct ControllerBrowseSummary: View {
+private struct HybridBrowseSummary: View {
     @ObservedObject var viewModel: CatalogViewModel
 
     var body: some View {
@@ -1179,12 +1318,13 @@ private struct ControllerBrowseSummary: View {
     }
 }
 
-private struct ControllerGameRail: View {
+private struct HybridGameRail: View {
     @ObservedObject var viewModel: CatalogViewModel
     let section: CatalogSectionModel
     @Binding var selectedIndex: Int
     let isFocused: Bool
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
+    @Binding var hoveredGameId: String?
     let openDetails: (CatalogGameObject) -> Void
     let showAll: () -> Void
 
@@ -1215,21 +1355,25 @@ private struct ControllerGameRail: View {
 
             GeometryReader { geometry in
                 let metrics = layoutMetrics(width: geometry.size.width)
-                HStack(spacing: itemSpacing) {
-                    ForEach(visibleGames(metrics: metrics), id: \.game.catalogIdentity) { item in
-                        ControllerGameTile(
-                            game: item.game,
-                            imageURL: viewModel.optimizedImageURL(item.game.bestWideImageURL, width: 720),
-                            isFocused: isFocused && selectedIndex == item.index,
-                            isQueuedForPatching: viewModel.isQueuedForPatching(item.game),
-                            showsFreeAccountAccessBadges: viewModel.isFreeTierAccount,
-                            tileSize: metrics.tileSize,
-                            action: { openDetails(item.game) }
-                        )
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: itemSpacing) {
+                        ForEach(Array(games.enumerated()), id: \.element.catalogIdentity) { offset, game in
+                            HybridGameTile(
+                                game: game,
+                                imageURL: viewModel.optimizedImageURL(game.bestWideImageURL, width: 720),
+                                isFocused: isFocused && selectedIndex == offset,
+                                isHovered: hoveredGameId == game.catalogIdentity,
+                                isQueuedForPatching: viewModel.isQueuedForPatching(game),
+                                showsFreeAccountAccessBadges: viewModel.isFreeTierAccount,
+                                tileSize: metrics.tileSize,
+                                onHover: { hovering in hoveredGameId = hovering ? game.catalogIdentity : nil },
+                                action: { openDetails(game) }
+                            )
+                        }
                     }
+                    .frame(height: metrics.rowHeight, alignment: .leading)
+                    .padding(.bottom, 8)
                 }
-                .frame(width: geometry.size.width, height: metrics.rowHeight, alignment: .leading)
-                .clipped()
             }
             .frame(height: estimatedRailHeight)
         }
@@ -1242,38 +1386,31 @@ private struct ControllerGameRail: View {
         layout.compactHeight ? 178 : 196
     }
 
-    private func layoutMetrics(width: CGFloat) -> ControllerRailLayoutMetrics {
+    private func layoutMetrics(width: CGFloat) -> HybridRailLayoutMetrics {
         let contentWidth = max(width, 1)
         let count = min(max(1, Int((contentWidth + itemSpacing) / (layout.railPreferredTileWidth + itemSpacing))), max(games.count, 1))
         let totalSpacing = CGFloat(max(count - 1, 0)) * itemSpacing
         let tileWidth = floor(max((contentWidth - totalSpacing) / CGFloat(count), 1))
         let tileHeight = floor(tileWidth * 9 / 16)
-        return ControllerRailLayoutMetrics(visibleCount: count, tileSize: CGSize(width: tileWidth, height: tileHeight), rowHeight: tileHeight + 4)
-    }
-
-    private func visibleGames(metrics: ControllerRailLayoutMetrics) -> [(index: Int, game: CatalogGameObject)] {
-        guard !games.isEmpty else { return [] }
-        let selected = min(max(selectedIndex, 0), games.count - 1)
-        let maxStart = max(games.count - metrics.visibleCount, 0)
-        let start = min(max(selected - metrics.visibleCount + 1, 0), maxStart)
-        let end = min(start + metrics.visibleCount, games.count)
-        return Array(games[start..<end].enumerated()).map { offset, game in (index: start + offset, game: game) }
+        return HybridRailLayoutMetrics(visibleCount: count, tileSize: CGSize(width: tileWidth, height: tileHeight), rowHeight: tileHeight + 12)
     }
 }
 
-private struct ControllerRailLayoutMetrics {
+private struct HybridRailLayoutMetrics {
     let visibleCount: Int
     let tileSize: CGSize
     let rowHeight: CGFloat
 }
 
-private struct ControllerGameTile: View {
+private struct HybridGameTile: View {
     let game: CatalogGameObject
     let imageURL: URL?
     let isFocused: Bool
+    let isHovered: Bool
     let isQueuedForPatching: Bool
     let showsFreeAccountAccessBadges: Bool
     let tileSize: CGSize
+    let onHover: (Bool) -> Void
     let action: () -> Void
 
     var body: some View {
@@ -1314,10 +1451,18 @@ private struct ControllerGameTile: View {
                 .padding(15)
             }
             .frame(width: tileSize.width, height: tileSize.height)
-            .overlay { Rectangle().stroke(isFocused ? Design.Catalog.selectionStroke : Color.white.opacity(0.12), lineWidth: isFocused ? 4 : 1) }
-            .shadow(color: isFocused ? Design.Catalog.selection.opacity(0.18) : .black.opacity(0.20), radius: isFocused ? 12 : 8, y: 8)
+            .glassmorphismPanel()
+            .glassHoverEffect(isHovered: isHovered || isFocused)
+            .overlay {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: Design.Glass.panelCornerRadius, style: .continuous)
+                        .stroke(Design.Catalog.selectionStroke, lineWidth: 4)
+                }
+            }
         }
         .buttonStyle(.plain)
+        .onHover(perform: onHover)
+        .onTapGesture(perform: action)
         .accessibilityLabel(game.title.isEmpty ? "Game" : game.title)
     }
 
@@ -1331,13 +1476,13 @@ private struct ControllerGameTile: View {
     }
 }
 
-private struct ControllerEmbeddedPage<Content: View>: View {
+private struct HybridEmbeddedPage<Content: View>: View {
     let title: String
     let subtitle: String
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
     private let content: Content
 
-    init(title: String, subtitle: String, layout: ControllerLayoutMetrics, @ViewBuilder content: () -> Content) {
+    init(title: String, subtitle: String, layout: HybridLayoutMetrics, @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
         self.layout = layout
@@ -1365,19 +1510,20 @@ private struct ControllerEmbeddedPage<Content: View>: View {
     }
 }
 
-private struct ControllerSearchOverlay: View {
+private struct HybridSearchOverlay: View {
     @ObservedObject var viewModel: CatalogViewModel
     let glyphs: ControllerInputGlyphSet
     let rowIndex: Int
     let filterOptionIndices: [String: Int]
     let resultIndex: Int
     @Binding var resultColumnCount: Int
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
     let selectSort: (Int) -> Void
     let selectFilter: (CatalogFilterGroupObject, Int) -> Void
     let selectResult: (CatalogGameObject) -> Void
     let close: () -> Void
     let clear: () -> Void
+    @Binding var hoveredGameId: String?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1385,12 +1531,13 @@ private struct ControllerSearchOverlay: View {
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.90)
                 VStack(alignment: .leading, spacing: 18) {
-                    ControllerOverlayHeader(title: "Search Catalog", subtitle: "Search, sort, filter, and launch from the full catalog.", glyphs: glyphs, close: close)
+                    HybridOverlayHeader(title: "Search Catalog", subtitle: "Search, sort, filter, and launch from the full catalog.", glyphs: glyphs, close: close)
                     searchField
                     sortRow
                     filterRows
                     resultsGrid(columns: columns)
                 }
+                .glassmorphismPanel()
                 .frame(width: layout.contentWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
@@ -1429,11 +1576,11 @@ private struct ControllerSearchOverlay: View {
 
     private var sortRow: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ControllerOverlaySectionTitle("Sort")
+            HybridOverlaySectionTitle("Sort")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(Array(viewModel.sortOptions.enumerated()), id: \.element.id) { index, option in
-                        ControllerOptionChip(
+                        HybridOptionChip(
                             title: option.label.isEmpty ? option.id : option.label,
                             isSelected: option.id == viewModel.selectedSortId,
                             isFocused: rowIndex == 1 && selectedSortIndex == index,
@@ -1449,11 +1596,11 @@ private struct ControllerSearchOverlay: View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(viewModel.visibleFilterGroups.enumerated()), id: \.element.id) { groupIndex, group in
                 VStack(alignment: .leading, spacing: 10) {
-                    ControllerOverlaySectionTitle(group.label.isEmpty ? group.id : group.label)
+                    HybridOverlaySectionTitle(group.label.isEmpty ? group.id : group.label)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(Array(group.options.enumerated()), id: \.element.id) { optionIndex, option in
-                                ControllerOptionChip(
+                                HybridOptionChip(
                                     title: option.label.isEmpty ? option.id : option.label,
                                     isSelected: viewModel.selectedFilterIds.contains(option.id),
                                     isFocused: rowIndex == 2 + groupIndex && (filterOptionIndices[group.id] ?? 0) == optionIndex,
@@ -1469,14 +1616,16 @@ private struct ControllerSearchOverlay: View {
 
     private func resultsGrid(columns: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ControllerOverlaySectionTitle(viewModel.resultSummary.isEmpty ? "Results" : viewModel.resultSummary)
+            HybridOverlaySectionTitle(viewModel.resultSummary.isEmpty ? "Results" : viewModel.resultSummary)
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: columns), spacing: 14) {
                     ForEach(Array(viewModel.catalogGames.enumerated()), id: \.element.catalogIdentity) { index, game in
-                        ControllerCompactGameCard(
+                        HybridCompactGameCard(
                             viewModel: viewModel,
                             game: game,
                             isFocused: rowIndex == 2 + viewModel.visibleFilterGroups.count && resultIndex == index,
+                            isHovered: hoveredGameId == game.catalogIdentity,
+                            onHover: { hovering in hoveredGameId = hovering ? game.catalogIdentity : nil },
                             action: { selectResult(game) }
                         )
                     }
@@ -1491,14 +1640,14 @@ private struct ControllerSearchOverlay: View {
     }
 }
 
-private struct ControllerGameDetailOverlay: View {
+private struct HybridDetailOverlay: View {
     @ObservedObject var viewModel: CatalogViewModel
     let game: CatalogGameObject
     let selectedActionIndex: Int
-    let actions: [ControllerDetailAction]
+    let actions: [HybridDetailAction]
     let glyphs: ControllerInputGlyphSet
-    let layout: ControllerLayoutMetrics
-    let perform: (ControllerDetailAction) -> Void
+    let layout: HybridLayoutMetrics
+    let perform: (HybridDetailAction) -> Void
     let close: () -> Void
 
     private var selectedVariant: CatalogGameVariantObject? { viewModel.selectedVariant(in: game) }
@@ -1516,9 +1665,9 @@ private struct ControllerGameDetailOverlay: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
 
                 VStack(alignment: .leading, spacing: 18) {
-                    ControllerOverlayHeader(title: game.title.isEmpty ? "Selected Game" : game.title, subtitle: detailSubtitle, glyphs: glyphs, close: close)
+                    HybridOverlayHeader(title: game.title.isEmpty ? "Selected Game" : game.title, subtitle: detailSubtitle, glyphs: glyphs, close: close)
                     detailMetadata
-                    ControllerCloudStatusCard(
+                    HybridCloudStatusCard(
                         title: cloudStatusTitle,
                         message: cloudStatusMessage,
                         systemImage: cloudStatusIcon,
@@ -1556,11 +1705,13 @@ private struct ControllerGameDetailOverlay: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .onTapGesture { perform(action) }
                             }
                         }
                         .padding(.vertical, 8)
                     }
                 }
+                .glassmorphismPanel()
                 .frame(width: panelWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
@@ -1626,24 +1777,24 @@ private struct ControllerGameDetailOverlay: View {
     }
 
     private var detailMetadata: some View {
-        FlowLayout(spacing: 8) {
-            if !game.ratingLabel.isEmpty { ControllerMetadataPill(text: game.ratingLabel) }
-            if game.supportsGamepad { ControllerMetadataPill(text: "Gamepad") }
-            if game.supportsKeyboard { ControllerMetadataPill(text: "Keyboard") }
+        HStack(spacing: 8) {
+            if !game.ratingLabel.isEmpty { HybridMetadataPill(text: game.ratingLabel) }
+            if game.supportsGamepad { HybridMetadataPill(text: "Gamepad") }
+            if game.supportsKeyboard { HybridMetadataPill(text: "Keyboard") }
             ForEach(Array(game.genres.prefix(3)), id: \.self) { genre in
-                ControllerMetadataPill(text: genre)
+                HybridMetadataPill(text: genre)
             }
-            if game.isLaunchPatching { ControllerMetadataPill(text: "Patching", highlighted: true) }
+            if game.isLaunchPatching { HybridMetadataPill(text: "Patching", highlighted: true) }
         }
         .frame(maxWidth: 720, alignment: .leading)
     }
 
     private var detailRows: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ControllerDetailRow(label: "Publisher", value: game.publisherName)
-            ControllerDetailRow(label: "Developer", value: game.developerName)
-            ControllerDetailRow(label: "Stores", value: game.storeLine)
-            ControllerDetailRow(label: "Players", value: playerLine)
+            HybridDetailRow(label: "Publisher", value: game.publisherName)
+            HybridDetailRow(label: "Developer", value: game.developerName)
+            HybridDetailRow(label: "Stores", value: game.storeLine)
+            HybridDetailRow(label: "Players", value: playerLine)
         }
     }
 
@@ -1655,7 +1806,7 @@ private struct ControllerGameDetailOverlay: View {
     }
 }
 
-private struct ControllerCloudStatusCard: View {
+private struct HybridCloudStatusCard: View {
     let title: String
     let message: String
     let systemImage: String
@@ -1690,15 +1841,16 @@ private struct ControllerCloudStatusCard: View {
     }
 }
 
-private struct ControllerShowAllOverlay: View {
+private struct HybridShowAllOverlay: View {
     @ObservedObject var viewModel: CatalogViewModel
     let section: CatalogSectionModel
     let selectedIndex: Int
     @Binding var columnCount: Int
     let glyphs: ControllerInputGlyphSet
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
     let select: (CatalogGameObject) -> Void
     let close: () -> Void
+    @Binding var hoveredGameId: String?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1706,13 +1858,20 @@ private struct ControllerShowAllOverlay: View {
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.90)
                 VStack(alignment: .leading, spacing: 18) {
-                    ControllerOverlayHeader(title: section.title, subtitle: subtitle, glyphs: glyphs, close: close)
+                    HybridOverlayHeader(title: section.title, subtitle: subtitle, glyphs: glyphs, close: close)
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical, showsIndicators: false) {
+                        ScrollView(.vertical, showsIndicators: true) {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: columns), spacing: 16) {
                                 ForEach(Array(section.games.enumerated()), id: \.element.catalogIdentity) { index, game in
-                                    ControllerCompactGameCard(viewModel: viewModel, game: game, isFocused: selectedIndex == index, action: { select(game) })
-                                        .id(game.catalogIdentity)
+                                    HybridCompactGameCard(
+                                        viewModel: viewModel,
+                                        game: game,
+                                        isFocused: selectedIndex == index,
+                                        isHovered: hoveredGameId == game.catalogIdentity,
+                                        onHover: { hovering in hoveredGameId = hovering ? game.catalogIdentity : nil },
+                                        action: { select(game) }
+                                    )
+                                    .id(game.catalogIdentity)
                                 }
                             }
                             .padding(.bottom, 18)
@@ -1725,6 +1884,7 @@ private struct ControllerShowAllOverlay: View {
                         }
                     }
                 }
+                .glassmorphismPanel()
                 .frame(width: layout.contentWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
@@ -1747,13 +1907,13 @@ private func overlayColumnCount(width: CGFloat, minimumWidth: CGFloat, spacing: 
     max(2, Int((width + spacing) / (minimumWidth + spacing)))
 }
 
-private struct ControllerActionMenuOverlay: View {
-    let items: [ControllerActionMenuItem]
+private struct HybridActionMenuOverlay: View {
+    let items: [HybridActionMenuItem]
     let selectedIndex: Int
     let glyphs: ControllerInputGlyphSet
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
     let isRefreshingCatalog: Bool
-    let perform: (ControllerActionMenuItem) -> Void
+    let perform: (HybridActionMenuItem) -> Void
     let close: () -> Void
 
     var body: some View {
@@ -1761,7 +1921,7 @@ private struct ControllerActionMenuOverlay: View {
             ZStack(alignment: .trailing) {
                 Color.black.opacity(0.58).onTapGesture(perform: close)
                 VStack(alignment: .leading, spacing: 0) {
-                    ControllerOverlayHeader(title: "Controller Actions", subtitle: "Catalog navigation and account actions", glyphs: glyphs, close: close)
+                    HybridOverlayHeader(title: "Controller Actions", subtitle: "Catalog navigation and account actions", glyphs: glyphs, close: close)
                         .padding(.horizontal, 22)
                         .padding(.top, 22)
                         .padding(.bottom, 12)
@@ -1794,6 +1954,7 @@ private struct ControllerActionMenuOverlay: View {
                             .overlay { Rectangle().stroke(index == selectedIndex ? Design.Catalog.selectionStroke : Color.white.opacity(0.10), lineWidth: index == selectedIndex ? 2 : 1) }
                                 }
                                 .buttonStyle(.plain)
+                                .onTapGesture { perform(item) }
                                 .disabled(item.isRefresh && isRefreshingCatalog)
                             }
                         }
@@ -1801,6 +1962,7 @@ private struct ControllerActionMenuOverlay: View {
                         .padding(.bottom, 22)
                     }
                 }
+                .glassmorphismPanel()
                 .frame(width: min(420, layout.contentWidth), alignment: .topLeading)
                 .background(Color(red: 18 / 255, green: 18 / 255, blue: 18 / 255).opacity(0.98))
                 .overlay(alignment: .leading) { Rectangle().fill(Design.Catalog.selection).frame(width: 3) }
@@ -1813,7 +1975,7 @@ private struct ControllerActionMenuOverlay: View {
     }
 }
 
-private struct ControllerOverlayHeader: View {
+private struct HybridOverlayHeader: View {
     let title: String
     let subtitle: String
     let glyphs: ControllerInputGlyphSet
@@ -1833,7 +1995,7 @@ private struct ControllerOverlayHeader: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 8) {
-                ControllerGlyphPill(glyph: glyphs.back)
+                HybridGlyphPill(glyph: glyphs.back)
                 Text("BACK")
                     .font(.nvidia(size: 11, weight: .bold))
                     .foregroundStyle(.white.opacity(0.62))
@@ -1848,13 +2010,16 @@ private struct ControllerOverlayHeader: View {
             }
             .buttonStyle(.plain)
         }
+        .glassmorphismPanel()
     }
 }
 
-private struct ControllerCompactGameCard: View {
+private struct HybridCompactGameCard: View {
     @ObservedObject var viewModel: CatalogViewModel
     let game: CatalogGameObject
     let isFocused: Bool
+    let isHovered: Bool
+    let onHover: (Bool) -> Void
     let action: () -> Void
 
     var body: some View {
@@ -1873,35 +2038,40 @@ private struct ControllerCompactGameCard: View {
                     .lineLimit(1)
             }
             .padding(10)
-            .background(Color.white.opacity(isFocused ? 0.12 : 0.055))
-            .overlay { Rectangle().stroke(isFocused ? Design.Catalog.selectionStroke : Color.white.opacity(0.10), lineWidth: isFocused ? 3 : 1) }
+            .background(Color.white.opacity(isFocused || isHovered ? 0.12 : 0.055))
+            .overlay { Rectangle().stroke(isFocused ? Design.Catalog.selectionStroke : Color.white.opacity(isHovered ? 0.2 : 0.10), lineWidth: isFocused ? 3 : 1) }
         }
         .buttonStyle(.plain)
+        .onHover(perform: onHover)
+        .onTapGesture(perform: action)
     }
 }
 
-private struct ControllerOptionChip: View {
+private struct HybridOptionChip: View {
     let title: String
     let isSelected: Bool
     let isFocused: Bool
     let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             Text(title.uppercased())
                 .font(.nvidia(size: 12, weight: .bold))
                 .tracking(0.6)
-                .foregroundStyle(isSelected || isFocused ? .white.opacity(0.92) : .white.opacity(0.82))
+                .foregroundStyle(isSelected || isFocused || isHovered ? .white.opacity(0.92) : .white.opacity(0.82))
                 .padding(.horizontal, 13)
                 .frame(height: 36)
-                .background(isSelected || isFocused ? Design.Catalog.selectionFill : Color.white.opacity(0.075))
-                .overlay { Rectangle().stroke(isFocused ? Design.Catalog.selectionStroke : (isSelected ? Design.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(0.12)), lineWidth: isFocused ? 2 : 1) }
+                .background(isSelected || isFocused ? Design.Catalog.selectionFill : Color.white.opacity(isHovered ? 0.12 : 0.075))
+                .overlay { Rectangle().stroke(isFocused ? Design.Catalog.selectionStroke : (isSelected ? Design.Catalog.selectionStroke.opacity(0.55) : Color.white.opacity(isHovered ? 0.2 : 0.12)), lineWidth: isFocused ? 2 : 1) }
         }
         .buttonStyle(.plain)
+        .onHover { hovering in isHovered = hovering }
+        .onTapGesture(perform: action)
     }
 }
 
-private struct ControllerOverlaySectionTitle: View {
+private struct HybridOverlaySectionTitle: View {
     let title: String
 
     init(_ title: String) { self.title = title }
@@ -1914,7 +2084,7 @@ private struct ControllerOverlaySectionTitle: View {
     }
 }
 
-private struct ControllerMetadataPill: View {
+private struct HybridMetadataPill: View {
     let text: String
     var highlighted = false
 
@@ -1930,7 +2100,7 @@ private struct ControllerMetadataPill: View {
     }
 }
 
-private struct ControllerDetailRow: View {
+private struct HybridDetailRow: View {
     let label: String
     let value: String
 
@@ -1951,7 +2121,9 @@ private struct ControllerDetailRow: View {
     }
 }
 
-private enum ControllerHint: Equatable {
+// MARK: - Hint Bar & Glyphs
+
+private enum HybridHint: Equatable {
     case move
     case select
     case back
@@ -1961,18 +2133,18 @@ private enum ControllerHint: Equatable {
     case clear
 }
 
-private struct ControllerHintBar: View {
-    let hints: [ControllerHint]
+private struct HybridHintBar: View {
+    let hints: [HybridHint]
     let glyphs: ControllerInputGlyphSet
-    let layout: ControllerLayoutMetrics
+    let layout: HybridLayoutMetrics
 
     var body: some View {
         HStack(spacing: 14) {
             ForEach(hints, id: \.self) { hint in
-                ControllerHintItem(hint: hint, glyphs: glyphs)
+                HybridHintItem(hint: hint, glyphs: glyphs)
             }
             Spacer(minLength: 0)
-            Text(glyphs.usesControllerGlyphs ? "Controller mode" : "Keyboard fallback")
+            Text("Hybrid Input Mode")
                 .font(.nvidia(size: 11, weight: .bold))
                 .foregroundStyle(.white.opacity(0.38))
                 .tracking(0.8)
@@ -1981,22 +2153,34 @@ private struct ControllerHintBar: View {
         }
         .frame(width: layout.contentWidth, alignment: .leading)
         .frame(height: 46)
-        .background(Color.black.opacity(0.36))
+        .glassmorphismPanel()
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
     }
 }
 
-private struct ControllerHintItem: View {
-    let hint: ControllerHint
+private struct HybridHintItem: View {
+    let hint: HybridHint
     let glyphs: ControllerInputGlyphSet
 
     var body: some View {
         HStack(spacing: 6) {
-            if hint == .move, !glyphs.usesControllerGlyphs {
-                ControllerKeyboardMovePill(glyphs: glyphs)
+            if hint == .move {
+                HybridKeyboardMovePill(glyphs: ControllerInputGlyphSet.keyboard)
+                Text("/")
+                    .font(.nvidia(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                ForEach(Array(controllerGlyphSet.enumerated()), id: \.offset) { _, glyph in
+                    HybridGlyphPill(glyph: glyph, compact: true)
+                }
             } else {
-                ForEach(Array(glyphSet.enumerated()), id: \.offset) { _, glyph in
-                    ControllerGlyphPill(glyph: glyph, compact: hint == .move)
+                ForEach(Array(keyboardGlyphSet.enumerated()), id: \.offset) { _, glyph in
+                    HybridGlyphPill(glyph: glyph, compact: false)
+                }
+                Text("/")
+                    .font(.nvidia(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                ForEach(Array(controllerGlyphSet.enumerated()), id: \.offset) { _, glyph in
+                    HybridGlyphPill(glyph: glyph, compact: false)
                 }
             }
             Text(title)
@@ -2006,7 +2190,20 @@ private struct ControllerHintItem: View {
         }
     }
 
-    private var glyphSet: [ControllerInputGlyph] {
+    private var keyboardGlyphSet: [ControllerInputGlyph] {
+        let kb = ControllerInputGlyphSet.keyboard
+        switch hint {
+        case .move: return [kb.left, kb.up, kb.down, kb.right]
+        case .select: return [kb.confirm]
+        case .back: return [kb.back]
+        case .search: return [kb.search]
+        case .showAll: return [kb.actions]
+        case .menu: return [kb.menu]
+        case .clear: return [kb.actions]
+        }
+    }
+
+    private var controllerGlyphSet: [ControllerInputGlyph] {
         switch hint {
         case .move: return [glyphs.left, glyphs.up, glyphs.down, glyphs.right]
         case .select: return [glyphs.confirm]
@@ -2031,7 +2228,7 @@ private struct ControllerHintItem: View {
     }
 }
 
-private struct ControllerGlyphPill: View {
+private struct HybridGlyphPill: View {
     let glyph: ControllerInputGlyph
     var compact = false
 
@@ -2052,7 +2249,7 @@ private struct ControllerGlyphPill: View {
         .frame(minWidth: compact ? 25 : 0)
         .frame(height: 22)
         .background(Color.pixelNowGreen.opacity(0.12))
-        .overlay { Rectangle().stroke(Color.pixelNowGreen.opacity(0.30), lineWidth: 1) }
+        .overlay { RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(Color.pixelNowGreen.opacity(0.30), lineWidth: 1) }
         .accessibilityLabel(glyph.accessibilityLabel)
     }
 
@@ -2063,7 +2260,7 @@ private struct ControllerGlyphPill: View {
     }
 }
 
-private struct ControllerKeyboardMovePill: View {
+private struct HybridKeyboardMovePill: View {
     let glyphs: ControllerInputGlyphSet
 
     var body: some View {
@@ -2078,31 +2275,14 @@ private struct ControllerKeyboardMovePill: View {
         .padding(.horizontal, 8)
         .frame(height: 22)
         .background(Color.pixelNowGreen.opacity(0.12))
-        .overlay { Rectangle().stroke(Color.pixelNowGreen.opacity(0.30), lineWidth: 1) }
+        .overlay { RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(Color.pixelNowGreen.opacity(0.30), lineWidth: 1) }
         .accessibilityLabel("Arrow keys")
     }
 }
 
-private struct ControllerCatalogBackground: View {
-    @ObservedObject var viewModel: CatalogViewModel
-    let game: CatalogGameObject?
+// MARK: - Keyboard Input Bridge
 
-    var body: some View {
-        ZStack {
-            Design.Catalog.canvas.ignoresSafeArea()
-            if let game {
-                CatalogRemoteImage(url: viewModel.optimizedImageURL(game.bestDetailImageURL, width: 1280), contentMode: .fill)
-                    .ignoresSafeArea()
-                    .blur(radius: 44)
-                    .opacity(0.26)
-            }
-            LinearGradient(colors: [.black.opacity(0.84), .black.opacity(0.38), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-        }
-    }
-}
-
-private struct ControllerKeyboardInputBridge: NSViewRepresentable {
+private struct HybridKeyboardInputBridge: NSViewRepresentable {
     let onCommand: (ControllerInputCommand) -> Void
 
     func makeCoordinator() -> Coordinator {
