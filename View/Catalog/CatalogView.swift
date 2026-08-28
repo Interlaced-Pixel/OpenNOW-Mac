@@ -178,7 +178,7 @@ struct CatalogView: View {
                 .ignoresSafeArea()
                 .transition(.opacity)
             } else {
-                HybridCatalogView(
+                CatalogShell(
                     viewModel: viewModel,
                     accounts: accounts,
                     onSwitch: guardedSwitch,
