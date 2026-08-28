@@ -58,7 +58,8 @@ struct HybridCatalogView: View {
                     catalogContent
                 }
             }
-
+        }
+        .overlay(alignment: .topTrailing) {
             AccountGlassControl(
                 account: viewModel.account,
                 accounts: accounts,
@@ -228,85 +229,78 @@ private struct CurvedPosterRail: View {
     let launch: (CatalogGameObject) -> Void
 
     @State private var scrolledDisplayIdentity: String?
+    @State private var suppressScrollFeedback = false
+
+    private static let separator = "\u{0}"
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollViewReader { scrollProxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .bottom, spacing: 14) {
-                        ForEach(0..<(games.count * 3), id: \.self) { displayIndex in
-                            let logicalIndex = displayIndex % games.count
-                            let cycle = displayIndex / games.count
-                            let game = games[logicalIndex]
-                            let distance = distanceFromCenter(for: logicalIndex)
-                            let id = displayIdentity(cycle: cycle, game: game)
-                            PosterGameCard(
-                                game: game,
-                                isSelected: scrolledDisplayIdentity == id || (scrolledDisplayIdentity == nil && cycle == 1 && gameIdentity(game) == selectedIdentity),
-                                verticalOffset: curveOffset(distance: distance),
-                                scale: curveScale(distance: distance),
-                                select: {
-                                    select(game)
-                                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
-                                        scrolledDisplayIdentity = id
-                                    }
-                                },
-                                launch: { launch(game) }
-                            )
-                            .id(id)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .safeAreaPadding(.horizontal, max(0, geometry.size.width / 2 - 99))
-                .scrollTargetBehavior(.viewAligned)
-                .scrollPosition(id: $scrolledDisplayIdentity)
-                .onAppear {
-                    if !selectedIdentity.isEmpty {
-                        scrolledDisplayIdentity = centerDisplayIdentity(for: selectedIdentity)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .bottom, spacing: 14) {
+                    ForEach(0..<(games.count * 3), id: \.self) { displayIndex in
+                        let logicalIndex = displayIndex % games.count
+                        let cycle = displayIndex / games.count
+                        let game = games[logicalIndex]
+                        let id = displayIdentity(cycle: cycle, game: game)
+                        PosterGameCard(
+                            game: game,
+                            isSelected: scrolledDisplayIdentity == id || (scrolledDisplayIdentity == nil && cycle == 1 && gameIdentity(game) == selectedIdentity),
+                            verticalOffset: 0,
+                            scale: 1,
+                            select: { selectCard(game: game, id: id) },
+                            launch: { launch(game) }
+                        )
+                        .id(id)
                     }
                 }
-                .onChange(of: selectedIdentity) { _, identity in
-                    guard !identity.isEmpty else { return }
-                    if let current = scrolledDisplayIdentity, extractGameIdentity(from: current) == identity {
-                        return
-                    }
+                .scrollTargetLayout()
+            }
+            .safeAreaPadding(.horizontal, max(0, geometry.size.width / 2 - 99))
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $scrolledDisplayIdentity)
+            .onAppear {
+                guard !selectedIdentity.isEmpty else { return }
+                suppressScrollFeedback = true
+                scrolledDisplayIdentity = centerDisplayIdentity(for: selectedIdentity)
+                suppressScrollFeedback = false
+            }
+            .onChange(of: selectedIdentity) { _, identity in
+                guard !identity.isEmpty else { return }
+                guard let current = scrolledDisplayIdentity,
+                      extractGameIdentity(from: current) == identity else {
+                    suppressScrollFeedback = true
                     withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
                         scrolledDisplayIdentity = centerDisplayIdentity(for: identity)
                     }
-                }
-                .onChange(of: scrolledDisplayIdentity) { _, newId in
-                    guard let newId = newId else { return }
-                    let gameId = extractGameIdentity(from: newId)
-                    if gameId != selectedIdentity, let game = games.first(where: { gameIdentity($0) == gameId }) {
-                        select(game)
-                    }
+                    DispatchQueue.main.async { suppressScrollFeedback = false }
+                    return
                 }
             }
+            .onChange(of: scrolledDisplayIdentity) { _, newId in
+                guard !suppressScrollFeedback, let newId = newId else { return }
+                let gameId = extractGameIdentity(from: newId)
+                guard gameId != selectedIdentity,
+                      let game = games.first(where: { gameIdentity($0) == gameId }) else { return }
+                suppressScrollFeedback = true
+                select(game)
+                DispatchQueue.main.async { suppressScrollFeedback = false }
+            }
         }
+    }
+
+    private func selectCard(game: CatalogGameObject, id: String) {
+        suppressScrollFeedback = true
+        scrolledDisplayIdentity = id
+        select(game)
+        DispatchQueue.main.async { suppressScrollFeedback = false }
     }
 
     private func gameIdentity(_ game: CatalogGameObject) -> String {
         [game.id, game.uuid, game.title].joined(separator: "|")
     }
 
-    private func distanceFromCenter(for index: Int) -> CGFloat {
-        let selectedIndex = games.firstIndex { gameIdentity($0) == selectedIdentity } ?? 0
-        let directDistance = index - selectedIndex
-        let wrappedDistance = directDistance > 0 ? directDistance - games.count : directDistance + games.count
-        return CGFloat(abs(directDistance) <= abs(wrappedDistance) ? directDistance : wrappedDistance)
-    }
-
-    private func curveOffset(distance: CGFloat) -> CGFloat {
-        0
-    }
-
-    private func curveScale(distance: CGFloat) -> CGFloat {
-        1
-    }
-
     private func displayIdentity(cycle: Int, game: CatalogGameObject) -> String {
-        "\(cycle)-\(gameIdentity(game))"
+        "\(cycle)\(Self.separator)\(gameIdentity(game))"
     }
 
     private func centerDisplayIdentity(for identity: String) -> String {
@@ -314,9 +308,9 @@ private struct CurvedPosterRail: View {
         return displayIdentity(cycle: 1, game: game)
     }
 
-    private func extractGameIdentity(from displayIdentity: String) -> String {
-        let parts = displayIdentity.split(separator: "-", maxSplits: 1)
-        return parts.count == 2 ? String(parts[1]) : displayIdentity
+    private func extractGameIdentity(from displayId: String) -> String {
+        guard let range = displayId.range(of: Self.separator) else { return displayId }
+        return String(displayId[range.upperBound...])
     }
 }
 
@@ -512,9 +506,8 @@ private struct AccountGlassControl: View {
         .buttonStyle(.plain)
         .modifier(LiquidGlassModifier(cornerRadius: 18))
         .frame(maxWidth: 240, alignment: .leading)
-        .safeAreaPadding(.trailing, 20)
+        .padding(.trailing, 20)
         .padding(.top, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 }
 
