@@ -16,21 +16,19 @@ struct CatalogShell: View {
         ZStack(alignment: .top) {
             DynamicGameBackground(game: store.selectedGame, imageIndex: backgroundIndex)
 
-            VStack(spacing: 0) {
-                if viewModel.selectedMainPage == .recordings {
-                    RecordingsView()
-                } else if viewModel.selectedMainPage == .settings {
-                    SettingsView(
-                        viewModel: viewModel,
-                        accounts: accounts,
-                        onSwitch: onSwitch,
-                        onAddAccount: onAddAccount,
-                        onSignOut: onSignOut,
-                        onForget: onForget
-                    )
-                } else {
-                    Spacer(minLength: 0)
-                    
+            if viewModel.selectedMainPage == .recordings {
+                RecordingsView()
+            } else if viewModel.selectedMainPage == .settings {
+                SettingsView(
+                    viewModel: viewModel,
+                    accounts: accounts,
+                    onSwitch: onSwitch,
+                    onAddAccount: onAddAccount,
+                    onSignOut: onSignOut,
+                    onForget: onForget
+                )
+            } else {
+                VStack(spacing: 0) {
                     GameDetailOverlayPanel(
                         viewModel: viewModel,
                         game: store.selectedGame,
@@ -47,9 +45,9 @@ struct CatalogShell: View {
                     GameRailView(store: store) { game in
                         performPrimaryAction(for: game)
                     }
-                    
-                    Spacer(minLength: 20)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 20)
             }
         }
         .overlay(alignment: .top) {
@@ -93,7 +91,7 @@ struct CatalogShell: View {
         .onChange(of: viewModel.catalogSections) { _, newSections in
             store.load(from: newSections)
         }
-        .onChange(of: store.selectedGame?.id) { _, _ in
+        .onChange(of: store.selectedIndex) { _, _ in
             if let game = store.selectedGame {
                 viewModel.selectGame(game)
             }

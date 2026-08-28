@@ -3,13 +3,13 @@ import SwiftUI
 struct GameRailView: View {
     @ObservedObject var store: CatalogSelectionStore
     let launch: (CatalogGameObject) -> Void
-    
+
     var body: some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .bottom, spacing: 14) {
-                        ForEach(Array(store.games.enumerated()), id: \.offset) { index, game in
+                    LazyHStack(alignment: .center, spacing: 14) {
+                        ForEach(Array(store.games.enumerated()), id: \.element.id) { index, game in
                             GameCardView(
                                 game: game,
                                 isSelected: index == store.selectedIndex,
@@ -19,23 +19,19 @@ struct GameRailView: View {
                             .id(CatalogSelectionStore.gameIdentity(game))
                         }
                     }
-                    .scrollTargetLayout()
+                    .padding(.horizontal, max(0, geometry.size.width / 2 - 99))
                 }
-                .safeAreaPadding(.horizontal, max(0, geometry.size.width / 2 - 99))
-                .scrollTargetBehavior(.viewAligned)
                 .onChange(of: store.selectedIndex) { _, newIndex in
-                    if store.games.indices.contains(newIndex) {
-                        let identity = CatalogSelectionStore.gameIdentity(store.games[newIndex])
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(identity, anchor: .center)
-                        }
+                    guard store.games.indices.contains(newIndex) else { return }
+                    let identity = CatalogSelectionStore.gameIdentity(store.games[newIndex])
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(identity, anchor: .center)
                     }
                 }
                 .onAppear {
-                    if store.games.indices.contains(store.selectedIndex) {
-                        let identity = CatalogSelectionStore.gameIdentity(store.games[store.selectedIndex])
-                        proxy.scrollTo(identity, anchor: .center)
-                    }
+                    guard store.games.indices.contains(store.selectedIndex) else { return }
+                    let identity = CatalogSelectionStore.gameIdentity(store.games[store.selectedIndex])
+                    proxy.scrollTo(identity, anchor: .center)
                 }
             }
         }

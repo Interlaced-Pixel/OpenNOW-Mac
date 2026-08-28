@@ -5,8 +5,23 @@ struct GameDetailOverlayPanel: View {
     let game: CatalogGameObject?
     let play: () -> Void
     let toggleFavorite: () -> Void
-    
+
     var body: some View {
+        ZStack {
+            panelContent
+                .id(game?.id)
+                .transition(.opacity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .frame(height: 220)
+        .frame(maxWidth: 700)
+        .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .animation(.easeInOut(duration: 0.18), value: game?.id)
+    }
+
+    @ViewBuilder
+    private var panelContent: some View {
         VStack(spacing: 8) {
             Text(game?.title ?? "")
                 .font(.title2.weight(.semibold))
@@ -48,7 +63,7 @@ struct GameDetailOverlayPanel: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(game == nil)
-                
+
                 Button(action: toggleFavorite) {
                     Image(systemName: (game != nil && viewModel.isFavorite(game!)) ? "heart.fill" : "heart")
                 }
@@ -60,13 +75,5 @@ struct GameDetailOverlayPanel: View {
             .padding(.top, 4)
             .frame(height: 48)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .frame(height: 220)
-        .frame(maxWidth: 700)
-        .modifier(LiquidGlassModifier(cornerRadius: 22))
-        .opacity(game == nil ? 0 : 1)
-        .contentTransition(.opacity)
-        .animation(.easeInOut(duration: 0.2), value: game?.id)
     }
 }
