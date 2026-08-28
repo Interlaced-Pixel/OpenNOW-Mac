@@ -12,6 +12,7 @@ struct HybridCatalogView: View {
 
     @State private var selectedIdentity = ""
     @State private var backgroundIndex = 0
+    @FocusState private var catalogHasFocus: Bool
 
     private var games: [CatalogGameObject] {
         var result: [CatalogGameObject] = []
@@ -82,6 +83,7 @@ struct HybridCatalogView: View {
             if selectedIdentity.isEmpty, let firstGame = games.first {
                 select(firstGame)
             }
+            catalogHasFocus = true
         }
         .onChange(of: games.map(gameIdentity)) { _, _ in
             guard let selectedGame else { return }
@@ -117,7 +119,19 @@ struct HybridCatalogView: View {
             Spacer(minLength: 12)
         }
         .padding(.horizontal, 28)
-        .animation(.easeInOut(duration: 0.35), value: selectedIdentity)
+        .focusable(true)
+        .focused($catalogHasFocus)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left:
+                moveSelection(by: -1)
+            case .right:
+                moveSelection(by: 1)
+            default:
+                break
+            }
+        }
+        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.9), value: selectedIdentity)
     }
 
     private func gameIdentity(_ game: CatalogGameObject?) -> String {
@@ -132,6 +146,13 @@ struct HybridCatalogView: View {
     private func select(_ game: CatalogGameObject) {
         selectedIdentity = gameIdentity(game)
         viewModel.selectGame(game)
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard !games.isEmpty else { return }
+        let currentIndex = games.firstIndex { gameIdentity($0) == selectedIdentity } ?? 0
+        let nextIndex = (currentIndex + offset + games.count) % games.count
+        select(games[nextIndex])
     }
 
     private func performPrimaryAction(for game: CatalogGameObject) {
@@ -208,27 +229,29 @@ private struct CurvedPosterRail: View {
             ScrollViewReader { scrollProxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .bottom, spacing: 14) {
-                        ForEach(Array(games.enumerated()), id: \.element.uuid) { index, game in
-                            let distance = distanceFromCenter(for: index)
+                        ForEach(0..<(games.count * 3), id: \.self) { displayIndex in
+                            let logicalIndex = displayIndex % games.count
+                            let cycle = displayIndex / games.count
+                            let game = games[logicalIndex]
+                            let distance = distanceFromCenter(for: logicalIndex)
                             PosterGameCard(
                                 game: game,
-                                isSelected: gameIdentity(game) == selectedIdentity,
+                                isSelected: cycle == 1 && gameIdentity(game) == selectedIdentity,
                                 verticalOffset: curveOffset(distance: distance),
                                 scale: curveScale(distance: distance),
                                 select: { select(game) },
                                 launch: { launch(game) }
                             )
-                            .id(gameIdentity(game))
+                            .id(displayIdentity(cycle: cycle, game: game))
                         }
                     }
-                    .frame(minWidth: geometry.size.width, alignment: .center)
                     .padding(.horizontal, max(0, geometry.size.width / 2 - 92))
                 }
                 .scrollTargetBehavior(.viewAligned)
                 .onChange(of: selectedIdentity) { _, identity in
                     guard !identity.isEmpty else { return }
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        scrollProxy.scrollTo(identity, anchor: .center)
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
+                        scrollProxy.scrollTo(centerDisplayIdentity(for: identity), anchor: .center)
                     }
                 }
             }
@@ -241,7 +264,9 @@ private struct CurvedPosterRail: View {
 
     private func distanceFromCenter(for index: Int) -> CGFloat {
         let selectedIndex = games.firstIndex { gameIdentity($0) == selectedIdentity } ?? 0
-        return CGFloat(index - selectedIndex)
+        let directDistance = index - selectedIndex
+        let wrappedDistance = directDistance > 0 ? directDistance - games.count : directDistance + games.count
+        return CGFloat(abs(directDistance) <= abs(wrappedDistance) ? directDistance : wrappedDistance)
     }
 
     private func curveOffset(distance: CGFloat) -> CGFloat {
@@ -250,6 +275,15 @@ private struct CurvedPosterRail: View {
 
     private func curveScale(distance: CGFloat) -> CGFloat {
         max(0.82, 1 - abs(distance) * 0.035)
+    }
+
+    private func displayIdentity(cycle: Int, game: CatalogGameObject) -> String {
+        "\(cycle)-\(gameIdentity(game))"
+    }
+
+    private func centerDisplayIdentity(for identity: String) -> String {
+        guard let game = games.first(where: { gameIdentity($0) == identity }) else { return identity }
+        return displayIdentity(cycle: 1, game: game)
     }
 }
 
@@ -298,12 +332,10 @@ private struct PosterGameCard: View {
         .scaleEffect(scale)
         .offset(y: verticalOffset)
         .onTapGesture(count: 2, perform: launch)
-        .animation(.easeInOut(duration: 0.35), value: selectedIdentity)
+        .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isSelected)
         .accessibilityLabel(game.title.isEmpty ? "Untitled game" : game.title)
         .accessibilityHint("Click to select. Double-click to launch.")
     }
-
-    private var selectedIdentity: String { isSelected ? game.uuid : "" }
 }
 
 private struct FloatingGameDetails: View {
