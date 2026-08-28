@@ -37,7 +37,7 @@ jobs:
       - name: Checkout private submodules
         run: |
           if [ -n "${{ secrets.PAT }}" ]; then
-            git config --global url."https://x-access-token:${{ secrets.PAT }}@github.com/Interlaced-Pixel/PixelNOW-GFN-private".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private"
+            git config --global url."https://${{ secrets.PAT }}:x-oauth-basic@github.com/Interlaced-Pixel/PixelNOW-GFN-private".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private"
           fi
           git submodule update --init --recursive
         shell: bash
@@ -79,7 +79,7 @@ jobs:
       - name: Checkout private submodules
         run: |
           if [ -n "${{ secrets.PAT }}" ]; then
-            git config --global url."https://x-access-token:${{ secrets.PAT }}@github.com/Interlaced-Pixel/PixelNOW-GFN-private".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private"
+            git config --global url."https://${{ secrets.PAT }}:x-oauth-basic@github.com/Interlaced-Pixel/PixelNOW-GFN-private".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private"
           fi
           git submodule update --init --recursive
         shell: bash
