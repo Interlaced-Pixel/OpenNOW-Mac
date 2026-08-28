@@ -33,6 +33,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up environment
         run: |
@@ -67,6 +70,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up environment
         run: |
