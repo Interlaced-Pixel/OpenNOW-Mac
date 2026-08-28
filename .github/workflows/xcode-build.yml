@@ -33,9 +33,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout private submodules
+        run: |
+          if [ -n "${{ secrets.PAT }}" ]; then
+            git config --local url."https://${{ secrets.PAT }}@github.com/Interlaced-Pixel/PixelNOW-GFN-private.git".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private.git"
+          fi
+          git submodule update --init --recursive
+        shell: bash
 
       - name: Set up environment
         run: |
@@ -70,9 +75,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout private submodules
+        run: |
+          if [ -n "${{ secrets.PAT }}" ]; then
+            git config --local url."https://${{ secrets.PAT }}@github.com/Interlaced-Pixel/PixelNOW-GFN-private.git".insteadOf "https://github.com/Interlaced-Pixel/PixelNOW-GFN-private.git"
+          fi
+          git submodule update --init --recursive
+        shell: bash
 
       - name: Set up environment
         run: |
