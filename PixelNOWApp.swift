@@ -144,15 +144,15 @@ struct PixelNOWApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Stream") {
                 Button("Toggle Microphone") {
-                    _ = AppDelegate.sendActiveStreamCommand(.toggleMicrophone)
+                    AppDelegate.sendActiveStreamCommand(.toggleMicrophone)
                 }
                 .keyboardShortcut("m", modifiers: .command)
                 Button("Toggle Recording") {
-                    _ = AppDelegate.sendActiveStreamCommand(.toggleRecording)
+                    AppDelegate.sendActiveStreamCommand(.toggleRecording)
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 Button("Toggle Anti-AFK") {
-                    _ = AppDelegate.sendActiveStreamCommand(.toggleAntiAFK)
+                    AppDelegate.sendActiveStreamCommand(.toggleAntiAFK)
                 }
                 .keyboardShortcut("k", modifiers: .command)
             }
