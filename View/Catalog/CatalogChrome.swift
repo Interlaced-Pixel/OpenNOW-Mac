@@ -49,7 +49,7 @@ private struct TopNavigationGlassBar: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            Button("Games") { viewModel.showGames() }
+            Button("Home") { viewModel.showGames() }
             Button("Library") { viewModel.showCatalogDestination(.library) }
             Button("Favorites") { viewModel.showCatalogDestination(.favorites) }
             Button("Recordings") { viewModel.showRecordings() }

@@ -31,6 +31,13 @@ struct CatalogShell: View {
                         onForget: onForget
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if viewModel.selectedCatalogDestination == .library {
+                    LibraryGridView(
+                        viewModel: viewModel,
+                        store: store,
+                        play: { game in performPrimaryAction(for: game) }
+                    )
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                 } else {
                     VStack(spacing: 20) {
                         GameDetailOverlayPanel(
