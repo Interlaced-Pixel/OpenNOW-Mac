@@ -59,16 +59,14 @@ struct HybridCatalogView: View {
                 }
             }
 
-            if viewModel.selectedMainPage == .games {
-                AccountGlassControl(
-                    account: viewModel.account,
-                    accounts: accounts,
-                    onSwitch: onSwitch,
-                    onAddAccount: onAddAccount,
-                    onSignOut: onSignOut,
-                    onForget: onForget
-                )
-            }
+            AccountGlassControl(
+                account: viewModel.account,
+                accounts: accounts,
+                onSwitch: onSwitch,
+                onAddAccount: onAddAccount,
+                onSignOut: onSignOut,
+                onForget: onForget
+            )
         }
         .task { viewModel.loadIfNeeded() }
         .task(id: gameIdentity(selectedGame)) {
@@ -229,7 +227,7 @@ private struct CurvedPosterRail: View {
         GeometryReader { geometry in
             ScrollViewReader { scrollProxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .bottom, spacing: 14) {
+                    LazyHStack(alignment: .bottom, spacing: 14) {
                         ForEach(0..<(games.count * 3), id: \.self) { displayIndex in
                             let logicalIndex = displayIndex % games.count
                             let cycle = displayIndex / games.count
@@ -451,10 +449,9 @@ private struct AccountGlassControl: View {
         .buttonStyle(.plain)
         .modifier(LiquidGlassModifier(cornerRadius: 18))
         .frame(maxWidth: 240, alignment: .leading)
-        .safeAreaPadding(.leading, 18)
-        .safeAreaPadding(.bottom, 18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        .padding(.bottom, 18)
+        .safeAreaPadding(.trailing, 20)
+        .padding(.top, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 }
 
