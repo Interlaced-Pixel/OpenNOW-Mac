@@ -223,6 +223,8 @@ private struct CurvedPosterRail: View {
     let select: (CatalogGameObject) -> Void
     let launch: (CatalogGameObject) -> Void
 
+    @State private var scrolledDisplayIdentity: String?
+
     var body: some View {
         GeometryReader { geometry in
             ScrollViewReader { scrollProxy in
@@ -244,13 +246,27 @@ private struct CurvedPosterRail: View {
                             .id(displayIdentity(cycle: cycle, game: game))
                         }
                     }
-                        .padding(.horizontal, max(0, geometry.size.width / 2 - 99))
+                    .padding(.horizontal, max(0, geometry.size.width / 2 - 99))
+                    .scrollTargetLayout()
                 }
                 .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $scrolledDisplayIdentity)
+                .onAppear {
+                    if !selectedIdentity.isEmpty {
+                        scrollProxy.scrollTo(centerDisplayIdentity(for: selectedIdentity), anchor: .center)
+                    }
+                }
                 .onChange(of: selectedIdentity) { _, identity in
                     guard !identity.isEmpty else { return }
                     withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
                         scrollProxy.scrollTo(centerDisplayIdentity(for: identity), anchor: .center)
+                    }
+                }
+                .onChange(of: scrolledDisplayIdentity) { _, newId in
+                    guard let newId = newId else { return }
+                    let gameId = extractGameIdentity(from: newId)
+                    if gameId != selectedIdentity, let game = games.first(where: { gameIdentity($0) == gameId }) {
+                        select(game)
                     }
                 }
             }
@@ -283,6 +299,11 @@ private struct CurvedPosterRail: View {
     private func centerDisplayIdentity(for identity: String) -> String {
         guard let game = games.first(where: { gameIdentity($0) == identity }) else { return identity }
         return displayIdentity(cycle: 1, game: game)
+    }
+
+    private func extractGameIdentity(from displayIdentity: String) -> String {
+        let parts = displayIdentity.split(separator: "-", maxSplits: 1)
+        return parts.count == 2 ? String(parts[1]) : displayIdentity
     }
 }
 
