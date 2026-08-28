@@ -50,7 +50,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		7729CE782FDEDAB300D5C9D5 /* App */ = {
+		7729CE782FDEDAB300D5C9D5 /*  */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = App;
 			sourceTree = "<group>";
@@ -97,7 +97,7 @@
 				B00000000000000000000101 /* Model */,
 				B00000000000000000000102 /* View */,
 				B00000000000000000000110 /* ViewModel */,
-				7729CE782FDEDAB300D5C9D5 /* App */,
+				7729CE782FDEDAB300D5C9D5 /*  */,
 				B00000000000000000000104 /* GFN */,
 				A00000000000000000000002 /* Resources */,
 				A00000000000000000000004 /* PixelNOWApp.swift */,
@@ -136,7 +136,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				7729CE782FDEDAB300D5C9D5 /* App */,
+				7729CE782FDEDAB300D5C9D5 /*  */,
 				B00000000000000000000101 /* Model */,
 				B00000000000000000000102 /* View */,
 				B00000000000000000000104 /* GFN */,

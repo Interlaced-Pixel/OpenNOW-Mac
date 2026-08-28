@@ -56,54 +56,6 @@ enum Design {
     static func clamped(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
         min(max(value, minimum), maximum)
     }
-
-    enum Glass {
-        static let panelBackground = Color.black.opacity(0.15)
-        static let panelCornerRadius: CGFloat = 16
-        static let panelStroke = Color.white.opacity(0.15)
-        static let hoverStroke = Color.white.opacity(0.4)
-        static let accentTint = Catalog.brand
-        static let panelShadowRadius: CGFloat = 10
-        static let panelShadowOpacity: Double = 0.3
-    }
-}
-
-private struct GlassmorphismPanel: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(Design.Glass.panelBackground)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: Design.Glass.panelCornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Design.Glass.panelCornerRadius, style: .continuous)
-                    .stroke(Design.Glass.panelStroke, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(Design.Glass.panelShadowOpacity), radius: Design.Glass.panelShadowRadius, x: 0, y: 5)
-    }
-}
-
-private struct GlassHoverEffect: ViewModifier {
-    var isHovered: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .overlay(
-                RoundedRectangle(cornerRadius: Design.Glass.panelCornerRadius, style: .continuous)
-                    .stroke(isHovered ? Design.Glass.hoverStroke : Color.clear, lineWidth: 2)
-            )
-            .scaleEffect(isHovered ? 1.02 : 1.0)
-            .animation(.easeOut(duration: 0.2), value: isHovered)
-    }
-}
-
-extension View {
-    func glassmorphismPanel() -> some View {
-        modifier(GlassmorphismPanel())
-    }
-
-    func glassHoverEffect(isHovered: Bool) -> some View {
-        modifier(GlassHoverEffect(isHovered: isHovered))
-    }
 }
 
 extension View {

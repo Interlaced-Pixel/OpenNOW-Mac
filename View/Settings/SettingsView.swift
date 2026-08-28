@@ -744,26 +744,31 @@ private struct SettingsStatisticTile: View {
 
 private struct InterfaceSettingsPage: View {
     @ObservedObject var viewModel: CatalogViewModel
+    @AppStorage(InterfacePreferences.controllerModeEnabledKey) private var controllerModeEnabled = false
     @StateObject private var inputRouter = ControllerInputRouter()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "Unified Input") {
+            SettingsCard(title: "Mode") {
                 HStack(alignment: .center, spacing: 18) {
                     Rectangle()
-                        .fill(Color.pixelNowGreen)
+                        .fill(controllerModeEnabled ? Color.pixelNowGreen : Color.white.opacity(0.18))
                         .frame(width: 4, height: 58)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Hybrid catalog mode is active")
+                        Text(controllerModeEnabled ? "Controller mode is active" : "Desktop catalog mode is active")
                             .font(.settingsNvidia(size: 18, weight: .bold))
                             .foregroundStyle(.white)
-                        Text("PixelNOW uses one immersive catalog for pointer, keyboard, and gamepad input.")
+                        Text("Controller mode replaces the catalog with a TV-style interface built for gamepads, while keeping keyboard and pointer fallback available.")
                             .font(.settingsNvidia(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.58))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 12)
                     SettingsStatusPill(title: "INPUT", value: inputRouter.glyphs.deviceName, positive: inputRouter.isControllerConnected)
+                }
+                SettingsDivider()
+                SettingsToggleRow(title: "Controller Mode", subtitle: "Use a clean Netflix-style catalog with large focus targets, controller shortcuts, and dynamic input glyphs.", isOn: controllerModeEnabled) { enabled in
+                    controllerModeEnabled = enabled
                 }
             }
 
