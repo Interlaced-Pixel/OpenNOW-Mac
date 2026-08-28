@@ -235,15 +235,21 @@ private struct CurvedPosterRail: View {
                             let cycle = displayIndex / games.count
                             let game = games[logicalIndex]
                             let distance = distanceFromCenter(for: logicalIndex)
+                            let id = displayIdentity(cycle: cycle, game: game)
                             PosterGameCard(
                                 game: game,
-                                isSelected: cycle == 1 && gameIdentity(game) == selectedIdentity,
+                                isSelected: scrolledDisplayIdentity == id || (scrolledDisplayIdentity == nil && cycle == 1 && gameIdentity(game) == selectedIdentity),
                                 verticalOffset: curveOffset(distance: distance),
                                 scale: curveScale(distance: distance),
-                                select: { select(game) },
+                                select: {
+                                    select(game)
+                                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
+                                        scrolledDisplayIdentity = id
+                                    }
+                                },
                                 launch: { launch(game) }
                             )
-                            .id(displayIdentity(cycle: cycle, game: game))
+                            .id(id)
                         }
                     }
                     .scrollTargetLayout()
@@ -253,13 +259,16 @@ private struct CurvedPosterRail: View {
                 .scrollPosition(id: $scrolledDisplayIdentity)
                 .onAppear {
                     if !selectedIdentity.isEmpty {
-                        scrollProxy.scrollTo(centerDisplayIdentity(for: selectedIdentity), anchor: .center)
+                        scrolledDisplayIdentity = centerDisplayIdentity(for: selectedIdentity)
                     }
                 }
                 .onChange(of: selectedIdentity) { _, identity in
                     guard !identity.isEmpty else { return }
+                    if let current = scrolledDisplayIdentity, extractGameIdentity(from: current) == identity {
+                        return
+                    }
                     withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
-                        scrollProxy.scrollTo(centerDisplayIdentity(for: identity), anchor: .center)
+                        scrolledDisplayIdentity = centerDisplayIdentity(for: identity)
                     }
                 }
                 .onChange(of: scrolledDisplayIdentity) { _, newId in
@@ -379,38 +388,56 @@ private struct FloatingGameDetails: View {
     let toggleFavorite: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             Text(game.title.isEmpty ? "Untitled game" : game.title)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .frame(height: 54, alignment: .bottom)
 
-            if !game.developerName.isEmpty {
-                Text(game.developerName)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.72))
+            HStack(spacing: 14) {
+                if !game.developerName.isEmpty {
+                    Label(game.developerName, systemImage: "person.crop.circle")
+                }
+                if !game.releaseDate.isEmpty {
+                    Label(String(game.releaseDate.prefix(4)), systemImage: "calendar")
+                }
+                if !game.genres.isEmpty {
+                    Label(game.genres.prefix(2).joined(separator: ", "), systemImage: "gamecontroller")
+                }
+                if game.isFreeToPlay {
+                    Label("Free", systemImage: "tag")
+                }
             }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.white.opacity(0.72))
+            .lineLimit(1)
+            .frame(height: 18)
 
             Text(game.shortDescription.isEmpty ? game.longDescription : game.shortDescription)
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.78))
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
-                .frame(maxWidth: 620)
+                .frame(maxWidth: 620, minHeight: 60, maxHeight: 60, alignment: .top)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Button(game.isLaunchPatching ? "Queue" : (game.cardPrimaryActionIsLaunchable ? "Play" : "Mark Owned"), action: play)
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 Button(action: toggleFavorite) {
                     Image(systemName: viewModel.isFavorite(game) ? "heart.fill" : "heart")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .help(viewModel.isFavorite(game) ? "Remove from favorites" : "Add to favorites")
             }
+            .padding(.top, 4)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
+        .frame(height: 220)
         .modifier(LiquidGlassModifier(cornerRadius: 22))
         .frame(maxWidth: 700)
     }
