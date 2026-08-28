@@ -276,11 +276,9 @@ struct HybridCatalogView: View {
                     hybridPage(layout: layout)
                     HybridHintBar(hints: hints, glyphs: inputRouter.glyphs, layout: layout)
                 }
-                .frame(width: layout.contentWidth, height: proxy.size.height, alignment: .top)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-                .clipped()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 if hybridViewModel.isSearchVisible {
                     HybridSearchOverlay(
@@ -347,8 +345,7 @@ struct HybridCatalogView: View {
                     .zIndex(34)
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(HybridKeyboardInputBridge { command in inputRouter.sendKeyboardCommand(command) })
         .onAppear {
@@ -1538,14 +1535,12 @@ private struct HybridSearchOverlay: View {
                     resultsGrid(columns: columns)
                 }
                 .glassmorphismPanel()
-                .frame(width: layout.contentWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
                 .padding(.top, 38)
                 .padding(.bottom, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            .clipped()
             .onAppear { resultColumnCount = columns }
             .onChange(of: columns) { _, value in resultColumnCount = value }
         }
@@ -1714,11 +1709,9 @@ private struct HybridDetailOverlay: View {
                 .glassmorphismPanel()
                 .frame(width: panelWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
-                .padding(.trailing, layout.trailingInset)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -1885,14 +1878,12 @@ private struct HybridShowAllOverlay: View {
                     }
                 }
                 .glassmorphismPanel()
-                .frame(width: layout.contentWidth, alignment: .leading)
                 .padding(.leading, layout.leadingInset)
                 .padding(.trailing, layout.trailingInset)
                 .padding(.top, 38)
                 .padding(.bottom, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            .clipped()
             .onAppear { columnCount = columns }
             .onChange(of: columns) { _, value in columnCount = value }
         }
@@ -1969,8 +1960,7 @@ private struct HybridActionMenuOverlay: View {
                 .shadow(color: .black.opacity(0.54), radius: 34, x: -14, y: 20)
                 .padding(.trailing, layout.trailingInset)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
