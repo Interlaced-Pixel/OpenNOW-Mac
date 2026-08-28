@@ -120,6 +120,7 @@ struct HybridCatalogView: View {
         }
         .padding(.horizontal, 28)
         .focusable(true)
+        .focusEffectDisabled()
         .focused($catalogHasFocus)
         .onMoveCommand { direction in
             switch direction {
