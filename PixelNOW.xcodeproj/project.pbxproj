@@ -362,7 +362,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.56;
+				MARKETING_VERSION = 1.57;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.opencloudgaming.pixelnow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -403,7 +403,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.56;
+				MARKETING_VERSION = 1.57;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.opencloudgaming.pixelnow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
