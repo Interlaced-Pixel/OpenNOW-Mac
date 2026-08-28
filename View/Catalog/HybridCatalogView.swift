@@ -246,7 +246,7 @@ private struct CurvedPosterRail: View {
                             .id(displayIdentity(cycle: cycle, game: game))
                         }
                     }
-                    .padding(.horizontal, max(0, geometry.size.width / 2 - 92))
+                        .padding(.horizontal, max(0, geometry.size.width / 2 - 99))
                 }
                 .scrollTargetBehavior(.viewAligned)
                 .onChange(of: selectedIdentity) { _, identity in
@@ -289,6 +289,9 @@ private struct CurvedPosterRail: View {
 }
 
 private struct PosterGameCard: View {
+    private static let cardWidth: CGFloat = 198
+    private static let cardHeight: CGFloat = 118
+
     let game: CatalogGameObject
     let isSelected: Bool
     let verticalOffset: CGFloat
@@ -300,7 +303,7 @@ private struct PosterGameCard: View {
         Button(action: select) {
             ZStack(alignment: .bottom) {
                 CatalogRemoteImage(url: URL(string: game.bestTileImageURL), contentMode: .fill)
-                    .frame(width: 170, height: 246)
+                    .frame(width: Self.cardWidth, height: Self.cardHeight)
                     .clipped()
 
                 LinearGradient(
@@ -318,12 +321,12 @@ private struct PosterGameCard: View {
                     .shadow(color: .black, radius: 4)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 12)
-                    .frame(width: 170)
+                    .frame(width: Self.cardWidth)
             }
-            .frame(width: 170, height: 246)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(width: Self.cardWidth, height: Self.cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(isSelected ? Color.white : Color.white.opacity(0.18), lineWidth: isSelected ? 3 : 1)
                     .shadow(color: isSelected ? Color.accentColor.opacity(0.95) : .clear, radius: 14)
             }
