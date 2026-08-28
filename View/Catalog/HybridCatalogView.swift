@@ -90,33 +90,38 @@ struct HybridCatalogView: View {
     }
 
     private var catalogContent: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
+        Group {
+            if let game = selectedGame {
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: 16) {
+                        Spacer(minLength: 0)
+                        FloatingGameDetails(
+                            viewModel: viewModel,
+                            game: game,
+                            play: { performPrimaryAction(for: game) },
+                            toggleFavorite: {
+                                viewModel.selectGame(game)
+                                viewModel.toggleFavoriteSelectedGame()
+                            }
+                        )
+                        .id(selectedIdentity)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.18), value: selectedIdentity)
 
-            if let selectedGame {
-                FloatingGameDetails(
-                    viewModel: viewModel,
-                    game: selectedGame,
-                    play: { performPrimaryAction(for: selectedGame) },
-                    toggleFavorite: {
-                        viewModel.selectGame(selectedGame)
-                        viewModel.toggleFavoriteSelectedGame()
+                        CurvedPosterRail(
+                            games: games,
+                            selectedIdentity: selectedIdentity,
+                            select: select,
+                            launch: { performPrimaryAction(for: $0) }
+                        )
+                        .frame(height: 150)
+
+                        Spacer(minLength: 12)
                     }
-                )
-                .transition(.opacity)
+                    .padding(.horizontal, 28)
+                }
             }
-
-            CurvedPosterRail(
-                games: games,
-                selectedIdentity: selectedIdentity,
-                select: select,
-                launch: { performPrimaryAction(for: $0) }
-            )
-            .frame(height: 150)
-
-            Spacer(minLength: 12)
         }
-        .padding(.horizontal, 28)
         .focusable(true)
         .focusEffectDisabled()
         .focused($catalogHasFocus)
@@ -130,7 +135,6 @@ struct HybridCatalogView: View {
                 break
             }
         }
-        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.9), value: selectedIdentity)
     }
 
     private func gameIdentity(_ game: CatalogGameObject?) -> String {
