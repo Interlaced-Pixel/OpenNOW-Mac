@@ -53,7 +53,7 @@ struct CatalogShell: View {
                         }
                     }
                     .frame(width: geometry.size.width, height: 390)
-                    .position(x: geometry.size.width / 2, y: geometry.size.height - 215)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2 + 30)
                 }
             }
             .overlay(alignment: .top) {

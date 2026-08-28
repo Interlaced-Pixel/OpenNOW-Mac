@@ -85,8 +85,7 @@ private struct AccountGlassControl: View {
             Button("Sign Out", role: .destructive, action: onSignOut)
         } label: {
             HStack(spacing: 10) {
-                GravatarView(account: account, size: 34)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(account.displayName.isEmpty ? "Account" : account.displayName)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
@@ -94,6 +93,7 @@ private struct AccountGlassControl: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
                 }
+                GravatarView(account: account, size: 34)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
@@ -102,7 +102,7 @@ private struct AccountGlassControl: View {
         .buttonStyle(.plain)
         .modifier(LiquidGlassModifier(cornerRadius: 18))
         .fixedSize()
-        .frame(maxWidth: 240, alignment: .leading)
+        .frame(maxWidth: 240, alignment: .trailing)
     }
 }
 
