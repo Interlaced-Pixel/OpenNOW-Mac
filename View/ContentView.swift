@@ -38,7 +38,6 @@ struct ContentView: View {
         }
             .frame(minWidth: 980, minHeight: 660)
             .frame(idealWidth: 1200, idealHeight: 760)
-            .ignoresSafeArea()
             .background(WindowTitleConfigurator(title: windowTitle))
             .task {
                 await bootstrapAppStartIfNeeded()
@@ -145,16 +144,16 @@ private struct WindowTitleConfigurator: NSViewRepresentable {
             let windowIdentifier = ObjectIdentifier(window)
             guard configuredWindow != windowIdentifier else { return }
             configuredWindow = windowIdentifier
-            if !window.styleMask.contains(.fullSizeContentView) {
-                window.styleMask.insert(.fullSizeContentView)
+            if window.styleMask.contains(.fullSizeContentView) {
+                window.styleMask.remove(.fullSizeContentView)
             }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .visible
+            window.titlebarAppearsTransparent = false
             window.isMovableByWindowBackground = false
             window.isOpaque = true
             window.backgroundColor = .black
             if #available(macOS 11.0, *) {
-                window.titlebarSeparatorStyle = .none
+                window.titlebarSeparatorStyle = .automatic
             }
         }
     }
