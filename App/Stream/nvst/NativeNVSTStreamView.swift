@@ -31,7 +31,7 @@ private final class NativeNVSTRendererWindow: NSWindow {
 
 
 @MainActor
-public final class NativeNVSTStreamView: NSView, NSTextInputClient {
+public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClient {
     public var onInputEvent: ((UserInputEvent) -> Void)?
     public var onAbsoluteMouseMove: ((NativeNVSTAbsoluteMouseEvent) -> Void)?
     public var onGamepadTopologyChanged: ((NativeNVSTGamepadTopology) -> Void)?

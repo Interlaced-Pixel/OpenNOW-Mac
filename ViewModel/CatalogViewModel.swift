@@ -313,8 +313,9 @@ final class CatalogViewModel: ObservableObject {
             return games.isEmpty ? [] : [CatalogSectionModel(id: "remote-favorites", title: "My Favorites", games: games, kind: .panel)]
         }
         if selectedCatalogDestination == .home, !isBrowseMode {
-            let games = featuredGames
-            return games.isEmpty ? [] : [CatalogSectionModel(id: "featured-games", title: "Featured Games", games: games, kind: .panel)]
+            let games = favoriteGames.isEmpty ? featuredGames : favoriteGames
+            let title = favoriteGames.isEmpty ? "Featured Games" : "My Favorites"
+            return games.isEmpty ? [] : [CatalogSectionModel(id: "home-games", title: title, games: games, kind: .panel)]
         }
 
         if isBrowseMode, !catalogGames.isEmpty {
@@ -2625,7 +2626,7 @@ struct CatalogPlatformOption: Identifiable {
 }
 
 struct CatalogPlaytimeStatistics: Codable, Equatable {
-    static let empty = CatalogPlaytimeStatistics(totalSeconds: 0, sessionCount: 0, lastSessionSeconds: 0, longestSessionSeconds: 0, lastPlayedTitle: "", lastPlayedAt: nil)
+    static let empty = CatalogPlaytimeStatistics(totalSeconds: 0, sessionCount: 0, lastSessionSeconds: 0, longestSessionSeconds: 0, lastPlayedTitle: "", lastPlayedAt: nil, recentTitles: nil)
 
     private(set) var totalSeconds: Double
     private(set) var sessionCount: Int
@@ -2633,6 +2634,7 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
     private(set) var longestSessionSeconds: Double
     private(set) var lastPlayedTitle: String
     private(set) var lastPlayedAt: Date?
+    var recentTitles: [String]?
 
     var averageSessionSeconds: Double {
         sessionCount > 0 ? totalSeconds / Double(sessionCount) : 0
@@ -2645,8 +2647,18 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
         sessionCount += 1
         lastSessionSeconds = duration
         longestSessionSeconds = max(longestSessionSeconds, duration)
-        lastPlayedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastPlayedTitle = trimmedTitle
         lastPlayedAt = endedAt
+        
+        var recents = recentTitles ?? (trimmedTitle.isEmpty ? [] : [trimmedTitle])
+        if !trimmedTitle.isEmpty {
+            if let idx = recents.firstIndex(of: trimmedTitle) {
+                recents.remove(at: idx)
+            }
+            recents.insert(trimmedTitle, at: 0)
+        }
+        recentTitles = Array(recents.prefix(10))
     }
 
     static func load(accountIdentifier: String) -> CatalogPlaytimeStatistics {

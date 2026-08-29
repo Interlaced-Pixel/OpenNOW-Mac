@@ -639,7 +639,7 @@ bool processVoiceActivity(AdaptiveVoiceActivityState &state, double rms) {
             }
         } else {
             state.attackFrames = 0;
-            state.noiseFloor = std::clamp(state.noiseFloor * 0.95 + rms * 0.05, 0.0005, 0.08);
+            state.noiseFloor = std::max(0.0005, std::min(0.08, state.noiseFloor * 0.95 + rms * 0.05));
         }
     } else if (rms >= releaseThreshold) {
         state.hangoverFrames = VoiceHangoverFrames;
@@ -648,7 +648,7 @@ bool processVoiceActivity(AdaptiveVoiceActivityState &state, double rms) {
     } else {
         state.speaking = false;
         state.attackFrames = 0;
-        state.noiseFloor = std::clamp(state.noiseFloor * 0.95 + rms * 0.05, 0.0005, 0.08);
+        state.noiseFloor = std::max(0.0005, std::min(0.08, state.noiseFloor * 0.95 + rms * 0.05));
     }
     return state.speaking;
 }
@@ -667,14 +667,14 @@ bool processMicrophonePCM(const int16_t *input,
     }
     const double rms = std::sqrt(static_cast<double>(sumSquares / sampleCount));
     const bool forwardAudio = !vadEnabled || processVoiceActivity(vad, rms);
-    const double boundedVolume = std::clamp(static_cast<double>(volume), 0.0, 1.0);
+    const double boundedVolume = std::max(0.0, std::min(1.0, static_cast<double>(volume)));
     for (size_t index = 0; index < sampleCount; ++index) {
         if (!forwardAudio || boundedVolume == 0) {
             output[index] = 0;
             continue;
         }
         const double scaled = std::round(static_cast<double>(input[index]) * boundedVolume);
-        output[index] = static_cast<int16_t>(std::clamp(scaled, -32768.0, 32767.0));
+        output[index] = static_cast<int16_t>(std::max(-32768.0, std::min(32767.0, scaled)));
     }
     return true;
 }
@@ -2672,7 +2672,7 @@ extern "C" int32_t NativeNVSTGeronimoSetMicrophoneVolume(void *sessionPointer, d
     auto *session = static_cast<NativeNVSTGeronimoSession *>(sessionPointer);
     if (session == nullptr || session->microphoneRoute == nullptr || !std::isfinite(volume)) { return -1; }
     std::lock_guard<std::recursive_mutex> operationLock(session->operationMutex);
-    const float boundedVolume = static_cast<float>(std::clamp(volume, 0.0, 1.0));
+    const float boundedVolume = static_cast<float>(std::max(0.0, std::min(1.0, static_cast<double>(volume))));
     session->microphoneVolume = boundedVolume;
     session->microphoneRoute->volume.store(boundedVolume, std::memory_order_release);
     return 0;
@@ -2966,7 +2966,7 @@ int32_t startOrResumeGeronimo(void *sessionPointer,
     session->microphoneSetupSucceeded = false;
     session->microphoneFailure.clear();
     session->requestedCodec = codecFromJSON(cloud, geronimo);
-    session->requestedDynamicStreamingMode = static_cast<uint32_t>(std::clamp(jsonIntAtPath(profile, "selectedFeatures.dynamicStreamingMode"), 0, 3));
+    session->requestedDynamicStreamingMode = static_cast<uint32_t>(std::max(0, std::min(3, static_cast<int>(jsonIntAtPath(profile, "selectedFeatures.dynamicStreamingMode")))));
     const char *const tokenPaths[] = { "token", "authToken", "jwt", "auth.token", "sessionToken" };
     const char *const tokenTypePaths[] = { "tokenType", "authType", "auth.type" };
     const char *const serverPaths[] = { "serverAddress", "sessionControlInfo.ip", "zoneAddress" };
