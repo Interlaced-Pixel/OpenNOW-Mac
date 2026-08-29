@@ -15,7 +15,7 @@ struct LibraryGridView: View {
     @ObservedObject var store: CatalogSelectionStore
     let play: (CatalogGameObject) -> Void
 
-    let columns = [GridItem(.adaptive(minimum: 200), spacing: 24)]
+    let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
     
     @State private var searchQuery = ""
     @State private var sortOption = LibrarySortOption.nameAsc
@@ -112,7 +112,7 @@ struct LibraryGridView: View {
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVGrid(columns: columns, spacing: 24) {
+                            LazyVGrid(columns: columns, spacing: 16) {
                                 ForEach(displayedGames, id: \.catalogIdentity) { game in
                                     let identity = CatalogSelectionStore.gameIdentity(game)
                                     let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity

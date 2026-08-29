@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct GameCardView: View {
-    private static let cardWidth: CGFloat = 198
-    private static let cardHeight: CGFloat = 118
+    private static let cardWidth: CGFloat = 138
+    private static let cardHeight: CGFloat = 207
 
     let game: CatalogGameObject
     let isSelected: Bool
@@ -12,7 +12,7 @@ struct GameCardView: View {
     var body: some View {
         Button(action: select) {
             ZStack(alignment: .bottom) {
-                CatalogRemoteImage(url: URL(string: game.bestTileImageURL), contentMode: .fill)
+                CatalogRemoteImage(url: URL(string: game.bestStorePickerPosterURL), contentMode: .fill)
                     .frame(width: Self.cardWidth, height: Self.cardHeight)
                     .clipped()
 

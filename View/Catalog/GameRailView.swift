@@ -35,6 +35,6 @@ struct GameRailView: View {
                 }
             }
         }
-        .frame(height: 150)
+        .frame(height: 250)
     }
 }

@@ -64,6 +64,14 @@ final class CatalogSelectionStore: ObservableObject {
         select(at: (selectedIndex - 1 + games.count) % games.count)
     }
     
+    func jump(by offset: Int) {
+        guard !games.isEmpty else { return }
+        var newIndex = selectedIndex + offset
+        if newIndex < 0 { newIndex = 0 }
+        if newIndex >= games.count { newIndex = games.count - 1 }
+        select(at: newIndex)
+    }
+    
     func selectGame(withId identity: String) {
         if let index = games.firstIndex(where: { Self.gameIdentity($0) == identity }) {
             select(at: index)

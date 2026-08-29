@@ -78,16 +78,26 @@ struct CatalogShell: View {
                     onForget: onForget
                 )
             }
-        }
-        .focusable(true)
-        .focusEffectDisabled()
-        .focused($catalogHasFocus)
-        .onMoveCommand { direction in
-            if viewModel.selectedMainPage == .games {
-                switch direction {
-                case .left: activeStore.selectPrevious()
-                case .right: activeStore.selectNext()
-                default: break
+            .focusable(true)
+            .focusEffectDisabled()
+            .focused($catalogHasFocus)
+            .onMoveCommand { direction in
+                if viewModel.selectedMainPage == .games {
+                    let availableWidth = geometry.size.width - 380 - 80
+                    let columns = max(1, Int(floor((availableWidth + 16) / 156)))
+                    switch direction {
+                    case .left: activeStore.selectPrevious()
+                    case .right: activeStore.selectNext()
+                    case .up:
+                        if viewModel.selectedCatalogDestination == .library {
+                            activeStore.jump(by: -columns)
+                        }
+                    case .down:
+                        if viewModel.selectedCatalogDestination == .library {
+                            activeStore.jump(by: columns)
+                        }
+                    default: break
+                    }
                 }
             }
         }
