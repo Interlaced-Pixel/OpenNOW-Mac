@@ -19,109 +19,28 @@ struct LibraryGridView: View {
     
     @State private var searchQuery = ""
     @State private var sortOption = LibrarySortOption.nameAsc
-
-    var filteredAndSortedGames: [CatalogGameObject] {
-        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        var result: [CatalogGameObject]
-
-        if trimmedQuery.isEmpty {
-            let owned = viewModel.libraryGames.filter { $0.isInLibrary || CatalogViewModel.gameHasOwnedVariant($0) }
-            result = owned.isEmpty && !viewModel.libraryGames.isEmpty ? viewModel.libraryGames : owned
-        } else {
-            var pool: [CatalogGameObject] = []
-            var seen = Set<String>()
-            for game in viewModel.catalogGames + viewModel.allKnownGames {
-                let identity = CatalogSelectionStore.gameIdentity(game)
-                guard !identity.isEmpty, seen.insert(identity).inserted else { continue }
-                pool.append(game)
-            }
-            result = pool.filter { $0.title.localizedCaseInsensitiveContains(trimmedQuery) }
-        }
-
-        switch sortOption {
-        case .nameAsc:
-            result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        case .nameDesc:
-            result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
-        case .recent:
-            result.sort {
-                let t0 = releaseTimestamp(for: $0)
-                let t1 = releaseTimestamp(for: $1)
-                if t0 != t1 {
-                    if t0 == 0 { return false }
-                    if t1 == 0 { return true }
-                    return t0 > t1
-                }
-                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-            }
-        case .oldest:
-            result.sort {
-                let t0 = releaseTimestamp(for: $0)
-                let t1 = releaseTimestamp(for: $1)
-                if t0 != t1 {
-                    if t0 == 0 { return false }
-                    if t1 == 0 { return true }
-                    return t0 < t1
-                }
-                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-            }
-        case .favorites:
-            result.sort {
-                let f0 = viewModel.isFavorite($0)
-                let f1 = viewModel.isFavorite($1)
-                if f0 != f1 { return f0 && !f1 }
-                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-            }
-        }
-
-        return result
+    
+    @State private var displayedGames: [CatalogGameObject] = []
+    @State private var isProcessing: Bool = false
+    
+    private struct GridStateHash: Equatable {
+        let query: String
+        let sort: LibrarySortOption
+        let libraryCount: Int
+        let catalogCount: Int
+        let knownCount: Int
+        let favCount: Int
     }
-
-    private func releaseTimestamp(for game: CatalogGameObject) -> TimeInterval {
-        var raw = game.releaseDate.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.isEmpty {
-            for v in game.variants {
-                let vr = v.releaseDate.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !vr.isEmpty {
-                    raw = vr
-                    break
-                }
-            }
-        }
-        guard !raw.isEmpty else { return 0 }
-
-        if let epoch = Double(raw) {
-            return epoch > 10_000_000_000 ? epoch / 1000.0 : epoch
-        }
-
-        let isoFull = ISO8601DateFormatter()
-        isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = isoFull.date(from: raw) { return d.timeIntervalSince1970 }
-
-        let isoStandard = ISO8601DateFormatter()
-        isoStandard.formatOptions = [.withInternetDateTime]
-        if let d = isoStandard.date(from: raw) { return d.timeIntervalSince1970 }
-
-        let isoDate = ISO8601DateFormatter()
-        isoDate.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        if let d = isoDate.date(from: raw) { return d.timeIntervalSince1970 }
-
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        for fmt in ["yyyy-MM-dd", "yyyy/MM/dd", "MM/dd/yyyy", "yyyy-MM", "yyyy"] {
-            df.dateFormat = fmt
-            if let d = df.date(from: raw) { return d.timeIntervalSince1970 }
-        }
-
-        if let year = Int(raw.prefix(4)), year >= 1970, year <= 2100 {
-            var comp = DateComponents()
-            comp.year = year
-            comp.month = 1
-            comp.day = 1
-            return Calendar.current.date(from: comp)?.timeIntervalSince1970 ?? 0
-        }
-
-        return 0
+    
+    private var gridStateHash: GridStateHash {
+        GridStateHash(
+            query: searchQuery,
+            sort: sortOption,
+            libraryCount: viewModel.libraryGames.count,
+            catalogCount: viewModel.catalogGames.count,
+            knownCount: viewModel.allKnownGames.count,
+            favCount: viewModel.favoriteGameIdentities.count
+        )
     }
 
     var body: some View {
@@ -178,12 +97,12 @@ struct LibraryGridView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                } else if filteredAndSortedGames.isEmpty {
+                } else if displayedGames.isEmpty {
                     VStack(spacing: 12) {
                         Spacer()
-                        if viewModel.isLoading {
+                        if isProcessing || viewModel.isLoading {
                             ProgressView().controlSize(.large)
-                            Text("Searching catalog...").font(.headline).foregroundStyle(.secondary)
+                            Text(isProcessing ? "Sorting games..." : "Searching catalog...").font(.headline).foregroundStyle(.secondary)
                         } else {
                             Text("No Games Found").font(.title2).foregroundStyle(.secondary)
                         }
@@ -194,7 +113,7 @@ struct LibraryGridView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVGrid(columns: columns, spacing: 24) {
-                                ForEach(filteredAndSortedGames, id: \.catalogIdentity) { game in
+                                ForEach(displayedGames, id: \.catalogIdentity) { game in
                                     let identity = CatalogSelectionStore.gameIdentity(game)
                                     let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity
                                     GameCardView(
@@ -220,14 +139,170 @@ struct LibraryGridView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .onAppear {
-                store.load(from: filteredAndSortedGames)
+            .task(id: gridStateHash) {
+                let query = gridStateHash.query
+                let sort = gridStateHash.sort
+                let favorites = viewModel.favoriteGameIdentities
+                
+                isProcessing = true
+                
+                struct GameSortData: Sendable {
+                    let identity: String
+                    let title: String
+                    let releaseDate: String
+                    let variantDates: [String]
+                    let isFavorite: Bool
+                    let isLibraryCandidate: Bool
+                }
+                
+                let isSearching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                
+                // Map to Sendable wrapper on MainActor
+                var mappedData: [GameSortData] = []
+                var gameDictionary: [String: CatalogGameObject] = [:]
+                
+                if isSearching {
+                    var seen = Set<String>()
+                    for game in viewModel.catalogGames + viewModel.allKnownGames {
+                        let identity = CatalogSelectionStore.gameIdentity(game)
+                        guard !identity.isEmpty, seen.insert(identity).inserted else { continue }
+                        gameDictionary[identity] = game
+                        mappedData.append(GameSortData(
+                            identity: identity,
+                            title: game.title,
+                            releaseDate: game.releaseDate,
+                            variantDates: game.variants.map { $0.releaseDate },
+                            isFavorite: game.isFavorited || favorites.contains(identity),
+                            isLibraryCandidate: false // Not needed for search
+                        ))
+                    }
+                } else {
+                    for game in viewModel.libraryGames {
+                        let identity = CatalogSelectionStore.gameIdentity(game)
+                        gameDictionary[identity] = game
+                        mappedData.append(GameSortData(
+                            identity: identity,
+                            title: game.title,
+                            releaseDate: game.releaseDate,
+                            variantDates: game.variants.map { $0.releaseDate },
+                            isFavorite: game.isFavorited || favorites.contains(identity),
+                            isLibraryCandidate: game.isInLibrary || CatalogViewModel.gameHasOwnedVariant(game)
+                        ))
+                    }
+                }
+                
+                // Pass lightweight sendable array to background task
+                let sortedIdentities = await Task.detached(priority: .userInitiated) {
+                    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    var pool: [GameSortData] = []
+                    
+                    if trimmedQuery.isEmpty {
+                        let owned = mappedData.filter { $0.isLibraryCandidate }
+                        pool = owned.isEmpty && !mappedData.isEmpty ? mappedData : owned
+                    } else {
+                        pool = mappedData.filter { $0.title.localizedCaseInsensitiveContains(trimmedQuery) }
+                    }
+                    
+                    guard !Task.isCancelled else { return [String]() }
+                    
+                    struct SortedWrapper {
+                        let identity: String
+                        let timestamp: TimeInterval
+                        let titleForSort: String
+                        let isFavorite: Bool
+                    }
+                    
+                    let isoFull = ISO8601DateFormatter()
+                    isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    let isoStandard = ISO8601DateFormatter()
+                    isoStandard.formatOptions = [.withInternetDateTime]
+                    let isoDate = ISO8601DateFormatter()
+                    isoDate.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+                    let df = DateFormatter()
+                    df.locale = Locale(identifier: "en_US_POSIX")
+                    
+                    func extractTimestamp(for rawDate: String, variants: [String]) -> TimeInterval {
+                        var raw = rawDate.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if raw.isEmpty {
+                            for vrRaw in variants {
+                                let vr = vrRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !vr.isEmpty { raw = vr; break }
+                            }
+                        }
+                        guard !raw.isEmpty else { return 0 }
+                        if let epoch = Double(raw) { return epoch > 10_000_000_000 ? epoch / 1000.0 : epoch }
+                        if let d = isoFull.date(from: raw) { return d.timeIntervalSince1970 }
+                        if let d = isoStandard.date(from: raw) { return d.timeIntervalSince1970 }
+                        if let d = isoDate.date(from: raw) { return d.timeIntervalSince1970 }
+                        for fmt in ["yyyy-MM-dd", "yyyy/MM/dd", "MM/dd/yyyy", "yyyy-MM", "yyyy"] {
+                            df.dateFormat = fmt
+                            if let d = df.date(from: raw) { return d.timeIntervalSince1970 }
+                        }
+                        if let year = Int(raw.prefix(4)), year >= 1970, year <= 2100 {
+                            var comp = DateComponents()
+                            comp.year = year
+                            comp.month = 1
+                            comp.day = 1
+                            return Calendar.current.date(from: comp)?.timeIntervalSince1970 ?? 0
+                        }
+                        return 0
+                    }
+                    
+                    var wrapped = pool.map { data in
+                        SortedWrapper(
+                            identity: data.identity,
+                            timestamp: (sort == .recent || sort == .oldest) ? extractTimestamp(for: data.releaseDate, variants: data.variantDates) : 0,
+                            titleForSort: data.title,
+                            isFavorite: data.isFavorite
+                        )
+                    }
+                    
+                    guard !Task.isCancelled else { return [] }
+                    
+                    switch sort {
+                    case .nameAsc:
+                        wrapped.sort { $0.titleForSort.localizedCaseInsensitiveCompare($1.titleForSort) == .orderedAscending }
+                    case .nameDesc:
+                        wrapped.sort { $0.titleForSort.localizedCaseInsensitiveCompare($1.titleForSort) == .orderedDescending }
+                    case .recent:
+                        wrapped.sort {
+                            if $0.timestamp != $1.timestamp {
+                                if $0.timestamp == 0 { return false }
+                                if $1.timestamp == 0 { return true }
+                                return $0.timestamp > $1.timestamp
+                            }
+                            return $0.titleForSort.localizedCaseInsensitiveCompare($1.titleForSort) == .orderedAscending
+                        }
+                    case .oldest:
+                        wrapped.sort {
+                            if $0.timestamp != $1.timestamp {
+                                if $0.timestamp == 0 { return false }
+                                if $1.timestamp == 0 { return true }
+                                return $0.timestamp < $1.timestamp
+                            }
+                            return $0.titleForSort.localizedCaseInsensitiveCompare($1.titleForSort) == .orderedAscending
+                        }
+                    case .favorites:
+                        wrapped.sort {
+                            if $0.isFavorite != $1.isFavorite { return $0.isFavorite && !$1.isFavorite }
+                            return $0.titleForSort.localizedCaseInsensitiveCompare($1.titleForSort) == .orderedAscending
+                        }
+                    }
+                    
+                    guard !Task.isCancelled else { return [] }
+                    
+                    return wrapped.map { $0.identity }
+                }.value
+                
+                guard !Task.isCancelled else { return }
+                
+                let finalGames = sortedIdentities.compactMap { gameDictionary[$0] }
+                self.displayedGames = finalGames
+                self.store.load(from: finalGames)
+                self.isProcessing = false
             }
-            .onChange(of: sortOption) { _, _ in
-                store.load(from: filteredAndSortedGames)
-            }
-            .onChange(of: filteredAndSortedGames.map(CatalogSelectionStore.gameIdentity)) { _, _ in
-                store.load(from: filteredAndSortedGames)
+            .onChange(of: displayedGames.map(CatalogSelectionStore.gameIdentity)) { _, _ in
+                store.load(from: displayedGames)
             }
 
             LibrarySidePanel(
