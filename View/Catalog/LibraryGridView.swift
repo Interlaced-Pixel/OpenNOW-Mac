@@ -125,6 +125,7 @@ struct LibraryGridView: View {
                                     .id(identity)
                                 }
                             }
+                            .padding(.top, 16)
                             .padding(.horizontal, 40)
                             .padding(.bottom, 60)
                         }

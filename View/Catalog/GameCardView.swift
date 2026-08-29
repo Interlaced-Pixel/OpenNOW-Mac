@@ -15,23 +15,6 @@ struct GameCardView: View {
                 CatalogRemoteImage(url: URL(string: game.bestStorePickerPosterURL), contentMode: .fill)
                     .frame(width: Self.cardWidth, height: Self.cardHeight)
                     .clipped()
-
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.90)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-
-                Text(game.title.isEmpty ? "Untitled game" : game.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-                    .shadow(color: .black, radius: 4)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 12)
-                    .frame(width: Self.cardWidth)
             }
             .frame(width: Self.cardWidth, height: Self.cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
