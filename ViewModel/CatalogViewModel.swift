@@ -260,6 +260,50 @@ final class CatalogViewModel: ObservableObject {
         return games
     }
 
+    var featuredGames: [CatalogGameObject] {
+        var games: [CatalogGameObject] = []
+        var seen = Set<String>()
+
+        func append(_ game: CatalogGameObject) {
+            let key = Self.identity(for: game)
+            guard !key.isEmpty, seen.insert(key).inserted else { return }
+            games.append(game)
+        }
+
+        for panel in marqueePanels {
+            for section in panel.sections {
+                for game in section.games {
+                    append(game)
+                }
+            }
+        }
+
+        if games.isEmpty {
+            for panel in mainPanels {
+                for section in panel.sections {
+                    let title = section.title.lowercased()
+                    if title.contains("featured") || title.contains("spotlight") || title.contains("popular") || title.contains("marquee") {
+                        for game in section.games {
+                            append(game)
+                        }
+                    }
+                }
+            }
+        }
+
+        if games.isEmpty {
+            for panel in mainPanels {
+                for section in panel.sections {
+                    for game in section.games {
+                        append(game)
+                    }
+                }
+            }
+        }
+
+        return games
+    }
+
     var catalogSections: [CatalogSectionModel] {
         if selectedCatalogDestination == .library, !isBrowseMode {
             return libraryGames.isEmpty ? [] : [CatalogSectionModel(id: "my-library", title: "My Library", games: libraryGames, kind: .library)]
@@ -268,14 +312,17 @@ final class CatalogViewModel: ObservableObject {
             let games = favoriteGames
             return games.isEmpty ? [] : [CatalogSectionModel(id: "remote-favorites", title: "My Favorites", games: games, kind: .panel)]
         }
+        if selectedCatalogDestination == .home, !isBrowseMode {
+            let games = featuredGames
+            return games.isEmpty ? [] : [CatalogSectionModel(id: "featured-games", title: "Featured Games", games: games, kind: .panel)]
+        }
+
+        if isBrowseMode, !catalogGames.isEmpty {
+            return [CatalogSectionModel(id: "catalog-results", title: "Search Results", games: catalogGames, kind: .catalog)]
+        }
 
         var sections: [CatalogSectionModel] = []
         var seenTitles = Set<String>()
-        let remoteFavoriteGames = favoriteGames
-        if !isBrowseMode, !remoteFavoriteGames.isEmpty {
-            sections.append(CatalogSectionModel(id: "remote-favorites", title: "My Favorites", games: remoteFavoriteGames, kind: .panel))
-            seenTitles.insert("My Favorites")
-        }
         for panel in mainPanels {
             for section in panel.sections where !section.games.isEmpty {
                 let title = section.title.isEmpty ? panel.title : section.title
@@ -295,13 +342,6 @@ final class CatalogViewModel: ObservableObject {
                     isLoadingFullList: loadingFullSectionIds.contains(sectionId)
                 ))
             }
-        }
-        if isBrowseMode, !catalogGames.isEmpty {
-            sections.insert(CatalogSectionModel(id: "catalog-results", title: "Search Results", games: catalogGames, kind: .catalog), at: 0)
-        }
-        if !isBrowseMode, !libraryGames.isEmpty {
-            let insertionIndex = sections.isEmpty ? 0 : min(sections.count, 1)
-            sections.insert(CatalogSectionModel(id: "my-library", title: "My Library", games: libraryGames, kind: .library), at: insertionIndex)
         }
         return Array(sections.prefix(10))
     }
