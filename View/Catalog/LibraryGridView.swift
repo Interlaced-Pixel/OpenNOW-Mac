@@ -254,6 +254,20 @@ private struct LibrarySidePanel: View {
     let play: () -> Void
     let toggleFavorite: () -> Void
 
+    private var selectedVariantIndex: Int {
+        guard let game else { return 0 }
+        if viewModel.selectedGame?.id == game.id, viewModel.selectedVariantIndex >= 0 {
+            return min(viewModel.selectedVariantIndex, max(game.variants.count - 1, 0))
+        }
+        return CatalogViewModel.preferredVariantIndex(for: game)
+    }
+
+    private var activeVariant: CatalogGameVariantObject? {
+        guard let game, !game.variants.isEmpty else { return nil }
+        let idx = selectedVariantIndex
+        return game.variants.indices.contains(idx) ? game.variants[idx] : game.variants.first
+    }
+
     var body: some View {
         if let game = game {
             VStack(spacing: 0) {
@@ -273,11 +287,8 @@ private struct LibrarySidePanel: View {
                             nvidiaTechSection(game: game)
                         }
 
-                        // Available Stores / Platforms
-                        let stores = storeItems(for: game)
-                        if !stores.isEmpty {
-                            storesSection(stores: stores)
-                        }
+                        // Available Platforms / Switchable Game Variants
+                        storesSection(game: game)
 
                         // Genres & Categories
                         if !game.genres.isEmpty {
@@ -290,7 +301,7 @@ private struct LibrarySidePanel: View {
                         }
 
                         // Supported Languages
-                        let languages = supportedLanguages(for: game)
+                        let languages = normalizedSupportedLanguages(for: game)
                         if !languages.isEmpty {
                             languagesSection(languages: languages)
                         }
@@ -308,11 +319,16 @@ private struct LibrarySidePanel: View {
 
                 // Bottom Pinned Actions
                 VStack(spacing: 10) {
+                    let isLaunchable = activeVariant?.inLibrary == true || activeVariant?.librarySelected == true || game.isFreeToPlay || game.variants.isEmpty || game.cardPrimaryActionIsLaunchable
                     let actionText = game.isLaunchPatching ? "Queue"
-                        : (game.cardPrimaryActionIsLaunchable ? "Play" : "Mark Owned")
+                        : (isLaunchable ? "Play" : "Mark Owned")
                     let actionIcon = game.isLaunchPatching ? "wrench.and.screwdriver.fill" : "play.fill"
 
-                    Button(action: play) {
+                    Button(action: {
+                        viewModel.selectGame(game)
+                        viewModel.focusGameStoreVariant(at: selectedVariantIndex)
+                        play()
+                    }) {
                         HStack(spacing: 8) {
                             Image(systemName: actionIcon)
                             Text(actionText)
@@ -396,7 +412,7 @@ private struct LibrarySidePanel: View {
 
     @ViewBuilder
     private func badgesRow(game: CatalogGameObject) -> some View {
-        let hasInLibrary = game.isInLibrary || game.variants.contains { $0.inLibrary || $0.librarySelected }
+        let hasInLibrary = activeVariant?.inLibrary == true || activeVariant?.librarySelected == true || game.isInLibrary
         let hasFree = game.isFreeToPlay
         let hasPatching = game.isLaunchPatching
         let hasTier = !game.membershipTierLabel.isEmpty
@@ -482,18 +498,49 @@ private struct LibrarySidePanel: View {
         }
     }
 
-    private func storesSection(stores: [(title: String, isOwned: Bool, icon: String)]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func storesSection(game: CatalogGameObject) -> some View {
+        let platforms = platformItems(for: game)
+        return VStack(alignment: .leading, spacing: 10) {
             SidePanelSectionHeader(icon: "cart.fill", title: "Available Platforms")
 
             FlowLayout(spacing: 8) {
-                ForEach(stores, id: \.title) { store in
-                    SidePanelChip(
-                        icon: store.icon,
-                        text: store.isOwned ? "\(store.title) (Owned)" : store.title,
-                        tintColor: store.isOwned ? Color.blue.opacity(0.2) : Color.white.opacity(0.08),
-                        foregroundColor: store.isOwned ? Color(red: 0.5, green: 0.8, blue: 1.0) : .white.opacity(0.85)
-                    )
+                ForEach(platforms) { platform in
+                    Button {
+                        viewModel.selectGame(game)
+                        viewModel.selectGameStoreVariant(at: platform.variantIndex)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: platform.icon)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(platform.isSelected ? .white : (platform.isOwned ? Color(red: 0.5, green: 0.8, blue: 1.0) : .white.opacity(0.7)))
+
+                            Text(platform.isOwned ? "\(platform.title) (Owned)" : platform.title)
+                                .font(.system(size: 11, weight: platform.isSelected ? .bold : .medium))
+                                .foregroundStyle(platform.isSelected ? .white : (platform.isOwned ? Color(red: 0.7, green: 0.9, blue: 1.0) : .white.opacity(0.85)))
+
+                            if platform.isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            platform.isSelected
+                                ? Color(red: 0.0, green: 0.48, blue: 1.0)
+                                : (platform.isOwned ? Color.blue.opacity(0.2) : Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(
+                                    platform.isSelected ? Color.white.opacity(0.8) : (platform.isOwned ? Color.blue.opacity(0.4) : Color.white.opacity(0.12)),
+                                    lineWidth: platform.isSelected ? 1.5 : 1
+                                )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -536,14 +583,26 @@ private struct LibrarySidePanel: View {
         }
     }
 
-    private func languagesSection(languages: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func languagesSection(languages: [NormalizedLanguage]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             SidePanelSectionHeader(icon: "globe", title: "Supported Languages")
 
-            Text(languages.joined(separator: ", "))
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
+            FlowLayout(spacing: 6) {
+                ForEach(languages) { lang in
+                    HStack(spacing: 5) {
+                        Text(lang.flag)
+                            .font(.system(size: 11))
+                        Text(lang.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.88))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+            }
         }
     }
 
@@ -602,28 +661,41 @@ private struct LibrarySidePanel: View {
         return items
     }
 
-    private func storeItems(for game: CatalogGameObject) -> [(title: String, isOwned: Bool, icon: String)] {
-        var result: [(title: String, isOwned: Bool, icon: String)] = []
-        var seen = Set<String>()
+    private func platformItems(for game: CatalogGameObject) -> [GamePlatformItem] {
+        var items: [GamePlatformItem] = []
+        let selectedIndex = selectedVariantIndex
 
         if !game.variants.isEmpty {
-            for variant in game.variants {
+            for (index, variant) in game.variants.enumerated() {
                 let name = variant.appStoreLabel.isEmpty ? variant.appStore : variant.appStoreLabel
                 guard !name.isEmpty else { continue }
-                let key = name.lowercased()
-                guard seen.insert(key).inserted else { continue }
                 let isOwned = variant.inLibrary || variant.librarySelected
-                result.append((title: cleanStoreName(name), isOwned: isOwned, icon: storeIconName(for: key)))
+                let isSelected = (index == selectedIndex)
+                let storeKey = variant.appStore.lowercased()
+                items.append(GamePlatformItem(
+                    id: "\(variant.id)_\(index)",
+                    variantIndex: index,
+                    title: cleanStoreName(name),
+                    isOwned: isOwned,
+                    isSelected: isSelected,
+                    icon: storeIconName(for: storeKey)
+                ))
             }
         } else {
-            for store in game.availableStores {
+            for (index, store) in game.availableStores.enumerated() {
                 guard !store.isEmpty else { continue }
-                let key = store.lowercased()
-                guard seen.insert(key).inserted else { continue }
-                result.append((title: cleanStoreName(store), isOwned: game.isInLibrary, icon: storeIconName(for: key)))
+                let storeKey = store.lowercased()
+                items.append(GamePlatformItem(
+                    id: "\(store)_\(index)",
+                    variantIndex: index,
+                    title: cleanStoreName(store),
+                    isOwned: game.isInLibrary,
+                    isSelected: (index == 0),
+                    icon: storeIconName(for: storeKey)
+                ))
             }
         }
-        return result
+        return items
     }
 
     private func cleanStoreName(_ raw: String) -> String {
@@ -644,17 +716,79 @@ private struct LibrarySidePanel: View {
         return "cart.fill"
     }
 
-    private func supportedLanguages(for game: CatalogGameObject) -> [String] {
-        var langs: [String] = []
-        var seen = Set<String>()
-        for variant in game.variants {
-            for lang in variant.supportedLanguages {
-                let cleaned = lang.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !cleaned.isEmpty, seen.insert(cleaned.lowercased()).inserted else { continue }
-                langs.append(cleaned)
+    private func normalizedSupportedLanguages(for game: CatalogGameObject) -> [NormalizedLanguage] {
+        var rawLanguages: [String] = []
+        if let variant = activeVariant, !variant.supportedLanguages.isEmpty {
+            rawLanguages = variant.supportedLanguages
+        } else {
+            for v in game.variants {
+                rawLanguages.append(contentsOf: v.supportedLanguages)
             }
         }
-        return langs
+
+        var result: [NormalizedLanguage] = []
+        var seen = Set<String>()
+
+        for raw in rawLanguages {
+            let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "-", with: "_")
+            guard !clean.isEmpty else { continue }
+            let (name, flag) = parseLanguage(clean)
+            guard seen.insert(name.lowercased()).inserted else { continue }
+            result.append(NormalizedLanguage(id: clean, name: name, flag: flag))
+        }
+        return result
+    }
+
+    private func parseLanguage(_ clean: String) -> (name: String, flag: String) {
+        let components = clean.split(separator: "_")
+        let langCode = String(components.first ?? "").lowercased()
+        let regionCode = components.count > 1 ? String(components[1]).uppercased() : ""
+
+        switch (langCode, regionCode) {
+        case ("en", "US"): return ("English (US)", "🇺🇸")
+        case ("en", "GB"), ("en", "UK"): return ("English (UK)", "🇬🇧")
+        case ("en", _): return ("English", "🇺🇸")
+        case ("es", "MX"), ("es", "419"): return ("Spanish (Latin America)", "🇲🇽")
+        case ("es", "ES"): return ("Spanish (Spain)", "🇪🇸")
+        case ("es", _): return ("Spanish", "🇪🇸")
+        case ("pt", "BR"): return ("Portuguese (Brazil)", "🇧🇷")
+        case ("pt", "PT"), ("pt", _): return ("Portuguese", "🇵🇹")
+        case ("zh", "TW"), ("zh", "HK"): return ("Traditional Chinese", "🇹🇼")
+        case ("zh", "CN"), ("zh", "HANS"), ("zh", "SG"): return ("Simplified Chinese", "🇨🇳")
+        case ("zh", _): return ("Chinese", "🇨🇳")
+        case ("fr", "FR"), ("fr", "CA"), ("fr", _): return ("French", "🇫🇷")
+        case ("de", "DE"), ("de", "AT"), ("de", _): return ("German", "🇩🇪")
+        case ("it", "IT"), ("it", _): return ("Italian", "🇮🇹")
+        case ("ja", "JP"), ("ja", _): return ("Japanese", "🇯🇵")
+        case ("ko", "KR"), ("ko", _): return ("Korean", "🇰🇷")
+        case ("ru", "RU"), ("ru", _): return ("Russian", "🇷🇺")
+        case ("pl", "PL"), ("pl", _): return ("Polish", "🇵🇱")
+        case ("tr", "TR"), ("tr", _): return ("Turkish", "🇹🇷")
+        case ("ar", "SA"), ("ar", "AE"), ("ar", _): return ("Arabic", "🇸🇦")
+        case ("nl", "NL"), ("nl", "BE"), ("nl", _): return ("Dutch", "🇳🇱")
+        case ("sv", "SE"), ("sv", _): return ("Swedish", "🇸🇪")
+        case ("da", "DK"), ("da", _): return ("Danish", "🇩🇰")
+        case ("fi", "FI"), ("fi", _): return ("Finnish", "🇫🇮")
+        case ("no", "NO"), ("nb", _), ("nn", _): return ("Norwegian", "🇳🇴")
+        case ("cs", "CZ"), ("cs", _): return ("Czech", "🇨🇿")
+        case ("hu", "HU"), ("hu", _): return ("Hungarian", "🇭🇺")
+        case ("el", "GR"), ("el", _): return ("Greek", "🇬🇷")
+        case ("th", "TH"), ("th", _): return ("Thai", "🇹🇭")
+        case ("vi", "VN"), ("vi", _): return ("Vietnamese", "🇻🇳")
+        case ("id", "ID"), ("id", _): return ("Indonesian", "🇮🇩")
+        case ("ro", "RO"), ("ro", _): return ("Romanian", "🇷🇴")
+        case ("uk", "UA"), ("uk", _): return ("Ukrainian", "🇺🇦")
+        case ("he", "IL"), ("he", _): return ("Hebrew", "🇮🇱")
+        default:
+            let locale = Locale(identifier: "en_US")
+            if let localized = locale.localizedString(forIdentifier: clean) {
+                return (localized, "🌐")
+            }
+            if let localized = locale.localizedString(forLanguageCode: langCode) {
+                return (localized, "🌐")
+            }
+            return (clean.replacingOccurrences(of: "_", with: " ").capitalized, "🌐")
+        }
     }
 
     private func ratingDisplay(for game: CatalogGameObject) -> (title: String, descriptors: [String])? {
@@ -671,7 +805,10 @@ private struct LibrarySidePanel: View {
     }
 
     private func hasCloudSaves(for game: CatalogGameObject) -> Bool {
-        game.variants.contains { $0.cloudSaveSupported } || game.featureLabels.contains { $0.localizedCaseInsensitiveContains("cloud") }
+        if let variant = activeVariant {
+            return variant.cloudSaveSupported || game.featureLabels.contains { $0.localizedCaseInsensitiveContains("cloud") }
+        }
+        return game.variants.contains { $0.cloudSaveSupported } || game.featureLabels.contains { $0.localizedCaseInsensitiveContains("cloud") }
     }
 
     private func playerModeBadges(for game: CatalogGameObject) -> [(title: String, icon: String)] {
@@ -697,7 +834,22 @@ private struct LibrarySidePanel: View {
     }
 }
 
-// MARK: - UI Components
+// MARK: - Models & UI Components
+
+private struct GamePlatformItem: Identifiable {
+    let id: String
+    let variantIndex: Int
+    let title: String
+    let isOwned: Bool
+    let isSelected: Bool
+    let icon: String
+}
+
+private struct NormalizedLanguage: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let flag: String
+}
 
 private struct SidePanelSectionHeader: View {
     let icon: String
