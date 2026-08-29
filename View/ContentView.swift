@@ -113,16 +113,20 @@ private struct WindowTitleConfigurator: NSViewRepresentable {
 
     @MainActor
     final class Coordinator {
+        nonisolated static let autosaveName: NSWindow.FrameAutosaveName = "PixelNOWMainWindow"
         private weak var window: NSWindow?
         private var configuredWindow: ObjectIdentifier?
         private var title = ""
+        private var observerTokens: [NSObjectProtocol] = []
 
         func attach(_ window: NSWindow?) {
             guard self.window !== window else { return }
+            removeObservers()
             self.window = window
             configuredWindow = nil
             guard let window else { return }
             configure(window)
+            addObservers(for: window)
             update(title: title)
         }
 
@@ -136,6 +140,7 @@ private struct WindowTitleConfigurator: NSViewRepresentable {
         }
 
         func detach() {
+            removeObservers()
             window = nil
             configuredWindow = nil
         }
@@ -155,6 +160,35 @@ private struct WindowTitleConfigurator: NSViewRepresentable {
             if #available(macOS 11.0, *) {
                 window.titlebarSeparatorStyle = .automatic
             }
+
+            window.setFrameAutosaveName(Self.autosaveName)
+            if !window.setFrameUsingName(Self.autosaveName) {
+                window.center()
+            }
+        }
+
+        private func addObservers(for window: NSWindow) {
+            let notificationCenter = NotificationCenter.default
+            let notifications: [Notification.Name] = [
+                NSWindow.didMoveNotification,
+                NSWindow.didResizeNotification,
+                NSWindow.didExitFullScreenNotification,
+            ]
+            let autosaveName = Self.autosaveName
+            observerTokens = notifications.map { name in
+                notificationCenter.addObserver(forName: name, object: window, queue: .main) { [weak window] _ in
+                    guard let window, !window.styleMask.contains(.fullScreen) else { return }
+                    window.saveFrame(usingName: autosaveName)
+                }
+            }
+        }
+
+        private func removeObservers() {
+            let notificationCenter = NotificationCenter.default
+            for token in observerTokens {
+                notificationCenter.removeObserver(token)
+            }
+            observerTokens = []
         }
     }
 
