@@ -36,7 +36,7 @@ struct StartupLoadingView: View {
                             Text(statusText(progress))
                                 .font(.nvidia(size: compact ? 9 : 10, weight: .bold))
                                 .tracking(2.4)
-                                .foregroundStyle(Color.pixelNowGreen.opacity(0.86))
+                                .foregroundStyle(Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.86))
                         }
                         .opacity(startupSmoothStep(0.16, 0.38, progress))
                         .offset(y: compact ? 26 : 36)
@@ -80,8 +80,8 @@ private struct StartupBackdrop: View {
 
             RadialGradient(
                 stops: [
-                    .init(color: Color.pixelNowGreen.opacity(0.22 * reveal), location: 0),
-                    .init(color: Color.pixelNowGreen.opacity(0.07 * reveal), location: 0.34),
+                    .init(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.22 * reveal), location: 0),
+                    .init(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.07 * reveal), location: 0.34),
                     .init(color: .clear, location: 0.78)
                 ],
                 center: UnitPoint(x: 0.5, y: 0.46),
@@ -95,9 +95,9 @@ private struct StartupBackdrop: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear, location: 0),
-                            .init(color: Color.pixelNowGreen.opacity(0.10 * reveal), location: 0.48),
-                            .init(color: Color.pixelNowGreen.opacity(0.34 * reveal), location: 0.50),
-                            .init(color: Color.pixelNowGreen.opacity(0.10 * reveal), location: 0.52),
+                            .init(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.10 * reveal), location: 0.48),
+                            .init(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.34 * reveal), location: 0.50),
+                            .init(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.10 * reveal), location: 0.52),
                             .init(color: .clear, location: 1)
                         ],
                         startPoint: .leading,
@@ -137,13 +137,13 @@ private struct StartupMark: View {
                 let animatedOpacity = reduceMotion ? 0.12 : (1 - phase) * 0.20
 
                 RoundedRectangle(cornerRadius: size * 0.16, style: .continuous)
-                    .stroke(Color.pixelNowGreen.opacity(animatedOpacity * reveal), lineWidth: index == 0 ? 1.2 : 0.7)
+                    .stroke(Color(red: 0.0, green: 0.85, blue: 1.0).opacity(animatedOpacity * reveal), lineWidth: index == 0 ? 1.2 : 0.7)
                     .frame(width: size * 1.28, height: size * 0.72)
                     .scaleEffect(CGFloat(animatedScale))
             }
 
             RoundedRectangle(cornerRadius: size * 0.15, style: .continuous)
-                .fill(Color.pixelNowGreen.opacity(0.10 * reveal))
+                .fill(Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.10 * reveal))
                 .frame(width: size * 1.18, height: size * 0.66)
                 .blur(radius: compact ? 26 : 38)
 
@@ -154,7 +154,7 @@ private struct StartupMark: View {
                 .scaleEffect(CGFloat(0.82 + reveal * 0.18 + settled * 0.025))
                 .opacity(reveal)
                 .blur(radius: CGFloat((1 - reveal) * 9))
-                .shadow(color: Color.pixelNowGreen.opacity(0.68), radius: compact ? 22 : 34)
+                .shadow(color: Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.68), radius: compact ? 22 : 34)
                 .shadow(color: .white.opacity(0.12), radius: 8)
         }
         .frame(width: size * 1.8, height: size)
@@ -177,14 +177,14 @@ private struct StartupSignalRail: View {
                     .frame(height: 1)
 
                 Capsule()
-                    .fill(Color.pixelNowGreen.opacity(0.62))
+                    .fill(Color(red: 0.0, green: 0.85, blue: 1.0).opacity(0.62))
                     .frame(width: completedWidth, height: 1)
 
                 Circle()
-                    .fill(Color.pixelNowGreen)
+                    .fill(Color(red: 0.0, green: 0.85, blue: 1.0))
                     .frame(width: 4, height: 4)
                     .offset(x: signalX - 2)
-                    .shadow(color: Color.pixelNowGreen, radius: 7)
+                    .shadow(color: Color(red: 0.0, green: 0.85, blue: 1.0), radius: 7)
             }
             .frame(maxHeight: .infinity)
         }
