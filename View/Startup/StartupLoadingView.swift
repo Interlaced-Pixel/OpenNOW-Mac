@@ -147,7 +147,8 @@ private struct StartupMark: View {
                 .frame(width: size * 1.18, height: size * 0.66)
                 .blur(radius: compact ? 26 : 38)
 
-            VendorResourceImage(name: "logo-isolated", fileExtension: "svg")
+            Image("StartupLogo")
+                .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size * 0.62)
                 .scaleEffect(CGFloat(0.82 + reveal * 0.18 + settled * 0.025))
