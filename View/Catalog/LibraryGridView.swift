@@ -21,22 +21,21 @@ struct LibraryGridView: View {
 
     var filteredAndSortedGames: [CatalogGameObject] {
         var result = store.games
-        let isSearching = !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        
-        if isSearching {
-            result = result.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
-        } else {
-            result = result.filter { !$0.releaseDate.isEmpty }
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            result = result.filter { $0.title.localizedCaseInsensitiveContains(trimmedQuery) }
         }
-        
+
         switch sortOption {
         case .usageLatest:
             result.sort {
                 if $0.isInLibrary != $1.isInLibrary {
                     return $0.isInLibrary && !$1.isInLibrary
                 }
-                if $0.releaseDate != $1.releaseDate {
-                    return $0.releaseDate > $1.releaseDate
+                let d0 = $0.releaseDate.isEmpty ? "0000" : $0.releaseDate
+                let d1 = $1.releaseDate.isEmpty ? "0000" : $1.releaseDate
+                if d0 != d1 {
+                    return d0 > d1
                 }
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
@@ -59,11 +58,7 @@ struct LibraryGridView: View {
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         }
-        
-        if !isSearching {
-            return Array(result.prefix(25))
-        }
-        
+
         return result
     }
 
@@ -112,23 +107,32 @@ struct LibraryGridView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 24) {
-                            ForEach(filteredAndSortedGames, id: \.id) { game in
-                            let identity = CatalogSelectionStore.gameIdentity(game)
-                            let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity
-                            GameCardView(
-                                game: game,
-                                isSelected: isSelected,
-                                select: { store.selectGame(withId: identity) },
-                                launch: { play(game) }
-                            )
-                            .id(identity)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 24) {
+                                ForEach(filteredAndSortedGames, id: \.id) { game in
+                                    let identity = CatalogSelectionStore.gameIdentity(game)
+                                    let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity
+                                    GameCardView(
+                                        game: game,
+                                        isSelected: isSelected,
+                                        select: { store.selectGame(withId: identity) },
+                                        launch: { play(game) }
+                                    )
+                                    .id(identity)
+                                }
+                            }
+                            .padding(.horizontal, 40)
+                            .padding(.bottom, 60)
+                        }
+                        .onChange(of: store.selectedIndex) { _, newIndex in
+                            guard store.games.indices.contains(newIndex) else { return }
+                            let identity = CatalogSelectionStore.gameIdentity(store.games[newIndex])
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(identity, anchor: .center)
+                            }
                         }
                     }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 60)
-                }
                 }
             }
             .frame(maxWidth: .infinity)
