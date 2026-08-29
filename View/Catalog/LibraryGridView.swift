@@ -1,11 +1,12 @@
 import SwiftUI
 
 enum LibrarySortOption: String, CaseIterable, Identifiable {
-    case usageLatest = "Usage / Latest Release"
     case nameAsc = "Name (A-Z)"
     case nameDesc = "Name (Z-A)"
     case recent = "Recently Released"
     case oldest = "Oldest First"
+    case favorites = "Favorites First"
+
     var id: String { rawValue }
 }
 
@@ -17,7 +18,7 @@ struct LibraryGridView: View {
     let columns = [GridItem(.adaptive(minimum: 200), spacing: 24)]
     
     @State private var searchQuery = ""
-    @State private var sortOption = LibrarySortOption.usageLatest
+    @State private var sortOption = LibrarySortOption.nameAsc
 
     var filteredAndSortedGames: [CatalogGameObject] {
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,39 +39,89 @@ struct LibraryGridView: View {
         }
 
         switch sortOption {
-        case .usageLatest:
-            result.sort {
-                if $0.isInLibrary != $1.isInLibrary {
-                    return $0.isInLibrary && !$1.isInLibrary
-                }
-                let d0 = $0.releaseDate.isEmpty ? "0000" : $0.releaseDate
-                let d1 = $1.releaseDate.isEmpty ? "0000" : $1.releaseDate
-                if d0 != d1 {
-                    return d0 > d1
-                }
-                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-            }
         case .nameAsc:
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case .nameDesc:
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
         case .recent:
             result.sort {
-                let d0 = $0.releaseDate.isEmpty ? "0000" : $0.releaseDate
-                let d1 = $1.releaseDate.isEmpty ? "0000" : $1.releaseDate
-                if d0 != d1 { return d0 > d1 }
+                let t0 = releaseTimestamp(for: $0)
+                let t1 = releaseTimestamp(for: $1)
+                if t0 != t1 {
+                    if t0 == 0 { return false }
+                    if t1 == 0 { return true }
+                    return t0 > t1
+                }
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         case .oldest:
             result.sort {
-                let d0 = $0.releaseDate.isEmpty ? "9999" : $0.releaseDate
-                let d1 = $1.releaseDate.isEmpty ? "9999" : $1.releaseDate
-                if d0 != d1 { return d0 < d1 }
+                let t0 = releaseTimestamp(for: $0)
+                let t1 = releaseTimestamp(for: $1)
+                if t0 != t1 {
+                    if t0 == 0 { return false }
+                    if t1 == 0 { return true }
+                    return t0 < t1
+                }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        case .favorites:
+            result.sort {
+                let f0 = viewModel.isFavorite($0)
+                let f1 = viewModel.isFavorite($1)
+                if f0 != f1 { return f0 && !f1 }
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         }
 
         return result
+    }
+
+    private func releaseTimestamp(for game: CatalogGameObject) -> TimeInterval {
+        var raw = game.releaseDate.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty {
+            for v in game.variants {
+                let vr = v.releaseDate.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !vr.isEmpty {
+                    raw = vr
+                    break
+                }
+            }
+        }
+        guard !raw.isEmpty else { return 0 }
+
+        if let epoch = Double(raw) {
+            return epoch > 10_000_000_000 ? epoch / 1000.0 : epoch
+        }
+
+        let isoFull = ISO8601DateFormatter()
+        isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = isoFull.date(from: raw) { return d.timeIntervalSince1970 }
+
+        let isoStandard = ISO8601DateFormatter()
+        isoStandard.formatOptions = [.withInternetDateTime]
+        if let d = isoStandard.date(from: raw) { return d.timeIntervalSince1970 }
+
+        let isoDate = ISO8601DateFormatter()
+        isoDate.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        if let d = isoDate.date(from: raw) { return d.timeIntervalSince1970 }
+
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in ["yyyy-MM-dd", "yyyy/MM/dd", "MM/dd/yyyy", "yyyy-MM", "yyyy"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: raw) { return d.timeIntervalSince1970 }
+        }
+
+        if let year = Int(raw.prefix(4)), year >= 1970, year <= 2100 {
+            var comp = DateComponents()
+            comp.year = year
+            comp.month = 1
+            comp.day = 1
+            return Calendar.current.date(from: comp)?.timeIntervalSince1970 ?? 0
+        }
+
+        return 0
     }
 
     var body: some View {
@@ -103,7 +154,7 @@ struct LibraryGridView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(width: 160)
+                    .frame(width: 175)
                 }
                 .padding(.horizontal, 40)
                 .padding(.top, 90)
@@ -143,7 +194,7 @@ struct LibraryGridView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVGrid(columns: columns, spacing: 24) {
-                                ForEach(filteredAndSortedGames, id: \.id) { game in
+                                ForEach(filteredAndSortedGames, id: \.catalogIdentity) { game in
                                     let identity = CatalogSelectionStore.gameIdentity(game)
                                     let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity
                                     GameCardView(
@@ -170,6 +221,9 @@ struct LibraryGridView: View {
             }
             .frame(maxWidth: .infinity)
             .onAppear {
+                store.load(from: filteredAndSortedGames)
+            }
+            .onChange(of: sortOption) { _, _ in
                 store.load(from: filteredAndSortedGames)
             }
             .onChange(of: filteredAndSortedGames.map(CatalogSelectionStore.gameIdentity)) { _, _ in
