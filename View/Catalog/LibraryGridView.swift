@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum LibrarySortOption: String, CaseIterable, Identifiable {
+    case usageLatest = "Usage / Latest Release"
     case nameAsc = "Name (A-Z)"
     case nameDesc = "Name (Z-A)"
     case recent = "Recently Released"
@@ -16,24 +17,51 @@ struct LibraryGridView: View {
     let columns = [GridItem(.adaptive(minimum: 200), spacing: 24)]
     
     @State private var searchQuery = ""
-    @State private var sortOption = LibrarySortOption.nameAsc
+    @State private var sortOption = LibrarySortOption.usageLatest
 
     var filteredAndSortedGames: [CatalogGameObject] {
         var result = store.games
+        let isSearching = !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         
-        if !searchQuery.isEmpty {
+        if isSearching {
             result = result.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
+        } else {
+            result = result.filter { !$0.releaseDate.isEmpty }
         }
         
         switch sortOption {
+        case .usageLatest:
+            result.sort {
+                if $0.isInLibrary != $1.isInLibrary {
+                    return $0.isInLibrary && !$1.isInLibrary
+                }
+                if $0.releaseDate != $1.releaseDate {
+                    return $0.releaseDate > $1.releaseDate
+                }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
         case .nameAsc:
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case .nameDesc:
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedDescending }
         case .recent:
-            result.sort { $0.releaseDate > $1.releaseDate }
+            result.sort {
+                let d0 = $0.releaseDate.isEmpty ? "0000" : $0.releaseDate
+                let d1 = $1.releaseDate.isEmpty ? "0000" : $1.releaseDate
+                if d0 != d1 { return d0 > d1 }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
         case .oldest:
-            result.sort { $0.releaseDate < $1.releaseDate }
+            result.sort {
+                let d0 = $0.releaseDate.isEmpty ? "9999" : $0.releaseDate
+                let d1 = $1.releaseDate.isEmpty ? "9999" : $1.releaseDate
+                if d0 != d1 { return d0 < d1 }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        }
+        
+        if !isSearching {
+            return Array(result.prefix(25))
         }
         
         return result
@@ -68,9 +96,25 @@ struct LibraryGridView: View {
                 .padding(.top, 90)
                 .padding(.bottom, 20)
 
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 24) {
-                        ForEach(filteredAndSortedGames, id: \.id) { game in
+                if store.games.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer()
+                        ProgressView().controlSize(.large)
+                        Text("Loading catalog...").font(.headline).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if filteredAndSortedGames.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No Games Found").font(.title2).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 24) {
+                            ForEach(filteredAndSortedGames, id: \.id) { game in
                             let identity = CatalogSelectionStore.gameIdentity(game)
                             let isSelected = store.selectedGame.map(CatalogSelectionStore.gameIdentity) == identity
                             GameCardView(
@@ -84,6 +128,7 @@ struct LibraryGridView: View {
                     }
                     .padding(.horizontal, 40)
                     .padding(.bottom, 60)
+                }
                 }
             }
             .frame(maxWidth: .infinity)

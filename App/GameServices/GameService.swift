@@ -313,7 +313,7 @@ final class GameService: @unchecked Sendable {
                 var result = CatalogBrowseResult()
                 result.selectedSortId = selectedSort.id
                 result.sortOptions = [selectedSort]
-                result.selectedFilterIds = [Self.libraryCatalogFilterId]
+                result.selectedFilterIds = []
                 let catalogCacheKey = GameDataCache.shared.catalogKey(
                     accountIdentifier: accountIdentifier,
                     searchQuery: "",
@@ -323,20 +323,28 @@ final class GameService: @unchecked Sendable {
                     locale: locale,
                     providerStreamingBaseUrl: providerBaseUrl,
                     vpcId: resolvedVpcId
-                )
-                self.fetchCatalogPages(
-                    baseResult: result,
-                    query: Self.catalogQuery,
-                    vpcId: resolvedVpcId,
-                    locale: locale,
-                    sortString: selectedSort.orderBy,
-                    fetchCount: 200,
-                    searchString: "",
-                    filters: Self.libraryCatalogFilter,
-                    catalogCacheKey: catalogCacheKey,
-                    deliveredCachedResult: AtomicFlag()
-                ) { [weak self] success, browseResult, error in
-                    self?.dispatchCatalog(completion, success, browseResult.games, error)
+                ) + "_v6"
+                let baseResult = result
+                GameDataCache.shared.loadCatalogAsync(key: catalogCacheKey) { [weak self] cachedResult in
+                    guard let self else { return }
+                    if let cachedResult {
+                        self.dispatchCatalog(completion, true, cachedResult.games, "")
+                        return
+                    }
+                    self.fetchCatalogPages(
+                        baseResult: baseResult,
+                        query: Self.catalogQuery,
+                        vpcId: resolvedVpcId,
+                        locale: locale,
+                        sortString: selectedSort.orderBy,
+                        fetchCount: 200,
+                        searchString: "",
+                        filters: [:],
+                        catalogCacheKey: catalogCacheKey,
+                        deliveredCachedResult: AtomicFlag()
+                    ) { [weak self] success, browseResult, error in
+                        self?.dispatchCatalog(completion, success, browseResult.games, error)
+                    }
                 }
             }
         }
@@ -1004,76 +1012,87 @@ final class GameService: @unchecked Sendable {
         }
         let metadataState = MetadataState()
         let chunks = stride(from: 0, to: appIds.count, by: 40).map { Array(appIds[$0..<min($0 + 40, appIds.count)]) }
-        let group = DispatchGroup()
-        for chunk in chunks {
-            group.enter()
-            fetchAppMetadata(appIds: chunk, vpcId: vpcId) { [weak self] data, _ in
-                if let self, let items = (data?["apps"] as? NSDictionary)?["items"] as? [NSDictionary] {
-                    let itemsBox = NSDictionaryArrayBox(items)
-                    Self.workQueue.async { [itemsBox] in
-                        for item in itemsBox.values {
-                            if let appId = self.safeString(item["id"]) { metadataState.metadataById[appId] = item }
-                        }
-                        group.leave()
-                    }
-                } else {
-                    group.leave()
-                }
-            }
-        }
-        group.notify(queue: Self.workQueue) {
-            let enriched = games.map { game in
-                guard let metadata = metadataState.metadataById[game.uuid] else { return game }
-                var merged = game
-                let metadataGame = self.parseGameItem(metadata)
-                self.mergeMissingStoreMetadata(target: &merged, metadata: metadataGame)
-                if merged.promoTag.isEmpty { merged.promoTag = metadataGame.promoTag }
-                if merged.campaignIds.isEmpty { merged.campaignIds = metadataGame.campaignIds }
-                if merged.skuTags.isEmpty { merged.skuTags = metadataGame.skuTags }
-                if merged.skuPlayabilityText.isEmpty { merged.skuPlayabilityText = metadataGame.skuPlayabilityText }
-                if merged.skuUnplayableDialogHeader.isEmpty { merged.skuUnplayableDialogHeader = metadataGame.skuUnplayableDialogHeader }
-                if merged.skuUnplayableDialogBody.isEmpty { merged.skuUnplayableDialogBody = metadataGame.skuUnplayableDialogBody }
-                if merged.skuUnplayableDialogBodyEcommerceRestricted.isEmpty { merged.skuUnplayableDialogBodyEcommerceRestricted = metadataGame.skuUnplayableDialogBodyEcommerceRestricted }
-                if !merged.isFreeToPlay { merged.isFreeToPlay = metadataGame.isFreeToPlay }
-                if !metadataGame.description.isEmpty { merged.description = metadataGame.description }
-                if merged.shortDescription.isEmpty { merged.shortDescription = metadataGame.shortDescription }
-                if merged.longDescription.isEmpty { merged.longDescription = metadataGame.longDescription }
-                if merged.genres.isEmpty { merged.genres = metadataGame.genres }
-                if merged.featureLabels.isEmpty { merged.featureLabels = metadataGame.featureLabels }
-                if merged.developerName.isEmpty { merged.developerName = metadataGame.developerName }
-                if merged.publisherName.isEmpty { merged.publisherName = metadataGame.publisherName }
-                if merged.releaseDate.isEmpty { merged.releaseDate = metadataGame.releaseDate }
-                if merged.imageUrl.isEmpty { merged.imageUrl = metadataGame.imageUrl }
-                if merged.heroImageUrl.isEmpty { merged.heroImageUrl = metadataGame.heroImageUrl }
-                if !metadataGame.screenshotUrls.isEmpty { merged.screenshotUrls = metadataGame.screenshotUrls }
-                for (key, value) in metadataGame.imageUrlsByType where merged.imageUrlsByType[key] == nil { merged.imageUrlsByType[key] = value }
-                if merged.maxLocalPlayers <= 0 { merged.maxLocalPlayers = metadataGame.maxLocalPlayers }
-                if merged.maxOnlinePlayers <= 0 { merged.maxOnlinePlayers = metadataGame.maxOnlinePlayers }
-                if merged.supportedControls.isEmpty { merged.supportedControls = metadataGame.supportedControls }
-                if merged.contentRatings.isEmpty { merged.contentRatings = metadataGame.contentRatings }
-                if merged.ratingSystemName.isEmpty { merged.ratingSystemName = metadataGame.ratingSystemName }
-                if merged.ratingCategoryKey.isEmpty { merged.ratingCategoryKey = metadataGame.ratingCategoryKey }
-                if merged.ratingCategoryTitle.isEmpty { merged.ratingCategoryTitle = metadataGame.ratingCategoryTitle }
-                if merged.ratingDescriptors.isEmpty { merged.ratingDescriptors = metadataGame.ratingDescriptors }
-                if merged.ratingInteractiveElements.isEmpty { merged.ratingInteractiveElements = metadataGame.ratingInteractiveElements }
-                if merged.ratingImageUrl.isEmpty { merged.ratingImageUrl = metadataGame.ratingImageUrl }
-                if merged.nvidiaTech.isEmpty { merged.nvidiaTech = metadataGame.nvidiaTech }
-                if !merged.displaysOwnRatingDuringGameplay { merged.displaysOwnRatingDuringGameplay = metadataGame.displaysOwnRatingDuringGameplay }
-                if !merged.isFavorited { merged.isFavorited = metadataGame.isFavorited }
-                if merged.patchStatusPrimaryText.isEmpty { merged.patchStatusPrimaryText = metadataGame.patchStatusPrimaryText }
-                if merged.patchStatusSecondaryText.isEmpty { merged.patchStatusSecondaryText = metadataGame.patchStatusSecondaryText }
-                return merged
-            }
-            self.fetchCampaignPromoTags(vpcId: vpcId, locale: Self.currentGFNCatalogLocale()) { tagsByCampaignId in
-                let campaignEnriched = enriched.map { game in
-                    guard game.promoTag.isEmpty else { return game }
+
+        @Sendable func finish() {
+            Self.workQueue.async { [weak self] in
+                let enriched = games.map { game in
+                    guard let metadata = metadataState.metadataById[game.uuid] else { return game }
                     var merged = game
-                    merged.promoTag = game.campaignIds.compactMap { tagsByCampaignId[$0] }.first ?? ""
+                    let metadataGame = self?.parseGameItem(metadata) ?? GameInfo()
+                    self?.mergeMissingStoreMetadata(target: &merged, metadata: metadataGame)
+                    if merged.promoTag.isEmpty { merged.promoTag = metadataGame.promoTag }
+                    if merged.campaignIds.isEmpty { merged.campaignIds = metadataGame.campaignIds }
+                    if merged.skuTags.isEmpty { merged.skuTags = metadataGame.skuTags }
+                    if merged.skuPlayabilityText.isEmpty { merged.skuPlayabilityText = metadataGame.skuPlayabilityText }
+                    if merged.skuUnplayableDialogHeader.isEmpty { merged.skuUnplayableDialogHeader = metadataGame.skuUnplayableDialogHeader }
+                    if merged.skuUnplayableDialogBody.isEmpty { merged.skuUnplayableDialogBody = metadataGame.skuUnplayableDialogBody }
+                    if merged.skuUnplayableDialogBodyEcommerceRestricted.isEmpty { merged.skuUnplayableDialogBodyEcommerceRestricted = metadataGame.skuUnplayableDialogBodyEcommerceRestricted }
+                    if !merged.isFreeToPlay { merged.isFreeToPlay = metadataGame.isFreeToPlay }
+                    if !metadataGame.description.isEmpty { merged.description = metadataGame.description }
+                    if merged.shortDescription.isEmpty { merged.shortDescription = metadataGame.shortDescription }
+                    if merged.longDescription.isEmpty { merged.longDescription = metadataGame.longDescription }
+                    if merged.genres.isEmpty { merged.genres = metadataGame.genres }
+                    if merged.featureLabels.isEmpty { merged.featureLabels = metadataGame.featureLabels }
+                    if merged.developerName.isEmpty { merged.developerName = metadataGame.developerName }
+                    if merged.publisherName.isEmpty { merged.publisherName = metadataGame.publisherName }
+                    if merged.releaseDate.isEmpty { merged.releaseDate = metadataGame.releaseDate }
+                    if merged.imageUrl.isEmpty { merged.imageUrl = metadataGame.imageUrl }
+                    if merged.heroImageUrl.isEmpty { merged.heroImageUrl = metadataGame.heroImageUrl }
+                    if !metadataGame.screenshotUrls.isEmpty { merged.screenshotUrls = metadataGame.screenshotUrls }
+                    for (key, value) in metadataGame.imageUrlsByType where merged.imageUrlsByType[key] == nil { merged.imageUrlsByType[key] = value }
+                    if merged.maxLocalPlayers <= 0 { merged.maxLocalPlayers = metadataGame.maxLocalPlayers }
+                    if merged.maxOnlinePlayers <= 0 { merged.maxOnlinePlayers = metadataGame.maxOnlinePlayers }
+                    if merged.supportedControls.isEmpty { merged.supportedControls = metadataGame.supportedControls }
+                    if merged.contentRatings.isEmpty { merged.contentRatings = metadataGame.contentRatings }
+                    if merged.ratingSystemName.isEmpty { merged.ratingSystemName = metadataGame.ratingSystemName }
+                    if merged.ratingCategoryKey.isEmpty { merged.ratingCategoryKey = metadataGame.ratingCategoryKey }
+                    if merged.ratingCategoryTitle.isEmpty { merged.ratingCategoryTitle = metadataGame.ratingCategoryTitle }
+                    if merged.ratingDescriptors.isEmpty { merged.ratingDescriptors = metadataGame.ratingDescriptors }
+                    if merged.ratingInteractiveElements.isEmpty { merged.ratingInteractiveElements = metadataGame.ratingInteractiveElements }
+                    if merged.ratingImageUrl.isEmpty { merged.ratingImageUrl = metadataGame.ratingImageUrl }
+                    if merged.nvidiaTech.isEmpty { merged.nvidiaTech = metadataGame.nvidiaTech }
+                    if !merged.displaysOwnRatingDuringGameplay { merged.displaysOwnRatingDuringGameplay = metadataGame.displaysOwnRatingDuringGameplay }
+                    if !merged.isFavorited { merged.isFavorited = metadataGame.isFavorited }
+                    if merged.patchStatusPrimaryText.isEmpty { merged.patchStatusPrimaryText = metadataGame.patchStatusPrimaryText }
+                    if merged.patchStatusSecondaryText.isEmpty { merged.patchStatusSecondaryText = metadataGame.patchStatusSecondaryText }
                     return merged
                 }
-                self.enrichRatingMetadata(campaignEnriched, locale: Self.currentGFNCatalogLocale(), completion: completion)
+                if let self = self {
+                    self.fetchCampaignPromoTags(vpcId: vpcId, locale: Self.currentGFNCatalogLocale()) { tagsByCampaignId in
+                        let campaignEnriched = enriched.map { game in
+                            guard game.promoTag.isEmpty else { return game }
+                            var merged = game
+                            merged.promoTag = game.campaignIds.compactMap { tagsByCampaignId[$0] }.first ?? ""
+                            return merged
+                        }
+                        self.enrichRatingMetadata(campaignEnriched, locale: Self.currentGFNCatalogLocale(), completion: completion)
+                    }
+                } else {
+                    completion(enriched)
+                }
             }
         }
+
+        @Sendable func fetchChunk(_ index: Int) {
+            if index >= chunks.count {
+                finish()
+                return
+            }
+            self.fetchAppMetadata(appIds: chunks[index], vpcId: vpcId) { [weak self] data, _ in
+                if let items = (data?["apps"] as? NSDictionary)?["items"] as? [NSDictionary] {
+                    let itemsBox = NSDictionaryArrayBox(items)
+                    Self.workQueue.async { [itemsBox, weak self] in
+                        for item in itemsBox.values {
+                            if let appId = self?.safeString(item["id"]) { metadataState.metadataById[appId] = item }
+                        }
+                        fetchChunk(index + 1)
+                    }
+                } else {
+                    Self.workQueue.async { fetchChunk(index + 1) }
+                }
+            }
+        }
+        fetchChunk(0)
     }
 
     private func enrichRatingMetadata(_ games: [GameInfo], locale: String, completion: @escaping @Sendable ([GameInfo]) -> Void) {
