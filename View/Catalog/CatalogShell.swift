@@ -8,14 +8,19 @@ struct CatalogShell: View {
     let onSignOut: () -> Void
     let onForget: (LoginAccount) -> Void
 
-    @StateObject private var store = CatalogSelectionStore()
+    @StateObject private var homeStore = CatalogSelectionStore()
+    @StateObject private var libraryStore = CatalogSelectionStore()
     @State private var backgroundIndex = 0
     @FocusState private var catalogHasFocus: Bool
+
+    private var activeStore: CatalogSelectionStore {
+        viewModel.selectedCatalogDestination == .library ? libraryStore : homeStore
+    }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                DynamicGameBackground(game: store.selectedGame, imageIndex: backgroundIndex)
+                DynamicGameBackground(game: activeStore.selectedGame, imageIndex: backgroundIndex)
                     .frame(width: geometry.size.width, height: geometry.size.height)
 
                 if viewModel.selectedMainPage == .recordings {
@@ -34,29 +39,29 @@ struct CatalogShell: View {
                 } else if viewModel.selectedCatalogDestination == .library {
                     LibraryGridView(
                         viewModel: viewModel,
-                        store: store,
+                        store: libraryStore,
                         play: { game in performPrimaryAction(for: game) }
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
                 } else {
                     VStack(spacing: 20) {
                         GameDetailOverlayPanel(
-                            game: store.selectedGame,
+                            game: homeStore.selectedGame,
                             isFavorite: {
-                                if let g = store.selectedGame { return viewModel.isFavorite(g) }
+                                if let g = homeStore.selectedGame { return viewModel.isFavorite(g) }
                                 return false
                             }(),
-                            play: { if let g = store.selectedGame { performPrimaryAction(for: g) } },
+                            play: { if let g = homeStore.selectedGame { performPrimaryAction(for: g, store: homeStore) } },
                             toggleFavorite: {
-                                if let g = store.selectedGame {
+                                if let g = homeStore.selectedGame {
                                     viewModel.selectGame(g)
                                     viewModel.toggleFavoriteSelectedGame()
                                 }
                             }
                         )
 
-                        GameRailView(store: store) { game in
-                            performPrimaryAction(for: game)
+                        GameRailView(store: homeStore) { game in
+                            performPrimaryAction(for: game, store: homeStore)
                         }
                     }
                     .frame(width: geometry.size.width, height: 390)
@@ -80,14 +85,14 @@ struct CatalogShell: View {
         .onMoveCommand { direction in
             if viewModel.selectedMainPage == .games {
                 switch direction {
-                case .left: store.selectPrevious()
-                case .right: store.selectNext()
+                case .left: activeStore.selectPrevious()
+                case .right: activeStore.selectNext()
                 default: break
                 }
             }
         }
         .task { viewModel.loadIfNeeded() }
-        .task(id: store.selectedGame?.id) {
+        .task(id: activeStore.selectedGame?.id) {
             backgroundIndex = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(9))
@@ -97,27 +102,41 @@ struct CatalogShell: View {
         }
         .onAppear {
             if let selected = viewModel.selectedGame {
-                store.setInitiallySelectedIdentity(CatalogSelectionStore.gameIdentity(selected))
+                homeStore.setInitiallySelectedIdentity(CatalogSelectionStore.gameIdentity(selected))
+                libraryStore.setInitiallySelectedIdentity(CatalogSelectionStore.gameIdentity(selected))
             }
             if viewModel.selectedCatalogDestination != .library {
-                store.load(from: viewModel.catalogSections)
+                homeStore.load(from: viewModel.catalogSections)
             }
             catalogHasFocus = true
         }
         .onChange(of: viewModel.catalogSections) { _, newSections in
-            if viewModel.selectedCatalogDestination != .library {
-                store.load(from: newSections)
+            homeStore.load(from: newSections)
+        }
+        .onChange(of: viewModel.selectedCatalogDestination) { _, newDest in
+            let store = newDest == .library ? libraryStore : homeStore
+            if let game = store.selectedGame {
+                viewModel.selectGame(game)
+            }
+            if newDest != .library {
+                homeStore.load(from: viewModel.catalogSections)
             }
         }
-        .onChange(of: store.selectedIndex) { _, _ in
-            if let game = store.selectedGame {
+        .onChange(of: homeStore.selectedIndex) { _, _ in
+            if viewModel.selectedCatalogDestination != .library, let game = homeStore.selectedGame {
+                viewModel.selectGame(game)
+            }
+        }
+        .onChange(of: libraryStore.selectedIndex) { _, _ in
+            if viewModel.selectedCatalogDestination == .library, let game = libraryStore.selectedGame {
                 viewModel.selectGame(game)
             }
         }
     }
 
-    private func performPrimaryAction(for game: CatalogGameObject) {
-        store.selectGame(withId: CatalogSelectionStore.gameIdentity(game))
+    private func performPrimaryAction(for game: CatalogGameObject, store: CatalogSelectionStore? = nil) {
+        let targetStore = store ?? (viewModel.selectedCatalogDestination == .library ? libraryStore : homeStore)
+        targetStore.selectGame(withId: CatalogSelectionStore.gameIdentity(game))
         if game.isLaunchPatching {
             viewModel.queuePatchingLaunch(game: game)
         } else if game.cardPrimaryActionIsLaunchable {
