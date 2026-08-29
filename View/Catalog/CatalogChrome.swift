@@ -20,8 +20,8 @@ struct CatalogChrome: View {
                 onSignOut: onSignOut,
                 onForget: onForget
             )
-            .padding(.top, 14)
-            .safeAreaPadding(.leading, 20)
+            .padding(.top, 16)
+            .padding(.leading, 72) // Clear macOS traffic lights
             
             Spacer(minLength: 20)
             
@@ -33,7 +33,7 @@ struct CatalogChrome: View {
                 onSignOut: onSignOut,
                 onForget: onForget
             )
-            .padding(.top, 14)
+            .padding(.top, 16)
             .padding(.trailing, 20)
         }
     }

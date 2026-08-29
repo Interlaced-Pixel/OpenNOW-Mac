@@ -194,7 +194,7 @@ private struct DynamicGameBackground: View {
                 endPoint: .trailing
             )
         }
-        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+        .ignoresSafeArea()
         .opacity(game == nil ? 0 : 1)
         .animation(.easeInOut(duration: 0.3), value: game?.id)
     }
