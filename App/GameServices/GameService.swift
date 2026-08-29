@@ -313,7 +313,7 @@ final class GameService: @unchecked Sendable {
                 var result = CatalogBrowseResult()
                 result.selectedSortId = selectedSort.id
                 result.sortOptions = [selectedSort]
-                result.selectedFilterIds = []
+                result.selectedFilterIds = [Self.libraryCatalogFilterId]
                 let catalogCacheKey = GameDataCache.shared.catalogKey(
                     accountIdentifier: accountIdentifier,
                     searchQuery: "",
@@ -339,7 +339,7 @@ final class GameService: @unchecked Sendable {
                         sortString: selectedSort.orderBy,
                         fetchCount: 200,
                         searchString: "",
-                        filters: [:],
+                        filters: Self.libraryCatalogFilter,
                         catalogCacheKey: catalogCacheKey,
                         deliveredCachedResult: AtomicFlag()
                     ) { [weak self] success, browseResult, error in

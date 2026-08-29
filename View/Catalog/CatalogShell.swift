@@ -99,11 +99,15 @@ struct CatalogShell: View {
             if let selected = viewModel.selectedGame {
                 store.setInitiallySelectedIdentity(CatalogSelectionStore.gameIdentity(selected))
             }
-            store.load(from: viewModel.catalogSections)
+            if viewModel.selectedCatalogDestination != .library {
+                store.load(from: viewModel.catalogSections)
+            }
             catalogHasFocus = true
         }
         .onChange(of: viewModel.catalogSections) { _, newSections in
-            store.load(from: newSections)
+            if viewModel.selectedCatalogDestination != .library {
+                store.load(from: newSections)
+            }
         }
         .onChange(of: store.selectedIndex) { _, _ in
             if let game = store.selectedGame {

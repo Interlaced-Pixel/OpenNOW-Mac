@@ -17,10 +17,10 @@ final class CatalogSelectionStore: ObservableObject {
         self.initiallySelectedIdentity = identity
     }
 
-    func load(from sections: [CatalogSectionModel]) {
+    func load(from gamesList: [CatalogGameObject]) {
         var result: [CatalogGameObject] = []
         var identities = Set<String>()
-        for game in sections.flatMap(\.games) {
+        for game in gamesList {
             let identity = Self.gameIdentity(game)
             guard identities.insert(identity).inserted else { continue }
             result.append(game)
@@ -43,6 +43,10 @@ final class CatalogSelectionStore: ObservableObject {
         if !games.isEmpty && !games.indices.contains(selectedIndex) {
             selectedIndex = 0
         }
+    }
+
+    func load(from sections: [CatalogSectionModel]) {
+        load(from: sections.flatMap(\.games))
     }
 
     func select(at index: Int) {

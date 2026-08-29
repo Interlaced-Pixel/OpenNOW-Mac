@@ -20,10 +20,21 @@ struct LibraryGridView: View {
     @State private var sortOption = LibrarySortOption.usageLatest
 
     var filteredAndSortedGames: [CatalogGameObject] {
-        var result = store.games
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedQuery.isEmpty {
-            result = result.filter { $0.title.localizedCaseInsensitiveContains(trimmedQuery) }
+        var result: [CatalogGameObject]
+
+        if trimmedQuery.isEmpty {
+            let owned = viewModel.libraryGames.filter { $0.isInLibrary || CatalogViewModel.gameHasOwnedVariant($0) }
+            result = owned.isEmpty && !viewModel.libraryGames.isEmpty ? viewModel.libraryGames : owned
+        } else {
+            var pool: [CatalogGameObject] = []
+            var seen = Set<String>()
+            for game in viewModel.catalogGames + viewModel.allKnownGames {
+                let identity = CatalogSelectionStore.gameIdentity(game)
+                guard !identity.isEmpty, seen.insert(identity).inserted else { continue }
+                pool.append(game)
+            }
+            result = pool.filter { $0.title.localizedCaseInsensitiveContains(trimmedQuery) }
         }
 
         switch sortOption {
@@ -63,22 +74,29 @@ struct LibraryGridView: View {
     }
 
     var body: some View {
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack(spacing: 16) {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundStyle(.secondary)
-                        TextField("Search library...", text: $searchQuery)
+                        TextField("Search all games...", text: $searchQuery)
                             .textFieldStyle(.plain)
+                            .onChange(of: searchQuery) { _, newQuery in
+                                let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if viewModel.searchQuery != trimmed {
+                                    viewModel.searchQuery = trimmed
+                                }
+                            }
                     }
                     .padding(8)
                     .background(Color.black.opacity(0.3))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .frame(maxWidth: 300)
-                    
+
                     Spacer()
-                    
+
                     Picker("Sort By", selection: $sortOption) {
                         ForEach(LibrarySortOption.allCases) { option in
                             Text(option.rawValue).tag(option)
@@ -91,18 +109,33 @@ struct LibraryGridView: View {
                 .padding(.top, 90)
                 .padding(.bottom, 20)
 
-                if store.games.isEmpty {
-                    VStack(spacing: 16) {
-                        Spacer()
-                        ProgressView().controlSize(.large)
-                        Text("Loading catalog...").font(.headline).foregroundStyle(.secondary)
-                        Spacer()
+                if trimmedQuery.isEmpty && viewModel.libraryGames.isEmpty {
+                    if viewModel.isCatalogRefreshInProgress {
+                        VStack(spacing: 16) {
+                            Spacer()
+                            ProgressView().controlSize(.large)
+                            Text("Loading library...").font(.headline).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        VStack(spacing: 12) {
+                            Spacer()
+                            Text("No Games in Library").font(.title2).foregroundStyle(.secondary)
+                            Text("Games you own or sync will appear here.").font(.subheadline).foregroundStyle(.secondary.opacity(0.8))
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if filteredAndSortedGames.isEmpty {
-                    VStack {
+                    VStack(spacing: 12) {
                         Spacer()
-                        Text("No Games Found").font(.title2).foregroundStyle(.secondary)
+                        if viewModel.isLoading {
+                            ProgressView().controlSize(.large)
+                            Text("Searching catalog...").font(.headline).foregroundStyle(.secondary)
+                        } else {
+                            Text("No Games Found").font(.title2).foregroundStyle(.secondary)
+                        }
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,6 +169,12 @@ struct LibraryGridView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .onAppear {
+                store.load(from: filteredAndSortedGames)
+            }
+            .onChange(of: filteredAndSortedGames.map(CatalogSelectionStore.gameIdentity)) { _, _ in
+                store.load(from: filteredAndSortedGames)
+            }
 
             LibrarySidePanel(
                 viewModel: viewModel,

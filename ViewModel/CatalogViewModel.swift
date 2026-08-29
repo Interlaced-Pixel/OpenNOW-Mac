@@ -322,8 +322,15 @@ final class CatalogViewModel: ObservableObject {
         filterGroups.filter { !$0.options.isEmpty }
     }
 
-    private var allKnownGames: [CatalogGameObject] {
-        marqueeGames + catalogGames + libraryGames + favoriteGames + mainPanelGames
+    var allKnownGames: [CatalogGameObject] {
+        var games: [CatalogGameObject] = []
+        var seen = Set<String>()
+        for game in marqueeGames + catalogGames + libraryGames + favoriteGames + mainPanelGames {
+            let key = Self.identity(for: game)
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            games.append(game)
+        }
+        return games
     }
 
     private var mainPanelGames: [CatalogGameObject] {
@@ -1856,7 +1863,11 @@ final class CatalogViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self = selfBox.value else { return }
                 if success {
-                    self.libraryGames = gamesBox.value
+                    let ownedGames = gamesBox.value.filter { $0.isInLibrary || Self.gameHasOwnedVariant($0) }
+                    self.libraryGames = ownedGames.isEmpty && !gamesBox.value.isEmpty ? gamesBox.value : ownedGames
+                    for game in self.libraryGames {
+                        game.isInLibrary = true
+                    }
                     self.schedulePatchingPollIfNeeded()
                 } else if self.refreshAuthIfNeeded(error: error) {
                     self.libraryGames = []
