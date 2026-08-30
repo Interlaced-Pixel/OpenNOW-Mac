@@ -142,6 +142,11 @@ struct PixelNOWApp: App {
         .modelContainer(sharedModelContainer)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    AppDelegate.requestApplicationUpdateCheck()
+                }
+            }
             CommandMenu("Stream") {
                 Button("Toggle Microphone") {
                     AppDelegate.sendActiveStreamCommand(.toggleMicrophone)

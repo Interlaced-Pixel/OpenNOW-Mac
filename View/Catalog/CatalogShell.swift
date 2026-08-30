@@ -44,28 +44,9 @@ struct CatalogShell: View {
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
                 } else {
-                    VStack(spacing: 20) {
-                        GameDetailOverlayPanel(
-                            game: homeStore.selectedGame,
-                            isFavorite: {
-                                if let g = homeStore.selectedGame { return viewModel.isFavorite(g) }
-                                return false
-                            }(),
-                            play: { if let g = homeStore.selectedGame { performPrimaryAction(for: g, store: homeStore) } },
-                            toggleFavorite: {
-                                if let g = homeStore.selectedGame {
-                                    viewModel.selectGame(g)
-                                    viewModel.toggleFavoriteSelectedGame()
-                                }
-                            }
-                        )
-
-                        GameRailView(store: homeStore) { game in
-                            performPrimaryAction(for: game, store: homeStore)
-                        }
+                    HomeDashboardView(viewModel: viewModel, store: homeStore) { game in
+                        performPrimaryAction(for: game, store: homeStore)
                     }
-                    .frame(width: geometry.size.width, height: 390)
-                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2 + 30)
                 }
             }
             .overlay(alignment: .top) {

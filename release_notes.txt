@@ -1,0 +1,3 @@
+- Removed New Additions widget from the Home Dashboard.
+- Made the CloudMatch Info widget more compact.
+- Increased top spacing on the Home Dashboard to distance content from the account bar.

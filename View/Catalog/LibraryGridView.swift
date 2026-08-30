@@ -18,7 +18,7 @@ struct LibraryGridView: View {
     let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
     
     @State private var searchQuery = ""
-    @State private var sortOption = LibrarySortOption.nameAsc
+    @AppStorage("LibrarySortOption") private var sortOption = LibrarySortOption.nameAsc
     
     @State private var displayedGames: [CatalogGameObject] = []
     @State private var isProcessing: Bool = false

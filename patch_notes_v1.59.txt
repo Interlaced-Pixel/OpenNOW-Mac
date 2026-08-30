@@ -1,0 +1,4 @@
+- Added 'Check for Updates...' option to the app menu.
+- Replaced the GameDetailOverlayPanel and GameRailView with a brand new Home Dashboard.
+- Sort preferences in the Library grid are now persisted across launches.
+- Updated AppIcon and Startup Logo with new designs.

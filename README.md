@@ -1,5 +1,9 @@
 # PixelNOW
 
+<p align="center">
+  <img src="View/Assets.xcassets/StartupLogo.imageset/logo.png" width="200" alt="PixelNOW Logo">
+</p>
+
 PixelNOW is a premium, native macOS cloud gaming client designed to give you the best possible GeForce NOW experience on your Mac.
 
 ## Features
