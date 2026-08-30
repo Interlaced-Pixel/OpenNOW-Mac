@@ -48,14 +48,10 @@ struct HomeDashboardView: View {
                     // LOWER LEFT: CloudMatch Info
                     CloudMatchWidgetView(selectedRegionUrl: viewModel.selectedSettingsRegionUrl, regionOptions: viewModel.settingsRegionOptions)
                         .frame(maxWidth: .infinity)
-
-                    // LOWER RIGHT: New Additions
-                    NewAdditionsWidgetView(games: viewModel.catalogGames, play: play)
-                        .frame(width: 300)
                 }
             }
             .padding(.horizontal, 40)
-            .padding(.top, 70) // Push below chrome
+            .padding(.top, 120) // Push below chrome
             .padding(.bottom, 20)
             .background(PixelPatternBackground())
         }
@@ -180,97 +176,27 @@ struct CloudMatchWidgetView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .center, spacing: 16) {
             Text("CloudMatch Info")
-                .font(.title2).bold()
+                .font(.headline).bold()
                 .foregroundStyle(.white)
 
-            VStack(alignment: .leading, spacing: 12) {
-                StatRow(label: "Current Region", value: currentRegion?.name ?? "Automatic")
-                StatRow(label: "Latency", value: currentRegion?.latencyMs ?? -1 >= 0 ? "\(currentRegion!.latencyMs) ms" : "Unknown")
+            HStack(spacing: 16) {
+                StatRow(label: "Current Region:", value: currentRegion?.name ?? "Automatic")
+                StatRow(label: "Latency:", value: currentRegion?.latencyMs ?? -1 >= 0 ? "\(currentRegion!.latencyMs) ms" : "Unknown")
                 if let best = bestRegion, currentRegion?.automatic == true {
-                    StatRow(label: "Best Available", value: best.name)
-                    StatRow(label: "Best Latency", value: "\(best.latencyMs) ms")
+                    StatRow(label: "Best Available:", value: best.name)
+                    StatRow(label: "Best Latency:", value: "\(best.latencyMs) ms")
                 }
             }
-            .padding()
+            .padding(10)
             .background(Color.black.opacity(0.4))
-            .cornerRadius(12)
+            .cornerRadius(8)
             
             Spacer()
         }
-        .padding()
+        .padding(12)
         .background(.ultraThinMaterial)
-        .cornerRadius(16)
-    }
-}
-
-struct NewAdditionsWidgetView: View {
-    let games: [CatalogGameObject]
-    let play: (CatalogGameObject) -> Void
-
-    @State private var selectedIndex = 0
-
-    var newGames: [CatalogGameObject] {
-        let sorted = games.sorted { $0.releaseDate > $1.releaseDate }
-        return Array(sorted.prefix(4))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Additions")
-                .font(.title2).bold()
-                .foregroundStyle(.white)
-
-            if newGames.isEmpty {
-                Text("No new games found.").foregroundStyle(.secondary)
-                Spacer()
-            } else {
-                let safeIndex = selectedIndex < newGames.count ? selectedIndex : 0
-                let selectedGame = newGames[safeIndex]
-                
-                Button(action: { play(selectedGame) }) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        CatalogRemoteImage(url: URL(string: selectedGame.heroImageUrl.isEmpty ? selectedGame.imageUrl : selectedGame.heroImageUrl), contentMode: .fill)
-                            .aspectRatio(16/9, contentMode: .fill)
-                            .frame(maxWidth: .infinity, maxHeight: 140)
-                            .clipped()
-                            .cornerRadius(8)
-                        
-                        Text(selectedGame.title)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .foregroundStyle(.white)
-                        
-                        Text(selectedGame.genres.joined(separator: ", "))
-                            .font(.caption)
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                HStack(spacing: 8) {
-                    ForEach(Array(newGames.enumerated()), id: \.element.id) { index, game in
-                        Button(action: { selectedIndex = index }) {
-                            CatalogRemoteImage(url: URL(string: game.heroImageUrl.isEmpty ? game.imageUrl : game.heroImageUrl), contentMode: .fill)
-                                .aspectRatio(16/9, contentMode: .fill)
-                                .frame(maxWidth: .infinity)
-                                .clipped()
-                                .cornerRadius(4)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(selectedIndex == index ? Color.white : Color.clear, lineWidth: 2)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.ultraThinMaterial)
-        .cornerRadius(16)
+        .cornerRadius(12)
     }
 }
