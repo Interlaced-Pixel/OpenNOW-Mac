@@ -44,6 +44,8 @@ struct HomeDashboardView: View {
                     PlayerStatsWidgetView(statistics: viewModel.playtimeStatistics)
                 }
 
+                Spacer()
+
                 HStack(alignment: .top, spacing: 20) {
                     // LOWER LEFT: CloudMatch Info
                     CloudMatchWidgetView(selectedRegionUrl: viewModel.selectedSettingsRegionUrl, regionOptions: viewModel.settingsRegionOptions)
