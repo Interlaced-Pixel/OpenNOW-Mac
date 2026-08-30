@@ -70,3 +70,12 @@ Execute every task in this order:
 - Commit all completed work before considering a task done.
 - Push completed commits to the current branch's upstream remote after committing.
 - Prefix every message with a conventional tag: `fix:`, `feat:`, `chore:`, `docs:`, `refactor:`, `test:`, or `style:`.
+
+# Release Process
+When instructed to create a new GitHub release, strictly follow these steps in order:
+1. **Update Version:** Bump the version using `agvtool new-marketing-version <version>` and `agvtool new-version -all <build>`.
+2. **Commit & Push:** Commit all outstanding changes (including the version bump) and push to the remote repository.
+3. **Write Patch Notes:** Create a text file containing the patch notes for the release (e.g., `patch_notes.txt`).
+4. **Compile:** Compile the release configuration of the app using `xcodebuild -scheme PixelNOW -project PixelNOW.xcodeproj -configuration Release clean build`.
+5. **Compress:** Do NOT use the standard `zip` command as it breaks the macOS code signature. Navigate to the release build directory and use `ditto` to compress the app bundle: `ditto -c -k --keepParent PixelNOW.app PixelNOW-<version>-macOS.zip`
+6. **Upload to GitHub:** Use the GitHub CLI to create the release and upload the compressed app bundle: `gh release create v<version> PixelNOW-<version>-macOS.zip -F <patch_notes_file> -t "PixelNOW <version>"`
