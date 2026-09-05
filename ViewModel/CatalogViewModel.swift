@@ -1125,6 +1125,31 @@ final class CatalogViewModel: ObservableObject {
         game.isFavorited || favoriteGameIdentities.contains(Self.identity(for: game))
     }
 
+    func toggleFavorite(for game: CatalogGameObject) {
+        selectGame(game)
+        toggleFavoriteSelectedGame()
+    }
+
+    func addShortcut(for game: CatalogGameObject) {
+        selectGame(game)
+        addShortcutForSelectedGame()
+    }
+
+    func openStore(for game: CatalogGameObject) {
+        selectGame(game)
+        openStoreForSelectedVariant()
+    }
+
+    func selectVariant(for game: CatalogGameObject, variantIndex: Int) {
+        selectGame(game)
+        selectGameStoreVariant(at: variantIndex)
+    }
+
+    func isCustomLaunchProfileActive(for game: CatalogGameObject) -> Bool {
+        let appId = game.launchAppId.isEmpty ? (game.uuid.isEmpty ? game.id : game.uuid) : game.launchAppId
+        return StreamPreferences.profileEnabled(forGame: appId)
+    }
+
     func toggleFavoriteSelectedGame() {
         guard let selectedGame else { return }
         let appId = Self.favoriteAppId(for: selectedGame)
@@ -1821,6 +1846,15 @@ final class CatalogViewModel: ObservableObject {
 
     func setMicrophoneDeviceId(_ deviceId: String) {
         StreamPreferences.saveMicrophoneDeviceId(deviceId)
+        loadSettingsPreferences()
+    }
+
+    var microphoneShortcutEnabled: Bool {
+        StreamPreferences.loadMicrophoneShortcutEnabled()
+    }
+
+    func setMicrophoneShortcutEnabled(_ enabled: Bool) {
+        StreamPreferences.saveMicrophoneShortcutEnabled(enabled)
         loadSettingsPreferences()
     }
 
@@ -2836,7 +2870,7 @@ private extension CatalogPanelSectionObject {
     }
 }
 
-private extension CatalogGameObject {
+extension CatalogGameObject {
     var primaryStoreURL: URL? {
         variants.compactMap { URL(string: $0.storeUrl) }.first
     }

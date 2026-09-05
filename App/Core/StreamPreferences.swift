@@ -614,25 +614,24 @@ public enum StreamPreferences {
         return profile(from: dictionary)
     }
 
-    public static func launchProfile(forGame appId: String, capabilities: StreamDeviceCapabilities) -> StreamPreferenceProfile {
-        var profile = loadProfile()
-        if let gameProfile = loadProfile(forGame: appId) {
-            profile.upscalingModeIndex = gameProfile.upscalingModeIndex
-            profile.upscalingMode = gameProfile.upscalingMode
-            profile.upscalingModeOption = gameProfile.upscalingModeOption
-            profile.upscalingTargetIndex = gameProfile.upscalingTargetIndex
-            profile.upscalingTargetHeight = gameProfile.upscalingTargetHeight
-            profile.upscalingTargetOption = gameProfile.upscalingTargetOption
-            profile.upscalingSharpness = gameProfile.upscalingSharpness
-            profile.upscalingDenoise = gameProfile.upscalingDenoise
-        }
-        return effectiveProfile(profile, capabilities: capabilities)
+    public static func rawProfile(forGame appId: String) -> StreamPreferenceProfile? {
+        guard let dictionary = gameProfileDictionary(for: appId) else { return nil }
+        return profile(from: dictionary)
     }
 
-    public static func saveProfile(forGame appId: String, profile: StreamPreferenceProfile) {
+    public static func launchProfile(forGame appId: String, capabilities: StreamDeviceCapabilities) -> StreamPreferenceProfile {
+        let baseProfile = loadProfile(forGame: appId) ?? loadProfile()
+        return effectiveProfile(baseProfile, capabilities: capabilities)
+    }
+
+    public static func effectiveProfile(forGame appId: String) -> StreamPreferenceProfile {
+        loadProfile(forGame: appId) ?? loadProfile()
+    }
+
+    public static func saveProfile(forGame appId: String, profile: StreamPreferenceProfile, enabled: Bool = true) {
         guard !appId.isEmpty else { return }
         var profiles = mutableGameProfilesDictionary()
-        profiles[appId] = dictionary(from: profile, enabled: true)
+        profiles[appId] = dictionary(from: profile, enabled: enabled)
         storage.set(profiles, forKey: k.gameProfiles)
         storage.synchronize()
     }
@@ -641,6 +640,21 @@ public enum StreamPreferences {
         guard !appId.isEmpty else { return }
         var profiles = mutableGameProfilesDictionary()
         profiles.removeValue(forKey: appId)
+        storage.set(profiles, forKey: k.gameProfiles)
+        storage.synchronize()
+    }
+
+    public static func saveSelectedRegionUrl(_ url: String, forGame appId: String) {
+        guard !appId.isEmpty else { return }
+        var profileDict = gameProfileDictionary(for: appId) ?? dictionary(from: loadProfile(), enabled: true)
+        let normalized = normalizedHTTPSBaseUrlOrEmpty(url)
+        if normalized.isEmpty {
+            profileDict.removeValue(forKey: k.selectedRegionUrl)
+        } else {
+            profileDict[k.selectedRegionUrl] = normalized
+        }
+        var profiles = mutableGameProfilesDictionary()
+        profiles[appId] = profileDict
         storage.set(profiles, forKey: k.gameProfiles)
         storage.synchronize()
     }

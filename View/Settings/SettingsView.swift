@@ -748,6 +748,7 @@ private struct SettingsStatisticTile: View {
 private struct InterfaceSettingsPage: View {
     @ObservedObject var viewModel: CatalogViewModel
     @StateObject private var inputRouter = ControllerInputRouter()
+    @AppStorage(InterfacePreferences.controllerModeEnabledKey) private var controllerModeEnabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -779,6 +780,13 @@ private struct InterfaceSettingsPage: View {
                     }
                     Spacer(minLength: 0)
                 }
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Controller Navigation Mode",
+                    subtitle: "Routes gamepad input for D-pad/stick navigation across the catalog, library, and settings interfaces.",
+                    isOn: controllerModeEnabled,
+                    action: { controllerModeEnabled = $0 }
+                )
             }
         }
     }
@@ -1262,6 +1270,13 @@ private struct GameplaySettingsPage: View {
                 SettingsOptionRow(title: "Microphone Mode", subtitle: "Controls how voice input is sent to the stream.", options: StreamPreferences.microphoneModeOptions.map(\.label), selectedIndex: selectedMicrophoneModeIndex, action: { viewModel.setMicrophoneMode(StreamPreferences.microphoneModeOptions[$0].value) })
                 SettingsDivider()
                 SettingsOptionRow(title: "Microphone Device", subtitle: "Current input device for PixelNOW streams.", options: viewModel.microphoneDeviceOptions.map(\.label), selectedIndex: selectedMicrophoneDeviceIndex, action: { viewModel.setMicrophoneDeviceId(viewModel.microphoneDeviceOptions[$0].uniqueId) })
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Microphone Shortcut",
+                    subtitle: "Enable keyboard hotkey (\(viewModel.streamProfile.microphonePushToTalkComboLabel)) to mute, unmute, or push-to-talk during streaming.",
+                    isOn: viewModel.microphoneShortcutEnabled,
+                    action: viewModel.setMicrophoneShortcutEnabled
+                )
             }
 
             SettingsCard(title: "Profile Maintenance") {

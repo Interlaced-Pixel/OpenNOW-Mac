@@ -120,7 +120,12 @@ struct LibraryGridView: View {
                                         game: game,
                                         isSelected: isSelected,
                                         select: { store.selectGame(withId: identity) },
-                                        launch: { play(game) }
+                                        launch: { play(game) },
+                                        isFavorite: viewModel.isFavorite(game),
+                                        onToggleFavorite: { viewModel.toggleFavorite(for: game) },
+                                        onSelectPlatform: { idx in viewModel.selectVariant(for: game, variantIndex: idx) },
+                                        onAddShortcut: { viewModel.addShortcut(for: game) },
+                                        onOpenStore: { viewModel.openStore(for: game) }
                                     )
                                     .id(identity)
                                 }
@@ -330,6 +335,8 @@ private struct LibrarySidePanel: View {
     let play: () -> Void
     let toggleFavorite: () -> Void
 
+    @State private var isSettingsSheetPresented = false
+
     private var selectedVariantIndex: Int {
         guard let game else { return 0 }
         if viewModel.selectedGame?.id == game.id, viewModel.selectedVariantIndex >= 0 {
@@ -414,19 +421,38 @@ private struct LibrarySidePanel: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
-                    Button(action: toggleFavorite) {
-                        Label(viewModel.isFavorite(game) ? "Remove Favorite" : "Add to Favorites",
-                              systemImage: viewModel.isFavorite(game) ? "heart.fill" : "heart")
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Button(action: toggleFavorite) {
+                            Label(viewModel.isFavorite(game) ? "Remove Favorite" : "Add to Favorites",
+                                  systemImage: viewModel.isFavorite(game) ? "heart.fill" : "heart")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+
+                        Button {
+                            isSettingsSheetPresented = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(viewModel.isCustomLaunchProfileActive(for: game) ? Color.pixelNowGreen : .white)
+                                .frame(width: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .help("Per-Game Launch Settings")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
                 }
                 .padding(24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.2), value: game.id)
+            .sheet(isPresented: $isSettingsSheetPresented) {
+                GameLaunchSettingsSheet(game: game) {
+                    isSettingsSheetPresented = false
+                }
+            }
         } else {
             VStack {
                 Spacer()
@@ -525,6 +551,14 @@ private struct LibrarySidePanel: View {
                         text: game.membershipTierLabel,
                         tintColor: Color.yellow.opacity(0.2),
                         foregroundColor: .yellow
+                    )
+                }
+                if viewModel.isCustomLaunchProfileActive(for: game) {
+                    SidePanelChip(
+                        icon: "slider.horizontal.3",
+                        text: "Custom Launch Settings",
+                        tintColor: Color.pixelNowGreen.opacity(0.2),
+                        foregroundColor: Color.pixelNowGreen
                     )
                 }
             }

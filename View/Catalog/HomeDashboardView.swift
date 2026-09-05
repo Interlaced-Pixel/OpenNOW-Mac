@@ -33,7 +33,12 @@ struct HomeDashboardView: View {
                                     isSelected: index == store.selectedIndex,
                                     scale: 0.8,
                                     select: { store.select(at: index) },
-                                    launch: { play(game) }
+                                    launch: { play(game) },
+                                    isFavorite: viewModel.isFavorite(game),
+                                    onToggleFavorite: { viewModel.toggleFavorite(for: game) },
+                                    onSelectPlatform: { idx in viewModel.selectVariant(for: game, variantIndex: idx) },
+                                    onAddShortcut: { viewModel.addShortcut(for: game) },
+                                    onOpenStore: { viewModel.openStore(for: game) }
                                 )
                             }
                         }

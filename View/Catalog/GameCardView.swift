@@ -7,6 +7,15 @@ struct GameCardView: View {
     let select: () -> Void
     let launch: () -> Void
 
+    var isFavorite: Bool = false
+    var onToggleFavorite: (() -> Void)? = nil
+    var onSelectPlatform: ((Int) -> Void)? = nil
+    var onAddShortcut: (() -> Void)? = nil
+    var onOpenStore: (() -> Void)? = nil
+    var onOpenSettings: (() -> Void)? = nil
+
+    @State private var isLaunchSettingsPresented = false
+
     private var cardWidth: CGFloat { 138 * scale }
     private var cardHeight: CGFloat { 207 * scale }
 
@@ -24,9 +33,32 @@ struct GameCardView: View {
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: launch)
+        .contextMenu {
+            GameCardContextMenuContent(
+                game: game,
+                isFavorite: isFavorite,
+                onPlay: launch,
+                onSelectPlatform: { idx in onSelectPlatform?(idx) },
+                onToggleFavorite: { onToggleFavorite?() },
+                onOpenSettings: {
+                    if let onOpenSettings {
+                        onOpenSettings()
+                    } else {
+                        isLaunchSettingsPresented = true
+                    }
+                },
+                onAddShortcut: { onAddShortcut?() },
+                onOpenStore: { onOpenStore?() }
+            )
+        }
+        .sheet(isPresented: $isLaunchSettingsPresented) {
+            GameLaunchSettingsSheet(game: game) {
+                isLaunchSettingsPresented = false
+            }
+        }
         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isSelected)
         .accessibilityLabel(game.title.isEmpty ? "Untitled game" : game.title)
-        .accessibilityHint("Click to select. Double-click to launch.")
+        .accessibilityHint("Click to select. Double-click to launch. Right-click for game options.")
     }
 }
 
