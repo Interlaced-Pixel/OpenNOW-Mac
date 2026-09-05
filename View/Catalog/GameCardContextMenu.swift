@@ -62,6 +62,28 @@ struct GameCardContextMenuContent: View {
                 Divider()
 
                 Menu {
+                    ForEach(StreamPreferences.streamingQualityProfileOptions.indices, id: \.self) { idx in
+                        let opt = StreamPreferences.streamingQualityProfileOptions[idx]
+                        Button {
+                            profile.streamingQualityProfileIndex = idx
+                            profile.streamingQualityProfileOption = opt
+                            profile.streamingQualityProfile = opt.value
+                            if idx != 0 {
+                                StreamPreferences.applyStreamingQualityPreset(idx, to: &profile)
+                            }
+                            saveProfile()
+                        } label: {
+                            HStack {
+                                Text(opt.label)
+                                if profile.streamingQualityProfileIndex == idx { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Quality Preset: \(profile.streamingQualityProfileOption.label)", systemImage: "slider.horizontal.3")
+                }
+
+                Menu {
                     Button("1080p @ 60 FPS") { applyResolutionPreset(width: 1920, height: 1080, fps: 60) }
                     Button("1080p @ 120 FPS") { applyResolutionPreset(width: 1920, height: 1080, fps: 120) }
                     Button("1440p @ 60 FPS") { applyResolutionPreset(width: 2560, height: 1440, fps: 60) }
@@ -69,8 +91,14 @@ struct GameCardContextMenuContent: View {
                     Button("4K @ 60 FPS") { applyResolutionPreset(width: 3840, height: 2160, fps: 60) }
                     Button("4K @ 120 FPS") { applyResolutionPreset(width: 3840, height: 2160, fps: 120) }
                 } label: {
-                    Label("Resolution & FPS: \(profile.resolution.label) @ \(profile.fps) FPS", systemImage: "display")
+                    Label(
+                        profile.streamingQualityProfileIndex == 0
+                            ? "Resolution & FPS: \(profile.resolution.label) @ \(profile.fps) FPS"
+                            : "Resolution & FPS: \(profile.resolution.label) @ \(profile.fps) FPS (Locked)",
+                        systemImage: profile.streamingQualityProfileIndex == 0 ? "display" : "lock.fill"
+                    )
                 }
+                .disabled(profile.streamingQualityProfileIndex != 0)
 
                 Menu {
                     Button {
@@ -102,6 +130,7 @@ struct GameCardContextMenuContent: View {
                     ForEach(StreamPreferences.codecOptions.indices, id: \.self) { idx in
                         let codec = StreamPreferences.codecOptions[idx]
                         Button {
+                            guard profile.streamingQualityProfileIndex == 0 else { return }
                             profile.codecIndex = idx
                             profile.codec = codec
                             saveProfile()
@@ -113,13 +142,20 @@ struct GameCardContextMenuContent: View {
                         }
                     }
                 } label: {
-                    Label("Codec: \(profile.codec.label)", systemImage: "film")
+                    Label(
+                        profile.streamingQualityProfileIndex == 0
+                            ? "Codec: \(profile.codec.label)"
+                            : "Codec: \(profile.codec.label) (Locked)",
+                        systemImage: profile.streamingQualityProfileIndex == 0 ? "film" : "lock.fill"
+                    )
                 }
+                .disabled(profile.streamingQualityProfileIndex != 0)
 
                 Menu {
                     ForEach(StreamPreferences.bitrateOptions.indices, id: \.self) { idx in
                         let opt = StreamPreferences.bitrateOptions[idx]
                         Button {
+                            guard profile.streamingQualityProfileIndex == 0 else { return }
                             profile.bitrateIndex = idx
                             profile.bitrate = opt
                             profile.maxBitrateMbps = opt.mbps
@@ -132,8 +168,14 @@ struct GameCardContextMenuContent: View {
                         }
                     }
                 } label: {
-                    Label("Max Bitrate: \(profile.maxBitrateMbps) Mbps", systemImage: "speedometer")
+                    Label(
+                        profile.streamingQualityProfileIndex == 0
+                            ? "Max Bitrate: \(profile.maxBitrateMbps) Mbps"
+                            : "Max Bitrate: \(profile.maxBitrateMbps) Mbps (Locked)",
+                        systemImage: profile.streamingQualityProfileIndex == 0 ? "speedometer" : "lock.fill"
+                    )
                 }
+                .disabled(profile.streamingQualityProfileIndex != 0)
 
                 Divider()
 
@@ -263,6 +305,7 @@ struct GameCardContextMenuContent: View {
     }
 
     private func applyResolutionPreset(width: Int, height: Int, fps: Int) {
+        guard profile.streamingQualityProfileIndex == 0 else { return }
         let aspectIndex = (width * 10 == height * 16) ? 1 : 0
         profile.aspectIndex = aspectIndex
         profile.aspect = StreamPreferences.aspectOptions[aspectIndex]
@@ -399,7 +442,7 @@ struct GameCardFloatingMenuView: View {
                 menuActionButton(
                     icon: "slider.horizontal.3",
                     iconColor: isCustomSettingsEnabled ? Color.pixelNowGreen : .white.opacity(0.8),
-                    title: isCustomSettingsEnabled ? "Launch Settings (Custom Active)" : "Configure Launch Settings..."
+                    title: isCustomSettingsEnabled ? "Launch Settings (\(profile.streamingQualityProfileOption.label))" : "Configure Launch Settings..."
                 ) {
                     onDismiss()
                     onOpenSettings()

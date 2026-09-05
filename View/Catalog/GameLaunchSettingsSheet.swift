@@ -23,6 +23,14 @@ struct GameLaunchSettingsSheet: View {
         return false
     }
 
+    private var isQualityLocked: Bool {
+        profile.streamingQualityProfileIndex != 0
+    }
+
+    private var lockedProfileSubtitle: String {
+        "Managed by the \(profile.streamingQualityProfileOption.label) preset. Select Custom to edit."
+    }
+
     enum LaunchSettingsTab: String, CaseIterable, Identifiable {
         case display = "Display & Video"
         case transport = "Transport & Server"
@@ -187,6 +195,9 @@ struct GameLaunchSettingsSheet: View {
                         profile.streamingQualityProfileIndex = idx
                         profile.streamingQualityProfileOption = opt
                         profile.streamingQualityProfile = opt.value
+                        if idx != 0 {
+                            StreamPreferences.applyStreamingQualityPreset(idx, to: &profile)
+                        }
                         saveCurrentProfile()
                     } label: {
                         Text(opt.label)
@@ -202,15 +213,35 @@ struct GameLaunchSettingsSheet: View {
                 }
             }
 
+            if isQualityLocked {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11))
+                    Text(lockedProfileSubtitle)
+                        .font(.caption)
+                }
+                .foregroundStyle(Color.pixelNowGreen)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.pixelNowGreen.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
             Divider().background(Color.white.opacity(0.08))
 
             settingSectionHeader("Aspect Ratio & Resolution")
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Aspect Ratio").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 4) {
+                        Text("Aspect Ratio").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        if isQualityLocked {
+                            Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                        }
+                    }
                     Picker("", selection: Binding(
                         get: { profile.aspectIndex },
                         set: { newAspect in
+                            guard !isQualityLocked else { return }
                             profile.aspectIndex = newAspect
                             profile.aspect = StreamPreferences.aspectOptions[newAspect]
                             let resolutions = StreamPreferences.resolutionOptions(forAspect: newAspect)
@@ -224,14 +255,22 @@ struct GameLaunchSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Resolution").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 4) {
+                        Text("Resolution").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        if isQualityLocked {
+                            Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                        }
+                    }
                     let resolutions = StreamPreferences.resolutionOptions(forAspect: profile.aspectIndex)
                     Picker("", selection: Binding(
                         get: { min(profile.resolutionIndex, resolutions.count - 1) },
                         set: { newRes in
+                            guard !isQualityLocked else { return }
                             profile.resolutionIndex = newRes
                             if resolutions.indices.contains(newRes) {
                                 profile.resolution = resolutions[newRes]
@@ -244,6 +283,8 @@ struct GameLaunchSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
                 }
             }
 
@@ -252,10 +293,16 @@ struct GameLaunchSettingsSheet: View {
             settingSectionHeader("Performance")
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Frame Rate").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 4) {
+                        Text("Frame Rate").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        if isQualityLocked {
+                            Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                        }
+                    }
                     Picker("", selection: Binding(
                         get: { profile.fpsIndex },
                         set: { newFps in
+                            guard !isQualityLocked else { return }
                             profile.fpsIndex = newFps
                             profile.fps = StreamPreferences.fpsOptions[newFps]
                             saveCurrentProfile()
@@ -268,13 +315,21 @@ struct GameLaunchSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Video Codec").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 4) {
+                        Text("Video Codec").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        if isQualityLocked {
+                            Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                        }
+                    }
                     Picker("", selection: Binding(
                         get: { profile.codecIndex },
                         set: { newCodec in
+                            guard !isQualityLocked else { return }
                             profile.codecIndex = newCodec
                             profile.codec = StreamPreferences.codecOptions[newCodec]
                             saveCurrentProfile()
@@ -286,13 +341,21 @@ struct GameLaunchSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Max Bitrate").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 4) {
+                        Text("Max Bitrate").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        if isQualityLocked {
+                            Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                        }
+                    }
                     Picker("", selection: Binding(
                         get: { profile.bitrateIndex },
                         set: { newBitrate in
+                            guard !isQualityLocked else { return }
                             profile.bitrateIndex = newBitrate
                             profile.bitrate = StreamPreferences.bitrateOptions[newBitrate]
                             profile.maxBitrateMbps = profile.bitrate.mbps
@@ -304,25 +367,38 @@ struct GameLaunchSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
                 }
             }
 
             Divider().background(Color.white.opacity(0.08))
 
             settingSectionHeader("Color Precision")
-            Picker("", selection: Binding(
-                get: { profile.colorQualityIndex },
-                set: { newQuality in
-                    profile.colorQualityIndex = newQuality
-                    profile.colorQuality = StreamPreferences.colorQualityOptions[newQuality]
-                    saveCurrentProfile()
+            HStack(spacing: 6) {
+                Picker("", selection: Binding(
+                    get: { profile.colorQualityIndex },
+                    set: { newQuality in
+                        guard !isQualityLocked else { return }
+                        profile.colorQualityIndex = newQuality
+                        profile.colorQuality = StreamPreferences.colorQualityOptions[newQuality]
+                        saveCurrentProfile()
+                    }
+                )) {
+                    ForEach(StreamPreferences.colorQualityOptions.indices, id: \.self) { idx in
+                        Text(StreamPreferences.colorQualityOptions[idx].label).tag(idx)
+                    }
                 }
-            )) {
-                ForEach(StreamPreferences.colorQualityOptions.indices, id: \.self) { idx in
-                    Text(StreamPreferences.colorQualityOptions[idx].label).tag(idx)
+                .pickerStyle(.segmented)
+                .disabled(isQualityLocked)
+                .opacity(isQualityLocked ? 0.6 : 1)
+
+                if isQualityLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
                 }
             }
-            .pickerStyle(.segmented)
         }
     }
 
@@ -383,23 +459,77 @@ struct GameLaunchSettingsSheet: View {
             Divider().background(Color.white.opacity(0.08))
 
             settingSectionHeader("Network Optimizations")
-            Toggle("L4S Low-Latency Congestion Control", isOn: Binding(
-                get: { profile.enableL4S },
-                set: { profile.enableL4S = $0; saveCurrentProfile() }
-            ))
-            .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Toggle("L4S Low-Latency Congestion Control", isOn: Binding(
+                        get: { profile.enableL4S },
+                        set: {
+                            guard !isQualityLocked else { return }
+                            profile.enableL4S = $0
+                            saveCurrentProfile()
+                        }
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
 
-            Toggle("Cloud G-Sync Variable Refresh Rate", isOn: Binding(
-                get: { profile.enableCloudGsync },
-                set: { profile.enableCloudGsync = $0; saveCurrentProfile() }
-            ))
-            .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    if isQualityLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                    }
+                }
 
-            Toggle("Fallback to Logical Display Resolution", isOn: Binding(
-                get: { profile.fallbackToLogicalResolution },
-                set: { profile.fallbackToLogicalResolution = $0; saveCurrentProfile() }
-            ))
-            .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                HStack {
+                    Toggle("Cloud G-Sync Variable Refresh Rate", isOn: Binding(
+                        get: { profile.enableCloudGsync },
+                        set: {
+                            guard !isQualityLocked else { return }
+                            profile.enableCloudGsync = $0
+                            saveCurrentProfile()
+                        }
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
+
+                    if isQualityLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                    }
+                }
+
+                HStack {
+                    Toggle("Fallback to Logical Display Resolution", isOn: Binding(
+                        get: { profile.fallbackToLogicalResolution },
+                        set: {
+                            guard !isQualityLocked else { return }
+                            profile.fallbackToLogicalResolution = $0
+                            saveCurrentProfile()
+                        }
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
+
+                    if isQualityLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                    }
+                }
+
+                if isQualityLocked {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10))
+                        Text(lockedProfileSubtitle)
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(Color.pixelNowGreen.opacity(0.85))
+                }
+            }
         }
     }
 
@@ -491,17 +621,57 @@ struct GameLaunchSettingsSheet: View {
             Divider().background(Color.white.opacity(0.08))
 
             settingSectionHeader("Dynamic Range & Power")
-            Toggle("High Dynamic Range (HDR)", isOn: Binding(
-                get: { profile.enableHdr },
-                set: { profile.enableHdr = $0; saveCurrentProfile() }
-            ))
-            .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Toggle("High Dynamic Range (HDR)", isOn: Binding(
+                        get: { profile.enableHdr },
+                        set: {
+                            guard !isQualityLocked else { return }
+                            profile.enableHdr = $0
+                            saveCurrentProfile()
+                        }
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
 
-            Toggle("Power Saver Mode", isOn: Binding(
-                get: { profile.enablePowerSaver },
-                set: { profile.enablePowerSaver = $0; saveCurrentProfile() }
-            ))
-            .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    if isQualityLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                    }
+                }
+
+                HStack {
+                    Toggle("Power Saver Mode", isOn: Binding(
+                        get: { profile.enablePowerSaver },
+                        set: {
+                            guard !isQualityLocked else { return }
+                            profile.enablePowerSaver = $0
+                            saveCurrentProfile()
+                        }
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.pixelNowGreen))
+                    .disabled(isQualityLocked)
+                    .opacity(isQualityLocked ? 0.6 : 1)
+
+                    if isQualityLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.pixelNowGreen.opacity(0.8))
+                    }
+                }
+
+                if isQualityLocked {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10))
+                        Text(lockedProfileSubtitle)
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(Color.pixelNowGreen.opacity(0.85))
+                }
+            }
         }
     }
 

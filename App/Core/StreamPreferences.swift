@@ -388,21 +388,53 @@ public enum StreamPreferences {
         }
         return fallbackKey
     }
-    private struct StreamingQualityPreset {
-        let aspectIndex: Int
-        let resolutionIndex: Int
-        let fpsIndex: Int
-        let codecIndex: Int
-        let bitrateIndex: Int
-        let colorQualityIndex: Int
-        let cloudGsyncEnabled: Bool
-        let fallbackToLogicalResolution: Bool
-        let hudStreamingModeIndex: Int
-        let sdrColorSpaceIndex: Int
-        let hdrColorSpaceIndex: Int
-        let l4sEnabled: Bool
-        let hdrEnabled: Bool
-        let powerSaverEnabled: Bool
+    public struct StreamingQualityPreset {
+        public let aspectIndex: Int
+        public let resolutionIndex: Int
+        public let fpsIndex: Int
+        public let codecIndex: Int
+        public let bitrateIndex: Int
+        public let colorQualityIndex: Int
+        public let cloudGsyncEnabled: Bool
+        public let fallbackToLogicalResolution: Bool
+        public let hudStreamingModeIndex: Int
+        public let sdrColorSpaceIndex: Int
+        public let hdrColorSpaceIndex: Int
+        public let l4sEnabled: Bool
+        public let hdrEnabled: Bool
+        public let powerSaverEnabled: Bool
+
+        public init(
+            aspectIndex: Int,
+            resolutionIndex: Int,
+            fpsIndex: Int,
+            codecIndex: Int,
+            bitrateIndex: Int,
+            colorQualityIndex: Int,
+            cloudGsyncEnabled: Bool,
+            fallbackToLogicalResolution: Bool,
+            hudStreamingModeIndex: Int,
+            sdrColorSpaceIndex: Int,
+            hdrColorSpaceIndex: Int,
+            l4sEnabled: Bool,
+            hdrEnabled: Bool,
+            powerSaverEnabled: Bool
+        ) {
+            self.aspectIndex = aspectIndex
+            self.resolutionIndex = resolutionIndex
+            self.fpsIndex = fpsIndex
+            self.codecIndex = codecIndex
+            self.bitrateIndex = bitrateIndex
+            self.colorQualityIndex = colorQualityIndex
+            self.cloudGsyncEnabled = cloudGsyncEnabled
+            self.fallbackToLogicalResolution = fallbackToLogicalResolution
+            self.hudStreamingModeIndex = hudStreamingModeIndex
+            self.sdrColorSpaceIndex = sdrColorSpaceIndex
+            self.hdrColorSpaceIndex = hdrColorSpaceIndex
+            self.l4sEnabled = l4sEnabled
+            self.hdrEnabled = hdrEnabled
+            self.powerSaverEnabled = powerSaverEnabled
+        }
     }
     private static let streamingProfileKeys = [
         Keys.aspectIndex,
@@ -630,8 +662,13 @@ public enum StreamPreferences {
 
     public static func saveProfile(forGame appId: String, profile: StreamPreferenceProfile, enabled: Bool = true) {
         guard !appId.isEmpty else { return }
+        var normalizedProfile = profile
+        if normalizedProfile.streamingQualityProfileIndex != 0,
+           let preset = streamingQualityPreset(for: normalizedProfile.streamingQualityProfileIndex, aspectIndex: normalizedProfile.aspectIndex) {
+            applyStreamingQualityPreset(preset, to: &normalizedProfile)
+        }
         var profiles = mutableGameProfilesDictionary()
-        profiles[appId] = dictionary(from: profile, enabled: enabled)
+        profiles[appId] = dictionary(from: normalizedProfile, enabled: enabled)
         storage.set(profiles, forKey: k.gameProfiles)
         storage.synchronize()
     }
@@ -1011,7 +1048,8 @@ public enum StreamPreferences {
     public static func saveStreamingQualityProfileIndex(_ value: Int) {
         let index = clamp(value, 0, streamingQualityProfileOptions.count - 1)
         storage.set(index, forKey: k.streamingQualityProfileIndex)
-        if let preset = streamingQualityPreset(for: index) {
+        let currentAspect = clampedStoredInt(k.aspectIndex, 1, aspectOptions.count)
+        if let preset = streamingQualityPreset(for: index, aspectIndex: currentAspect) {
             saveStreamingQualityPreset(preset)
         }
         storage.synchronize()
@@ -1148,7 +1186,7 @@ public enum StreamPreferences {
         profile.microphonePushToTalkKeyLabel = microphonePushToTalkKeyLabel(profile.microphonePushToTalkKeyCode)
         profile.microphonePushToTalkComboLabel = microphonePushToTalkComboLabel(keyCode: profile.microphonePushToTalkKeyCode, modifierMask: profile.microphonePushToTalkModifierMask)
         profile.selectedRegionUrl = string(value(dictionary, k.selectedRegionUrl), "")
-        if let preset = streamingQualityPreset(for: profile.streamingQualityProfileIndex) {
+        if let preset = streamingQualityPreset(for: profile.streamingQualityProfileIndex, aspectIndex: profile.aspectIndex) {
             applyStreamingQualityPreset(preset, to: &profile)
         }
         return profile
@@ -1214,22 +1252,124 @@ public enum StreamPreferences {
         return fallbackIndex
     }
 
-    private static func streamingQualityPreset(for index: Int) -> StreamingQualityPreset? {
+    public static func presetResolutionIndex(forQualityIndex qualityIndex: Int, aspectIndex: Int) -> Int {
+        switch qualityIndex {
+        case 1, 2:
+            switch aspectIndex {
+            case 0: return 2
+            case 1: return 3
+            case 2: return 0
+            case 3: return 0
+            default: return 2
+            }
+        case 3:
+            switch aspectIndex {
+            case 0: return 0
+            case 1: return 0
+            case 2: return 0
+            case 3: return 0
+            default: return 0
+            }
+        case 4:
+            switch aspectIndex {
+            case 0: return 4
+            case 1: return 5
+            case 2: return 2
+            case 3: return 1
+            default: return 4
+            }
+        default:
+            return defaultResolutionIndex(forAspect: aspectIndex)
+        }
+    }
+
+    public static func streamingQualityPreset(for index: Int, aspectIndex: Int = 1) -> StreamingQualityPreset? {
+        let safeAspect = clamp(aspectIndex, 0, aspectOptions.count - 1)
         switch index {
         case 1:
-            return StreamingQualityPreset(aspectIndex: 1, resolutionIndex: 3, fpsIndex: 1, codecIndex: 0, bitrateIndex: 2, colorQualityIndex: 0, cloudGsyncEnabled: false, fallbackToLogicalResolution: false, hudStreamingModeIndex: 0, sdrColorSpaceIndex: 2, hdrColorSpaceIndex: 0, l4sEnabled: false, hdrEnabled: false, powerSaverEnabled: false)
+            return StreamingQualityPreset(
+                aspectIndex: safeAspect,
+                resolutionIndex: presetResolutionIndex(forQualityIndex: 1, aspectIndex: safeAspect),
+                fpsIndex: 1,
+                codecIndex: 3,
+                bitrateIndex: 2,
+                colorQualityIndex: 0,
+                cloudGsyncEnabled: true,
+                fallbackToLogicalResolution: false,
+                hudStreamingModeIndex: 0,
+                sdrColorSpaceIndex: 2,
+                hdrColorSpaceIndex: 0,
+                l4sEnabled: false,
+                hdrEnabled: false,
+                powerSaverEnabled: false
+            )
         case 2:
-            return StreamingQualityPreset(aspectIndex: 1, resolutionIndex: 3, fpsIndex: 2, codecIndex: 0, bitrateIndex: 2, colorQualityIndex: 0, cloudGsyncEnabled: false, fallbackToLogicalResolution: false, hudStreamingModeIndex: 0, sdrColorSpaceIndex: 2, hdrColorSpaceIndex: 0, l4sEnabled: true, hdrEnabled: false, powerSaverEnabled: false)
+            return StreamingQualityPreset(
+                aspectIndex: safeAspect,
+                resolutionIndex: presetResolutionIndex(forQualityIndex: 2, aspectIndex: safeAspect),
+                fpsIndex: 2,
+                codecIndex: 3,
+                bitrateIndex: 2,
+                colorQualityIndex: 0,
+                cloudGsyncEnabled: false,
+                fallbackToLogicalResolution: false,
+                hudStreamingModeIndex: 0,
+                sdrColorSpaceIndex: 2,
+                hdrColorSpaceIndex: 0,
+                l4sEnabled: true,
+                hdrEnabled: false,
+                powerSaverEnabled: false
+            )
         case 3:
-            return StreamingQualityPreset(aspectIndex: 1, resolutionIndex: 0, fpsIndex: 0, codecIndex: 0, bitrateIndex: 0, colorQualityIndex: 0, cloudGsyncEnabled: false, fallbackToLogicalResolution: false, hudStreamingModeIndex: 0, sdrColorSpaceIndex: 2, hdrColorSpaceIndex: 0, l4sEnabled: false, hdrEnabled: false, powerSaverEnabled: true)
+            return StreamingQualityPreset(
+                aspectIndex: safeAspect,
+                resolutionIndex: presetResolutionIndex(forQualityIndex: 3, aspectIndex: safeAspect),
+                fpsIndex: 1,
+                codecIndex: 3,
+                bitrateIndex: 0,
+                colorQualityIndex: 0,
+                cloudGsyncEnabled: false,
+                fallbackToLogicalResolution: false,
+                hudStreamingModeIndex: 0,
+                sdrColorSpaceIndex: 2,
+                hdrColorSpaceIndex: 0,
+                l4sEnabled: false,
+                hdrEnabled: false,
+                powerSaverEnabled: true
+            )
         case 4:
-            return StreamingQualityPreset(aspectIndex: 1, resolutionIndex: 5, fpsIndex: 1, codecIndex: 3, bitrateIndex: 3, colorQualityIndex: 2, cloudGsyncEnabled: false, fallbackToLogicalResolution: false, hudStreamingModeIndex: 0, sdrColorSpaceIndex: 2, hdrColorSpaceIndex: 2, l4sEnabled: false, hdrEnabled: true, powerSaverEnabled: false)
+            return StreamingQualityPreset(
+                aspectIndex: safeAspect,
+                resolutionIndex: presetResolutionIndex(forQualityIndex: 4, aspectIndex: safeAspect),
+                fpsIndex: 1,
+                codecIndex: 3,
+                bitrateIndex: 3,
+                colorQualityIndex: 2,
+                cloudGsyncEnabled: true,
+                fallbackToLogicalResolution: false,
+                hudStreamingModeIndex: 0,
+                sdrColorSpaceIndex: 2,
+                hdrColorSpaceIndex: 2,
+                l4sEnabled: false,
+                hdrEnabled: true,
+                powerSaverEnabled: false
+            )
         default:
             return nil
         }
     }
 
-    private static func applyStreamingQualityPreset(_ preset: StreamingQualityPreset, to profile: inout StreamPreferenceProfile) {
+    public static func applyStreamingQualityPreset(_ presetIndex: Int, to profile: inout StreamPreferenceProfile) {
+        profile.streamingQualityProfileIndex = presetIndex
+        if presetIndex < streamingQualityProfileOptions.count {
+            profile.streamingQualityProfileOption = streamingQualityProfileOptions[presetIndex]
+            profile.streamingQualityProfile = profile.streamingQualityProfileOption.value
+        }
+        guard let preset = streamingQualityPreset(for: presetIndex, aspectIndex: profile.aspectIndex) else { return }
+        applyStreamingQualityPreset(preset, to: &profile)
+    }
+
+    public static func applyStreamingQualityPreset(_ preset: StreamingQualityPreset, to profile: inout StreamPreferenceProfile) {
         profile.aspectIndex = clamp(preset.aspectIndex, 0, aspectOptions.count - 1)
         profile.aspect = aspectOptions[profile.aspectIndex]
         let resolutions = resolutionOptions(forAspect: profile.aspectIndex)
