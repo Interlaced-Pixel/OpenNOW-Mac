@@ -40,8 +40,10 @@ struct HomeDashboardView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    // UPPER RIGHT: Player Stats Widget
-                    PlayerStatsWidgetView(statistics: viewModel.playtimeStatistics)
+                    PlayerStatsWidgetView(
+                        statistics: viewModel.playtimeStatistics,
+                        subscriptionStatus: viewModel.subscriptionStatus
+                    )
                 }
 
                 Spacer()
@@ -111,6 +113,7 @@ struct PixelPatternBackground: View {
 
 struct PlayerStatsWidgetView: View {
     let statistics: CatalogPlaytimeStatistics
+    let subscriptionStatus: CatalogSubscriptionStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -119,13 +122,29 @@ struct PlayerStatsWidgetView: View {
                 .foregroundStyle(.white)
 
             VStack(alignment: .leading, spacing: 12) {
+                StatRow(label: "Remaining Playtime", value: subscriptionStatus.remainingPlaytimeText)
+                if subscriptionStatus.isAvailable && !subscriptionStatus.isUnlimited && !subscriptionStatus.usageText.isEmpty {
+                    StatRow(label: "Monthly Usage", value: subscriptionStatus.usageText)
+                }
+                if subscriptionStatus.rolledOverHours > 0 {
+                    StatRow(label: "Rolled Over", value: CatalogSubscriptionStatus.hoursText(subscriptionStatus.rolledOverHours))
+                }
+                if subscriptionStatus.purchasedHours > 0 {
+                    StatRow(label: "Extra Playtime", value: CatalogSubscriptionStatus.hoursText(subscriptionStatus.purchasedHours))
+                }
+                StatRow(label: "Total Playtime", value: formatDuration(statistics.totalSeconds))
                 StatRow(label: "Total Sessions", value: "\(statistics.sessionCount)")
-                StatRow(label: "Playtime", value: formatDuration(statistics.totalSeconds))
-                if !statistics.lastPlayedTitle.isEmpty {
-                    StatRow(label: "Last Played", value: statistics.lastPlayedTitle)
+                if statistics.lastSessionSeconds > 0 {
+                    StatRow(label: "Last Session", value: formatDuration(statistics.lastSessionSeconds))
+                }
+                if statistics.averageSessionSeconds > 0 {
+                    StatRow(label: "Average Session", value: formatDuration(statistics.averageSessionSeconds))
                 }
                 if statistics.longestSessionSeconds > 0 {
                     StatRow(label: "Longest Session", value: formatDuration(statistics.longestSessionSeconds))
+                }
+                if !statistics.lastPlayedTitle.isEmpty {
+                    StatRow(label: "Last Played", value: statistics.lastPlayedTitle)
                 }
             }
             .padding()
@@ -139,10 +158,14 @@ struct PlayerStatsWidgetView: View {
     }
 
     private func formatDuration(_ seconds: Double) -> String {
-        let hrs = Int(seconds) / 3600
-        let mins = (Int(seconds) % 3600) / 60
-        if hrs > 0 {
+        let totalMinutes = max(0, Int((seconds / 60).rounded()))
+        let hrs = totalMinutes / 60
+        let mins = totalMinutes % 60
+        if hrs > 0, mins > 0 {
             return "\(hrs)h \(mins)m"
+        }
+        if hrs > 0 {
+            return "\(hrs)h"
         }
         return "\(mins)m"
     }
@@ -154,9 +177,13 @@ struct StatRow: View {
 
     var body: some View {
         HStack {
-            Text(label).foregroundStyle(.secondary)
+            Text(label)
+                .foregroundStyle(.secondary)
+                .layoutPriority(1)
             Spacer()
-            Text(value).foregroundStyle(.white).bold()
+            Text(value)
+                .foregroundStyle(.white)
+                .bold()
                 .lineLimit(1)
         }
     }

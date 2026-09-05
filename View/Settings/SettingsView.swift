@@ -414,6 +414,9 @@ private struct AccountSettingsPage: View {
                 } else {
                     SettingsFlowLayout(spacing: 10) {
                         SettingsStatisticTile(label: "Total Playtime", value: durationText(viewModel.playtimeStatistics.totalSeconds), emphasized: true)
+                        if viewModel.subscriptionStatus.isAvailable {
+                            SettingsStatisticTile(label: "Remaining Playtime", value: viewModel.subscriptionStatus.remainingPlaytimeText)
+                        }
                         SettingsStatisticTile(label: "Sessions", value: "\(viewModel.playtimeStatistics.sessionCount)")
                         SettingsStatisticTile(label: "Last Session", value: durationText(viewModel.playtimeStatistics.lastSessionSeconds))
                         SettingsStatisticTile(label: "Average Session", value: durationText(viewModel.playtimeStatistics.averageSessionSeconds))

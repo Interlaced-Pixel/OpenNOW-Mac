@@ -2505,6 +2505,9 @@ public final class ParsedSubscriptionInfo: NSObject {
     public let totalHours: Double
     public let usedHours: Double
     public let remainingHours: Double
+    public let allottedHours: Double
+    public let purchasedHours: Double
+    public let rolledOverHours: Double
 
     init(subscription: SubscriptionInfo) {
         membershipTier = subscription.membershipTier
@@ -2514,6 +2517,9 @@ public final class ParsedSubscriptionInfo: NSObject {
         totalHours = subscription.totalHours
         usedHours = subscription.usedHours
         remainingHours = subscription.remainingHours
+        allottedHours = subscription.allottedHours
+        purchasedHours = subscription.purchasedHours
+        rolledOverHours = subscription.rolledOverHours
     }
 }
 

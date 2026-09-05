@@ -2683,38 +2683,93 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
 }
 
 struct CatalogSubscriptionStatus: Equatable {
-    static let unavailable = CatalogSubscriptionStatus(membershipTier: "Performance", remainingPlaytimeText: "Unavailable", usageText: "Playtime refresh pending", isAvailable: false)
+    static let unavailable = CatalogSubscriptionStatus(
+        membershipTier: "Performance",
+        remainingPlaytimeText: "Unavailable",
+        usageText: "Playtime refresh pending",
+        isAvailable: false
+    )
 
     let membershipTier: String
     let remainingPlaytimeText: String
     let usageText: String
     let isAvailable: Bool
+    let totalHours: Double
+    let usedHours: Double
+    let remainingHours: Double
+    let allottedHours: Double
+    let purchasedHours: Double
+    let rolledOverHours: Double
+    let isUnlimited: Bool
 
     var isFreeTierAccount: Bool {
         CatalogGameObject.isFreeMembershipTier(membershipTier)
     }
 
-    init(membershipTier: String, remainingPlaytimeText: String, usageText: String, isAvailable: Bool) {
+    init(
+        membershipTier: String,
+        remainingPlaytimeText: String,
+        usageText: String,
+        isAvailable: Bool,
+        totalHours: Double = 0,
+        usedHours: Double = 0,
+        remainingHours: Double = 0,
+        allottedHours: Double = 0,
+        purchasedHours: Double = 0,
+        rolledOverHours: Double = 0,
+        isUnlimited: Bool = false
+    ) {
         self.membershipTier = membershipTier.isEmpty ? "Performance" : membershipTier
         self.remainingPlaytimeText = remainingPlaytimeText
         self.usageText = usageText
         self.isAvailable = isAvailable
+        self.totalHours = totalHours
+        self.usedHours = usedHours
+        self.remainingHours = remainingHours
+        self.allottedHours = allottedHours
+        self.purchasedHours = purchasedHours
+        self.rolledOverHours = rolledOverHours
+        self.isUnlimited = isUnlimited
     }
 
     init(subscription: ParsedSubscriptionInfo) {
         let tier = subscription.membershipTier.isEmpty ? "Performance" : subscription.membershipTier.capitalized
         if subscription.isUnlimited {
-            self.init(membershipTier: tier, remainingPlaytimeText: "Unlimited", usageText: "No monthly playtime cap", isAvailable: true)
+            self.init(
+                membershipTier: tier,
+                remainingPlaytimeText: "Unlimited",
+                usageText: "No monthly playtime cap",
+                isAvailable: true,
+                totalHours: subscription.totalHours,
+                usedHours: subscription.usedHours,
+                remainingHours: subscription.remainingHours,
+                allottedHours: subscription.allottedHours,
+                purchasedHours: subscription.purchasedHours,
+                rolledOverHours: subscription.rolledOverHours,
+                isUnlimited: true
+            )
             return
         }
         let remaining = Self.hoursText(subscription.remainingHours)
         let used = Self.hoursText(subscription.usedHours)
         let total = Self.hoursText(subscription.totalHours)
         let usage = subscription.totalHours > 0 ? "\(used) used of \(total)" : "\(used) used"
-        self.init(membershipTier: tier, remainingPlaytimeText: "\(remaining) left", usageText: usage, isAvailable: true)
+        self.init(
+            membershipTier: tier,
+            remainingPlaytimeText: "\(remaining) left",
+            usageText: usage,
+            isAvailable: true,
+            totalHours: subscription.totalHours,
+            usedHours: subscription.usedHours,
+            remainingHours: subscription.remainingHours,
+            allottedHours: subscription.allottedHours,
+            purchasedHours: subscription.purchasedHours,
+            rolledOverHours: subscription.rolledOverHours,
+            isUnlimited: false
+        )
     }
 
-    private static func hoursText(_ hours: Double) -> String {
+    static func hoursText(_ hours: Double) -> String {
         let totalMinutes = max(0, Int((hours * 60).rounded()))
         let wholeHours = totalMinutes / 60
         let minutes = totalMinutes % 60
