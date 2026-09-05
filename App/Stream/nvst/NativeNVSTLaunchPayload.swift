@@ -133,6 +133,7 @@ struct NativeNVSTLaunchPayload: Equatable, Sendable {
         let hasGpuNameMap: Bool
         let hasStreamingDisplayDataInfo: Bool
         let hasCurrentPhysicalResolution: Bool
+        let resumeType: Int
     }
 
     let prepare: Prepare
@@ -144,6 +145,7 @@ struct NativeNVSTLaunchPayload: Equatable, Sendable {
             "nativePayloadMissingFields": missingFields.joined(separator: ","),
             "nativePayloadServerType": String(start.serverType),
             "nativePayloadAppLaunchMode": String(start.appLaunchMode),
+            "nativePayloadResumeType": String(start.resumeType),
             "nativePayloadHasToken": prepare.hasToken ? "true" : "false",
             "nativePayloadTokenType": prepare.tokenType,
             "nativePayloadNetworkSessionId": start.networkSessionId.isEmpty ? "missing" : "present",
@@ -220,7 +222,8 @@ struct NativeNVSTLaunchPayload: Equatable, Sendable {
             serverLocation: Self.firstNonEmpty(Self.string(rawSession["serverLocation"]), Self.string(requestData["serverLocation"]), Self.string(rawSession["zoneName"])),
             hasGpuNameMap: rawSession["gpuNameMap"] != nil || requestData["gpuNameMap"] != nil,
             hasStreamingDisplayDataInfo: !streamingDisplayData.isEmpty,
-            hasCurrentPhysicalResolution: rawSession["currentPhysicalResolution"] != nil || requestData["currentPhysicalResolution"] != nil || sessionInfo["currentPhysicalResolution"] != nil
+            hasCurrentPhysicalResolution: rawSession["currentPhysicalResolution"] != nil || requestData["currentPhysicalResolution"] != nil || sessionInfo["currentPhysicalResolution"] != nil,
+            resumeType: Self.firstInt(rawSession["resumeType"], requestData["resumeType"]) ?? (allocation.isResume ? 1 : 0)
         )
 
         var missing: [String] = []
@@ -281,6 +284,15 @@ struct NativeNVSTLaunchPayload: Equatable, Sendable {
 
     private static func firstNonEmpty(_ values: String...) -> String {
         values.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+    }
+
+    private static func firstInt(_ values: Any?...) -> Int? {
+        for value in values {
+            if let value = value as? Int { return value }
+            if let value = value as? NSNumber { return value.intValue }
+            if let value = value as? String, let parsed = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) { return parsed }
+        }
+        return nil
     }
 
     private static func positiveInt(_ values: Any?..., fallback: Int) -> Int {

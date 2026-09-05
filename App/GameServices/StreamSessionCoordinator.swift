@@ -79,6 +79,8 @@ public final class StreamSessionCoordinator: StreamSessionProvider, StreamSignal
     private var remoteEndContinuation: AsyncStream<String>.Continuation?
     private var pendingRemoteEndMessage: String?
     private var offerContinuation: CheckedContinuation<StreamOffer, Error>?
+    private var remoteOffersContinuation: AsyncStream<StreamOffer>.Continuation?
+    private var pendingRemoteOffers: [StreamOffer] = []
     private let adPresenter: (any StreamSessionAdPresenter)?
     private let progressHandler: (@Sendable (StreamProgress) -> Void)?
 
@@ -181,17 +183,21 @@ public final class StreamSessionCoordinator: StreamSessionProvider, StreamSignal
 
     public func finishSession(_ session: StreamSessionDescriptor, reason: StreamEndReason) async throws {
         lock.withLock {
-            signaling?.disconnect()
-            signaling = nil
-            iceContinuation?.finish()
-            iceContinuation = nil
-            remoteEndContinuation?.finish()
-            remoteEndContinuation = nil
-            pendingIceCandidates.removeAll()
-            pendingRemoteEndMessage = nil
-            offerContinuation = nil
+            self.activeSession = nil
+            self.iceContinuation?.finish()
+            self.iceContinuation = nil
+            self.remoteEndContinuation?.finish()
+            self.remoteEndContinuation = nil
+            self.pendingIceCandidates.removeAll()
+            self.pendingRemoteEndMessage = nil
+            self.remoteOffersContinuation?.finish()
+            self.remoteOffersContinuation = nil
+            self.pendingRemoteOffers.removeAll()
+            self.offerContinuation = nil
             if activeSession?.id == session.id { activeSession = nil }
         }
+        signaling?.disconnect()
+        signaling = nil
         guard shouldReportFinishedSession(reason) else { return }
         let stopError = await stopCloudMatchSession(session)
         if stopError == nil { StreamSessionLimitStartStore.clear(sessionId: session.id) }
@@ -713,13 +719,36 @@ public final class StreamSessionCoordinator: StreamSessionProvider, StreamSignal
         )
     }
 
-    private func resumeOffer(_ offer: StreamOffer) {
-        let continuation = lock.withLock { () -> CheckedContinuation<StreamOffer, Error>? in
-            let value = offerContinuation
-            offerContinuation = nil
-            return value
+    public func remoteOffers(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamOffer> {
+        lock.withLock {
+            let (stream, continuation) = AsyncStream<StreamOffer>.makeStream()
+            remoteOffersContinuation = continuation
+            for offer in pendingRemoteOffers {
+                continuation.yield(offer)
+            }
+            pendingRemoteOffers.removeAll()
+            return stream
         }
-        continuation?.resume(returning: offer)
+    }
+
+    private func resumeOffer(_ offer: StreamOffer) {
+        let (offerContinuation, remoteOffersContinuation) = lock.withLock { () -> (CheckedContinuation<StreamOffer, Error>?, AsyncStream<StreamOffer>.Continuation?) in
+            let value = self.offerContinuation
+            self.offerContinuation = nil
+            if value == nil {
+                if let cont = self.remoteOffersContinuation {
+                    return (nil, cont)
+                } else {
+                    self.pendingRemoteOffers.append(offer)
+                }
+            }
+            return (value, nil)
+        }
+        if let offerContinuation {
+            offerContinuation.resume(returning: offer)
+        } else if let remoteOffersContinuation {
+            remoteOffersContinuation.yield(offer)
+        }
     }
 
     private func resumeOffer(error: Error) {

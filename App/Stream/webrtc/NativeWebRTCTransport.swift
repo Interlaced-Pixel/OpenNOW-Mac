@@ -454,6 +454,29 @@ public final class NativeWebRTCTransport: NSObject, WebRTCStreamTransport, @unch
         }
     }
 
+    public func renegotiate(offer: StreamOffer) async throws -> StreamAnswer {
+        WebRTCMediaTelemetry.capture("webrtc.transport.renegotiate.start", level: .info, message: "Starting native WebRTC transport renegotiation.", attributes: ["sessionId": offer.session.id])
+        return try await withCheckedThrowingContinuation { continuation in
+            var sessionInfo = offer.metadata["sessionInfoJSON"].flatMap(Self.dictionaryValue) ?? offer.metadata
+            if let nvstSdp = offer.metadata["nvstSdp"], !nvstSdp.isEmpty {
+                sessionInfo["nvstSdp"] = nvstSdp
+            }
+            if let nvstServerOverrides = offer.metadata["nvstServerOverrides"], !nvstServerOverrides.isEmpty {
+                sessionInfo["nvstServerOverrides"] = nvstServerOverrides
+            }
+            session.renegotiate(
+                offerSdp: offer.sdp,
+                sessionInfo: sessionInfo,
+                answerHandler: { sdp, nvstSdp in
+                    continuation.resume(returning: StreamAnswer(sdp: sdp as String, metadata: ["nvstSdp": nvstSdp as String]))
+                },
+                errorHandler: { error in
+                    continuation.resume(throwing: StreamSessionError.signalingFailed(error as String))
+                }
+            )
+        }
+    }
+
     private var hasPendingContinuation: Bool {
         continuationLock.withLock { continuation != nil }
     }

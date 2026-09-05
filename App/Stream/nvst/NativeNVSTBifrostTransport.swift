@@ -1229,7 +1229,7 @@ public actor NativeNVSTBifrostTransport: NativeNVSTTransport {
             "metaData": source.metadata,
             "frameLossWarningTimeout": rawFrameLossWarningTimeout > 0 ? rawFrameLossWarningTimeout : 500,
             "frameLossErrorTimeout": rawFrameLossErrorTimeout > 0 ? rawFrameLossErrorTimeout : 30_000,
-            "resumeType": int(rawSession["resumeType"]),
+            "resumeType": int(firstValue(in: rawSession, requestData, keys: ["resumeType"])) != 0 ? int(firstValue(in: rawSession, requestData, keys: ["resumeType"])) : (allocation.isResume ? 1 : 0),
             "keyboardLayout": string(settings["keyboardLayout"], fallback: ""),
             "locale": firstNonEmpty(string(settings["gameLanguage"], fallback: ""), string(rawSession["locale"], fallback: "")),
             "digitalStore": firstNonEmpty(string(rawSession["digitalStore"], fallback: ""), string(requestData["digitalStore"], fallback: "")),

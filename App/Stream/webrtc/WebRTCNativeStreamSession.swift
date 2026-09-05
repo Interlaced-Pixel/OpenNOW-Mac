@@ -288,6 +288,42 @@ final class LibWebRTCStreamSession: NSObject, @unchecked Sendable {
         }
     }
 
+    func renegotiate(offerSdp: String, sessionInfo: [String: Any], answerHandler: @escaping @Sendable (NSString, NSString) -> Void, errorHandler: @escaping @Sendable (NSString) -> Void) {
+        guard let impl, let peerConnection = impl.peerConnection else {
+            errorHandler("peerConnection not initialized")
+            return
+        }
+        let generation = self.callbackGeneration
+        let remoteNVSTSdp = string(sessionInfo["nvstSdp"])
+        let remoteNVSTServerOverrides = string(sessionInfo["nvstServerOverrides"])
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
+        let offer = RTCSessionDescription(type: .offer, sdp: offerSdp)
+        peerConnection.setRemoteDescription(offer) { [weak self, weak peerConnection] error in
+            guard let self, self.callbackGeneration == generation else { return }
+            if let error {
+                errorHandler("setRemoteDescription failed: \(error.localizedDescription)" as NSString)
+                return
+            }
+            guard let peerConnection else { return }
+            peerConnection.answer(for: constraints) { [weak self, weak peerConnection] answer, answerError in
+                guard let self, self.callbackGeneration == generation else { return }
+                guard let peerConnection, let answer else {
+                    errorHandler("createAnswer failed: \(answerError?.localizedDescription ?? "unknown")" as NSString)
+                    return
+                }
+                peerConnection.setLocalDescription(answer) { [weak self] localError in
+                    guard let self, self.callbackGeneration == generation else { return }
+                    if let localError {
+                        errorHandler("setLocalDescription failed: \(localError.localizedDescription)" as NSString)
+                        return
+                    }
+                    let answerSdp = answer.sdp
+                    answerHandler(answerSdp as NSString, NVSTSessionDescriptionBuilder.buildAnswerExtension(settings: self.settings, credentials: NVSTSessionDescriptionBuilder.iceCredentials(from: answerSdp), remoteNVSTSdp: remoteNVSTSdp, serverOverrides: remoteNVSTServerOverrides) as NSString)
+                }
+            }
+        }
+    }
+
     func stop() {
         callbackGeneration &+= 1
         cancelDisconnectGraceTimer()

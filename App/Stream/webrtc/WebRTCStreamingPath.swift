@@ -11,6 +11,7 @@ public protocol StreamSessionStartCancellable: Sendable {
 
 public protocol WebRTCStreamTransport: Sendable {
     func connect(offer: StreamOffer, mediaReceiver: any MediaFrameReceiver) async throws -> StreamAnswer
+    func renegotiate(offer: StreamOffer) async throws -> StreamAnswer
     func addRemoteIceCandidate(_ candidate: StreamIceCandidate) async throws
     func localIceCandidates() -> AsyncStream<StreamIceCandidate>
     func sessionLimitUpdates() -> AsyncStream<StreamSessionLimitUpdate>
@@ -19,6 +20,10 @@ public protocol WebRTCStreamTransport: Sendable {
 }
 
 public extension WebRTCStreamTransport {
+    func renegotiate(offer: StreamOffer) async throws -> StreamAnswer {
+        throw StreamingPathError.invalidOffer
+    }
+    
     func sessionLimitUpdates() -> AsyncStream<StreamSessionLimitUpdate> {
         AsyncStream { continuation in continuation.finish() }
     }
@@ -28,10 +33,15 @@ public protocol StreamSignalingChannel: Sendable {
     func sendAnswer(_ answer: StreamAnswer, for session: StreamSessionDescriptor) async throws
     func sendLocalIceCandidate(_ candidate: StreamIceCandidate, for session: StreamSessionDescriptor) async throws
     func remoteIceCandidates(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamIceCandidate>
+    func remoteOffers(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamOffer>
     func remoteEndEvents(for session: StreamSessionDescriptor) async throws -> AsyncStream<String>
 }
 
 public extension StreamSignalingChannel {
+    func remoteOffers(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamOffer> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+    
     func remoteEndEvents(for session: StreamSessionDescriptor) async throws -> AsyncStream<String> {
         AsyncStream { continuation in continuation.finish() }
     }
@@ -45,6 +55,7 @@ public actor WebRTCStreamingPath {
     private var state: StreamingPathState = .idle
     private var activeSession: StreamSessionDescriptor?
     private var startedAt: ContinuousClock.Instant?
+    private var remoteOfferTask: Task<Void, Never>?
     private var remoteIceCandidateTask: Task<Void, Never>?
     private var localIceCandidateTask: Task<Void, Never>?
     private var remoteEndTask: Task<Void, Never>?
@@ -96,6 +107,7 @@ public actor WebRTCStreamingPath {
         try await stopOfferSessionIfCancelled(offer.session)
         guard !offer.sdp.isEmpty else { throw StreamingPathError.invalidOffer }
         if let signaling {
+            startRemoteOfferForwarding(session: offer.session, signaling: signaling)
             startRemoteIceCandidateForwarding(session: offer.session, signaling: signaling)
             startRemoteEndForwarding(session: offer.session, signaling: signaling)
             if Self.envFlagEnabled("_ENABLE_WEBRTC_LOCAL_TRICKLE_ICE", defaultValue: true) {
@@ -270,7 +282,33 @@ public actor WebRTCStreamingPath {
         }
     }
 
+    private func startRemoteOfferForwarding(session: StreamSessionDescriptor, signaling: any StreamSignalingChannel) {
+        remoteOfferTask?.cancel()
+        remoteOfferTask = Task { [weak self, transport] in
+            do {
+                let offers = try await signaling.remoteOffers(for: session)
+                for await offer in offers {
+                    WebRTCMediaTelemetry.capture("webrtc.path.renegotiation.offer_received", level: .info, message: "Received mid-stream re-offer.", attributes: ["sessionId": session.id])
+                    do {
+                        let answer = try await transport.renegotiate(offer: offer)
+                        try await signaling.sendAnswer(answer, for: session)
+                        WebRTCMediaTelemetry.capture("webrtc.path.renegotiation.completed", level: .info, message: "Stream renegotiation completed successfully.", attributes: ["sessionId": session.id])
+                    } catch {
+                        WebRTCMediaTelemetry.capture("webrtc.path.renegotiation.failed", level: .error, message: error.localizedDescription, attributes: ["sessionId": session.id])
+                        if let self {
+                            _ = try? await self.stop(reason: .failed, message: "Stream renegotiation failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
+            } catch {
+                WebRTCMediaTelemetry.capture("webrtc.path.remote_offer.error", level: .warning, message: error.localizedDescription, attributes: ["sessionId": session.id])
+            }
+        }
+    }
+
     private func cancelIceCandidateForwarding() {
+        remoteOfferTask?.cancel()
+        remoteOfferTask = nil
         remoteIceCandidateTask?.cancel()
         remoteIceCandidateTask = nil
         localIceCandidateTask?.cancel()

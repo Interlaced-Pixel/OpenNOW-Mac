@@ -2898,7 +2898,18 @@ int32_t startOrResumeGeronimo(void *sessionPointer,
     {
         std::lock_guard<std::mutex> stateLock(session->stateMutex);
         if (session->state != NativeSessionState::created) {
-            setError(errorBuffer, errorBufferLength, "Native Geronimo start can only be requested once per session.");
+            const char* stateName = "unknown";
+            switch (session->state) {
+                case NativeSessionState::created: stateName = "created"; break;
+                case NativeSessionState::starting: stateName = "starting"; break;
+                case NativeSessionState::streaming: stateName = "streaming"; break;
+                case NativeSessionState::stopping: stateName = "stopping"; break;
+                case NativeSessionState::paused: stateName = "paused"; break;
+                case NativeSessionState::failed: stateName = "failed"; break;
+            }
+            if (errorBuffer != nullptr && errorBufferLength > 0) {
+                snprintf(errorBuffer, errorBufferLength, "Native Geronimo start or resume can only be requested once per session instance. Current state: %s. A new NativeNVSTGeronimoSession must be created to resume or restart.", stateName);
+            }
             return -9;
         }
     }
