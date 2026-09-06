@@ -27,7 +27,8 @@ extension NvstWebRtcBundle {
                                        remoteFingerprint: String,
                                        peerIP: String,
                                        peerPort: UInt16,
-                                       includesMicrophone: Bool = false) -> String {
+                                       includesMicrophone: Bool = false,
+                                       channelCount: Int = 2) -> String {
         let transport = [
             "c=IN IP4 0.0.0.0",
             "a=ice-ufrag:\(remoteUsernameFragment)",
@@ -52,7 +53,7 @@ extension NvstWebRtcBundle {
             "a=rtcp-mux",
             "a=sendonly",
         ]
-        lines += Self.audioCodecLines
+        lines += Self.audioCodecLines(channelCount: channelCount)
         if includesMicrophone {
             // With the mic section in the bundle, Opus pt 111 appears in two audio m-sections and
             // libwebrtc turns payload-type demuxing OFF for every audio section of the bundle
@@ -148,17 +149,22 @@ extension NvstWebRtcBundle {
         usesRedAudio ? "\(redPayloadType) \(opusPayloadType)" : "\(opusPayloadType)"
     }
 
-    /// 48 kHz stereo Opus in 5 ms frames. libwebrtc decodes Opus as mono unless `stereo=1` is
-    /// negotiated. Under RED, pt 63 carries generations of the pt-111 Opus payload.
-    static var audioCodecLines: [String] {
+    /// 48 kHz Opus in 5 ms frames. libwebrtc decodes Opus as mono unless `stereo=1` is
+    /// negotiated, or multi-channel surround when channel count > 2. Under RED, pt 63 carries generations of the pt-111 Opus payload.
+    static func audioCodecLines(channelCount: Int = 2) -> [String] {
         var lines: [String] = []
+        let channels = max(2, channelCount)
         if usesRedAudio {
-            lines.append("a=rtpmap:\(redPayloadType) red/48000/2")
+            lines.append("a=rtpmap:\(redPayloadType) red/48000/\(channels)")
             lines.append("a=fmtp:\(redPayloadType) \(opusPayloadType)/\(opusPayloadType)")
         }
-        lines.append("a=rtpmap:\(opusPayloadType) opus/48000/2")
+        lines.append("a=rtpmap:\(opusPayloadType) opus/48000/\(channels)")
         lines.append("a=fmtp:\(opusPayloadType) minptime=5;stereo=1;sprop-stereo=1;useinbandfec=1")
         return lines
+    }
+
+    static var audioCodecLines: [String] {
+        audioCodecLines(channelCount: 2)
     }
 
     static func replacingIceCredentials(in sdp: String, usernameFragment: String, password: String) -> String {

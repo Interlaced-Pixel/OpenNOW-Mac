@@ -181,7 +181,7 @@ extension NvstBifrostFreeTransport {
         let bundle = NvstWebRtcBundle(handoff: handoff, logger: logger)
         let sender = NvstFeedbackSender()
         do {
-            let identity = try await bundle.prepare(microphone: microphoneSetup)
+            let identity = try await bundle.prepare(microphone: microphoneSetup, channelCount: configuredAudioChannels)
             scheduleVideoHolePunch()
             sender.configure(
                 channelWriter: { payload in _ = bundle.sendFeedback(payload) },
@@ -245,6 +245,9 @@ extension NvstBifrostFreeTransport {
         }
         bundle.onHdrMode = { [weak self] notification in
             Task { await self?.handleHdrMode(notification) }
+        }
+        bundle.onAudioSurroundInfo = { [weak self] surround in
+            Task { await self?.handleAudioSurroundInfo(surround) }
         }
         bundle.onRemoteAudio = { [weak self] count in
             logger?("NVST bundle seat offered \(count) audio track(s)")
@@ -528,6 +531,11 @@ extension NvstBifrostFreeTransport {
         }
         guard let notify = onHdrModeChanged else { return }
         Task { @MainActor in notify(notification) }
+    }
+
+    func handleAudioSurroundInfo(_ surround: NvstAudioSurroundInfo) {
+        logger?(String(format: "NVST audio surround info %@ at %.3fs", surround.summary,
+                       Double(clock.elapsedMicroseconds()) / 1_000_000))
     }
 
     /// Microseconds since this session started, as the remote-input timestamps are expressed.

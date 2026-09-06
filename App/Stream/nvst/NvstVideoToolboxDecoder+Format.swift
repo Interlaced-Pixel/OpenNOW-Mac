@@ -38,12 +38,20 @@ extension NvstVideoToolboxDecoder {
     /// `bitDepthLumaMinus8` in its low three. H.264 sessions on this service are 8-bit 4:2:0 —
     /// the 10-bit and 4:4:4 tiers are only offered on HEVC and AV1 — so `avcC` is not parsed.
     static func bitstreamFormat(from description: CMFormatDescription, codec: NVSTVideoCodec) -> BitstreamFormat {
-        guard codec == .hevc,
-              let atoms = CMFormatDescriptionGetExtension(description, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any],
-              let record = atoms["hvcC"] as? Data else {
-            return BitstreamFormat()
+        if codec == .hevc {
+            guard let atoms = CMFormatDescriptionGetExtension(description, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any],
+                  let record = atoms["hvcC"] as? Data else {
+                return BitstreamFormat()
+            }
+            return bitstreamFormat(hvcC: record)
+        } else if codec == .av1 {
+            guard let atoms = CMFormatDescriptionGetExtension(description, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any],
+                  let record = atoms["av1C"] as? Data else {
+                return BitstreamFormat()
+            }
+            return bitstreamFormat(av1C: record)
         }
-        return bitstreamFormat(hvcC: record)
+        return BitstreamFormat()
     }
 
     static func bitstreamFormat(hvcC record: Data) -> BitstreamFormat {
@@ -55,22 +63,45 @@ extension NvstVideoToolboxDecoder {
         return format
     }
 
-    /// The `CVPixelBuffer` formats to ask VideoToolbox for, best first. Every entry is full range
-    /// and bi-planar: the Metal path samples luma and interleaved chroma as two textures with the
-    /// same normalised coordinates, so 4:2:2 and 4:4:4 chroma planes of any size bind unchanged,
-    /// and full range is what the YCbCr shaders assume. A 10-bit stream asks for the matching
-    /// 10-bit surface so the decoder no longer truncates every frame to 8 bits before the renderer
-    /// sees it. The 8-bit 4:2:0 surface is always the last resort, because VideoToolbox will
-    /// convert down to it from anything.
+    static func bitstreamFormat(av1C record: Data) -> BitstreamFormat {
+        guard record.count >= 4 else { return BitstreamFormat() }
+        let bytes = [UInt8](record)
+        let b2 = bytes[2]
+        let high = (b2 & 0x40) != 0
+        let twelve = (b2 & 0x20) != 0
+        let mono = (b2 & 0x10) != 0
+        let subX = (b2 & 0x08) != 0
+        let subY = (b2 & 0x04) != 0
+        var format = BitstreamFormat()
+        format.bitDepth = high ? (twelve ? 12 : 10) : 8
+        if mono {
+            format.chroma = .monochrome
+        } else if subX && subY {
+            format.chroma = .yuv420
+        } else if subX && !subY {
+            format.chroma = .yuv422
+        } else if !subX && !subY {
+            format.chroma = .yuv444
+        }
+        return format
+    }
+
+    /// The `CVPixelBuffer` formats to ask VideoToolbox for, best first. Every entry is video range
+    /// and bi-planar, matching the vendor client's `VTDecoder::defaultPixelFormat` in `libGeronimo.dylib`.
+    /// The Metal path samples luma and interleaved chroma as two textures with the
+    /// same normalised coordinates, so 4:2:2 and 4:4:4 chroma planes of any size bind unchanged.
+    /// A 10-bit stream asks for the matching 10-bit surface so the decoder no longer truncates every
+    /// frame to 8 bits before the renderer sees it. The 8-bit 4:2:0 surface is always the last resort,
+    /// because VideoToolbox will convert down to it from anything.
     static func preferredOutputPixelFormats(for format: BitstreamFormat) -> [OSType] {
-        let fallback = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        let fallback = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         var preferred: [OSType] = []
         switch (format.chroma, format.isTenBit) {
-        case (.yuv444, true): preferred = [kCVPixelFormatType_444YpCbCr10BiPlanarFullRange, kCVPixelFormatType_420YpCbCr10BiPlanarFullRange]
-        case (.yuv444, false): preferred = [kCVPixelFormatType_444YpCbCr8BiPlanarFullRange]
-        case (.yuv422, true): preferred = [kCVPixelFormatType_422YpCbCr10BiPlanarFullRange, kCVPixelFormatType_420YpCbCr10BiPlanarFullRange]
-        case (.yuv422, false): preferred = [kCVPixelFormatType_422YpCbCr8BiPlanarFullRange]
-        case (_, true): preferred = [kCVPixelFormatType_420YpCbCr10BiPlanarFullRange]
+        case (.yuv444, true): preferred = [kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange]
+        case (.yuv444, false): preferred = [kCVPixelFormatType_444YpCbCr8BiPlanarVideoRange]
+        case (.yuv422, true): preferred = [kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange]
+        case (.yuv422, false): preferred = [kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange]
+        case (_, true): preferred = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange]
         default: preferred = []
         }
         return preferred + [fallback]
@@ -83,6 +114,12 @@ extension NvstVideoToolboxDecoder {
     }
 
     func makeFormatDescription(_ sets: NvstElementaryStream.ParameterSets) throws -> CMVideoFormatDescription {
+        if codec == .av1 {
+            guard let seqHeaderOBU = sets.sequenceParameterSets.first, !seqHeaderOBU.isEmpty else {
+                throw DecoderError.missingParameterSets
+            }
+            return try makeAV1FormatDescription(sequenceHeaderOBU: seqHeaderOBU)
+        }
         let ordered = sets.ordered
         guard !ordered.isEmpty else { throw DecoderError.missingParameterSets }
         // One contiguous allocation so the pointer array stays valid for the whole call;
@@ -195,5 +232,198 @@ extension NvstVideoToolboxDecoder {
 
     static func milliseconds(from start: UInt64, to end: UInt64) -> Double {
         end > start ? Double(end - start) / 1_000_000 : 0
+    }
+
+    struct Av1BitReader {
+        let bytes: [UInt8]
+        var bitOffset: Int = 0
+
+        init(_ data: Data) {
+            self.bytes = [UInt8](data)
+        }
+
+        mutating func readBits(_ count: Int) -> UInt32? {
+            guard count >= 0, count <= 32 else { return nil }
+            var result: UInt32 = 0
+            for _ in 0..<count {
+                let byteIndex = bitOffset / 8
+                let bitIndex = 7 - (bitOffset % 8)
+                guard byteIndex < bytes.count else { return nil }
+                let bit = (UInt32(bytes[byteIndex]) >> bitIndex) & 1
+                result = (result << 1) | bit
+                bitOffset += 1
+            }
+            return result
+        }
+
+        mutating func readUvlc() -> UInt32? {
+            var leadingZeros = 0
+            while let bit = readBits(1), bit == 0 {
+                leadingZeros += 1
+                if leadingZeros > 32 { return nil }
+            }
+            if leadingZeros == 0 { return 0 }
+            guard let value = readBits(leadingZeros) else { return nil }
+            return (1 << leadingZeros) - 1 + value
+        }
+    }
+
+    struct Av1SequenceHeaderInfo {
+        var seqProfile: UInt32 = 0
+        var seqLevelIdx: UInt32 = 0
+        var seqTier: UInt32 = 0
+        var highBitdepth: Bool = false
+        var twelveBit: Bool = false
+        var monochrome: Bool = false
+        var subsamplingX: Bool = true
+        var subsamplingY: Bool = true
+        var chromaSamplePosition: UInt32 = 0
+        var width: Int = 1920
+        var height: Int = 1080
+    }
+
+    static func parseAV1SequenceHeader(_ data: Data) -> Av1SequenceHeaderInfo? {
+        guard !data.isEmpty else { return nil }
+        let header = data[data.startIndex]
+        guard (header & 0x80) == 0 else { return nil }
+        let hasExtension = (header & 0x04) != 0
+        let hasSize = (header & 0x02) != 0
+        var offset = 1
+        if hasExtension { offset += 1 }
+        if hasSize {
+            while offset < data.count {
+                let byte = data[data.startIndex + offset]
+                offset += 1
+                if (byte & 0x80) == 0 { break }
+            }
+        }
+        guard offset < data.count else { return nil }
+        let payload = data.dropFirst(offset)
+        var bitReader = Av1BitReader(payload)
+        guard let seqProfile = bitReader.readBits(3),
+              let _ = bitReader.readBits(1),
+              let reducedStillPicture = bitReader.readBits(1) else { return nil }
+        var info = Av1SequenceHeaderInfo()
+        info.seqProfile = seqProfile
+        if reducedStillPicture == 1 {
+            guard let level = bitReader.readBits(5),
+                  let widthBits = bitReader.readBits(4),
+                  let heightBits = bitReader.readBits(4),
+                  let maxW = bitReader.readBits(Int(widthBits + 1)),
+                  let maxH = bitReader.readBits(Int(heightBits + 1)) else { return nil }
+            info.seqLevelIdx = level
+            info.width = Int(maxW + 1)
+            info.height = Int(maxH + 1)
+        } else {
+            guard let timingInfoPresent = bitReader.readBits(1) else { return nil }
+            if timingInfoPresent == 1 {
+                _ = bitReader.readBits(32)
+                _ = bitReader.readBits(32)
+                guard let equalPicInterval = bitReader.readBits(1) else { return nil }
+                if equalPicInterval == 1 { _ = bitReader.readUvlc() }
+            }
+            guard let initialDisplayDelayPresent = bitReader.readBits(1),
+                  let opCountMinus1 = bitReader.readBits(5) else { return nil }
+            for _ in 0...opCountMinus1 {
+                _ = bitReader.readBits(12)
+                guard let level = bitReader.readBits(5) else { return nil }
+                info.seqLevelIdx = level
+                if level > 7 {
+                    if let tier = bitReader.readBits(1) { info.seqTier = tier }
+                }
+                if initialDisplayDelayPresent == 1 {
+                    if let delayPresent = bitReader.readBits(1), delayPresent == 1 {
+                        _ = bitReader.readBits(4)
+                    }
+                }
+            }
+            guard let widthBits = bitReader.readBits(4),
+                  let heightBits = bitReader.readBits(4),
+                  let maxW = bitReader.readBits(Int(widthBits + 1)),
+                  let maxH = bitReader.readBits(Int(heightBits + 1)) else { return nil }
+            info.width = Int(maxW + 1)
+            info.height = Int(maxH + 1)
+            if let frameIdNumbersPresent = bitReader.readBits(1), frameIdNumbersPresent == 1 {
+                _ = bitReader.readBits(7)
+            }
+            _ = bitReader.readBits(3)
+            _ = bitReader.readBits(5)
+            if let orderHint = bitReader.readBits(1), orderHint == 1 {
+                _ = bitReader.readBits(2)
+            }
+            if let chooseScreenTools = bitReader.readBits(1) {
+                var forceScreen = 2
+                if chooseScreenTools == 0 {
+                    if let f = bitReader.readBits(1) { forceScreen = Int(f) }
+                }
+                if forceScreen > 0 {
+                    if let chooseIntMv = bitReader.readBits(1), chooseIntMv == 0 {
+                        _ = bitReader.readBits(1)
+                    }
+                }
+            }
+            _ = bitReader.readBits(3)
+            if let highBitdepth = bitReader.readBits(1) {
+                info.highBitdepth = highBitdepth == 1
+                if seqProfile == 2 && highBitdepth == 1 {
+                    if let twelve = bitReader.readBits(1) { info.twelveBit = twelve == 1 }
+                }
+                if seqProfile != 1 {
+                    if let mono = bitReader.readBits(1) { info.monochrome = mono == 1 }
+                }
+                if !info.monochrome {
+                    if seqProfile == 0 {
+                        info.subsamplingX = true
+                        info.subsamplingY = true
+                    } else if seqProfile == 1 {
+                        info.subsamplingX = false
+                        info.subsamplingY = false
+                    }
+                }
+            }
+        }
+        return info
+    }
+
+    func makeAV1FormatDescription(sequenceHeaderOBU: Data) throws -> CMVideoFormatDescription {
+        let info = Self.parseAV1SequenceHeader(sequenceHeaderOBU) ?? Av1SequenceHeaderInfo()
+        var av1c = Data([
+            0x81,
+            UInt8(((info.seqProfile & 0x07) << 5) | (info.seqLevelIdx & 0x1f)),
+            UInt8(((info.seqTier & 0x01) << 7)
+                | ((info.highBitdepth ? 1 : 0) << 6)
+                | ((info.twelveBit ? 1 : 0) << 5)
+                | ((info.monochrome ? 1 : 0) << 4)
+                | ((info.subsamplingX ? 1 : 0) << 3)
+                | ((info.subsamplingY ? 1 : 0) << 2)
+                | (info.chromaSamplePosition & 0x03)),
+            0x00
+        ])
+        av1c.append(sequenceHeaderOBU)
+
+        let atoms: [String: Any] = ["av1C": av1c]
+        let bitDepth = info.highBitdepth ? (info.twelveBit ? 12 : 10) : 8
+        let extensions: [CFString: Any] = [
+            kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms: atoms,
+            "BitsPerComponent" as CFString: bitDepth,
+        ]
+
+        var description: CMFormatDescription?
+        let status = CMVideoFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            codecType: kCMVideoCodecType_AV1,
+            width: Int32(info.width),
+            height: Int32(info.height),
+            extensions: extensions as CFDictionary,
+            formatDescriptionOut: &description
+        )
+        guard status == noErr, let description else { throw DecoderError.formatDescriptionFailed(status) }
+        let format = Self.bitstreamFormat(from: description, codec: .av1)
+        statsLock.lock()
+        currentBitstreamFormat = format
+        statsLock.unlock()
+        let hex = sequenceHeaderOBU.map { String(format: "%02x", $0) }.joined()
+        onDecodeFailure?(0, "NVST AV1 sequence header \(format.summary): \(hex)")
+        return description
     }
 }

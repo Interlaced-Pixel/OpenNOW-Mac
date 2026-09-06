@@ -81,4 +81,32 @@ extension NvstBifrostFreeTransport {
         case .av1: .av1
         }
     }
+
+    /// Reads the negotiated or requested audio channels (2 for stereo, 6 for 5.1, 8 for 7.1) out of the allocation.
+    static func sessionAudioChannels(from allocation: NativeNVSTSessionAllocation) -> Int {
+        for json in [allocation.settingsJSON, allocation.sessionInfoJSON, allocation.rawSessionJSON] {
+            guard let data = json.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let candidates: [[String: Any]] = [
+                object["negotiatedStreamProfile"] as? [String: Any] ?? [:],
+                object["sessionRequestData"] as? [String: Any] ?? [:],
+                object
+            ]
+            for dict in candidates {
+                if let mode = (dict["audioMode"] as? NSNumber)?.intValue {
+                    if mode >= 8 { return 8 }
+                    if mode >= 6 { return 6 }
+                }
+                if let surround = (dict["surroundAudioInfo"] as? NSNumber)?.intValue {
+                    if surround == 3 { return 8 }
+                    if surround == 1 || surround == 2 { return 6 }
+                }
+                if let format = dict["audioModeFormat"] as? String {
+                    if format.contains("7_1") || format.contains("7.1") { return 8 }
+                    if format.contains("5_1") || format.contains("5.1") { return 6 }
+                }
+            }
+        }
+        return 2
+    }
 }

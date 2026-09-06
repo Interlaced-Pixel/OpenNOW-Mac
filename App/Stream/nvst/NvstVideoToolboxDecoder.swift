@@ -96,7 +96,7 @@ public final class NvstVideoToolboxDecoder: @unchecked Sendable {
     public var onDecodeCompleted: (@Sendable (Bool) -> Void)?
 
     public init(codec: NVSTVideoCodec) throws {
-        guard codec == .h264 || codec == .hevc else {
+        guard codec == .h264 || codec == .hevc || codec == .av1 else {
             throw DecoderError.unsupportedCodec(codec.rawValue)
         }
         self.codec = codec

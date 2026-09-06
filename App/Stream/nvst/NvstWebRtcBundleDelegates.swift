@@ -96,6 +96,12 @@ extension NvstWebRtcBundle {
             onHdrMode?(hdrMode)
             return
         }
+        if let surround = NvstAudioSurroundInfo.parse(command) {
+            logger?("NVST audio surround info \(surround.summary) payload=\(command.payload.prefix(16).map { String(format: "%02x", $0) }.joined())")
+            lock.withLock { currentAudioSurroundInfo = surround }
+            onAudioSurroundInfo?(surround)
+            return
+        }
         guard let cursor = NvstRemoteCursor.from(command) else {
             describeCursorCommandIfUnparsed(command)
             return

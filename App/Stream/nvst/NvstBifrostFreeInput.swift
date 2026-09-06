@@ -204,9 +204,16 @@ extension NvstBifrostFreeTransport {
     /// `notRunning`, which reads as "no session" and sent me looking in the wrong place once
     /// already with `sendAbsoluteMouseMove`. They still fail, but they now say why.
     public func setMaximumBitrateKbps(_ bitrateKbps: UInt32) async throws {
-        throw NativeNVSTError.transportFailed(
-            "Changing the maximum bitrate mid-session is not implemented on the Bifrost-free path; "
-            + "the announced cap comes from the negotiated session profile.")
+        guard let bundle else { throw NativeNVSTError.notRunning }
+        var writer = NvstByteWriter(capacity: 8)
+        writer.u32LE(0)
+        writer.u32LE(bitrateKbps)
+        let command = NvstControlCommand(code: .maxBitrateChange, payload: writer.data)
+        guard bundle.sendControl(command) else {
+            throw NativeNVSTError.transportFailed(
+                "Failed to send maximum bitrate change (\(bitrateKbps) kbps) over control channel")
+        }
+        logger?("NVST sent maximum bitrate change: \(bitrateKbps) kbps")
     }
 
     /// Audio's mean jitter-buffer dwell since the previous snapshot, from libwebrtc's cumulative
@@ -325,11 +332,29 @@ extension NvstBifrostFreeTransport {
     // Session-peak tracker for the NVST SESSION SUMMARY line (see logCounters).
 
     public func setDynamicStreamingMode(_ mode: NativeNVSTDynamicStreamingMode) async throws {
-        throw NativeNVSTError.transportFailed("Dynamic streaming mode is not implemented on the Bifrost-free path.")
+        guard let bundle else { throw NativeNVSTError.notRunning }
+        var writer = NvstByteWriter(capacity: 8)
+        writer.u32LE(0)
+        writer.u32LE(UInt32(mode.rawValue))
+        let command = NvstControlCommand(code: .qosPreferenceChange, payload: writer.data)
+        guard bundle.sendControl(command) else {
+            throw NativeNVSTError.transportFailed(
+                "Failed to send dynamic streaming mode change (\(mode)) over control channel")
+        }
+        logger?("NVST sent dynamic streaming mode change: \(mode)")
     }
 
     public func setL4SEnabled(_ enabled: Bool) async throws {
-        throw NativeNVSTError.transportFailed("L4S toggling is not implemented on the Bifrost-free path.")
+        guard let bundle else { throw NativeNVSTError.notRunning }
+        var writer = NvstByteWriter(capacity: 8)
+        writer.u32LE(0)
+        writer.u32LE(enabled ? 1 : 0)
+        let command = NvstControlCommand(code: .l4sStateChange, payload: writer.data)
+        guard bundle.sendControl(command) else {
+            throw NativeNVSTError.transportFailed(
+                "Failed to send L4S state change (\(enabled)) over control channel")
+        }
+        logger?("NVST sent L4S state change: \(enabled)")
     }
 
     /// Announces exactly the pads in `topology`. This is how a Remote Co-Op guest becomes player 2

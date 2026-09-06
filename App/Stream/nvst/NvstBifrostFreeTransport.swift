@@ -290,6 +290,8 @@ public actor NvstBifrostFreeTransport: NativeNVSTTransport {
     /// The session's colour tier (`8bit_420`, `10bit_420`, `10bit_444`, ...), announced as
     /// `video[0].bitDepth` / `chromaFormat` so the ANNOUNCE agrees with what the session PUT asked for.
     let configuredColorQuality: String?
+    /// Configured audio channel count (2 for stereo, 6 for 5.1, 8 for 7.1).
+    var configuredAudioChannels: Int = 2
 
     public init(pixelBufferSink: PixelBufferSink? = nil,
                 configuredFps: Int? = nil,
@@ -347,6 +349,8 @@ public actor NvstBifrostFreeTransport: NativeNVSTTransport {
         let profile = Self.resolvedStreamProfile(allocation: allocation,
                                                  configuredFps: configuredFps,
                                                  configuredMaxBitrateKbps: configuredMaxBitrateKbps)
+        let audioChannels = Self.sessionAudioChannels(from: allocation)
+        self.configuredAudioChannels = audioChannels
         negotiatedFps = profile.fps
         negotiatedResolution = profile.resolution
         negotiatedCodec = profile.codec
@@ -354,7 +358,7 @@ public actor NvstBifrostFreeTransport: NativeNVSTTransport {
         // "we failed to read the fps" (fps=nil, pacing 16667) from "the seat dropped it" (fps=120,
         // pacing 8333, stream still 60 — the seat's own dynamic fps control under 5K load).
         logger?("NVST profile fps=\(profile.fps.map(String.init) ?? "nil") resolution=\(profile.resolution ?? "nil")"
-                + " codec=\(profile.codec ?? "nil") pacingTargetUs=\(sessionFrameTimeMicroseconds) maxKbps=\(profile.maximumBitrateKbps.map(String.init) ?? "nil") initKbps=\(profile.bitrateKbps.map(String.init) ?? "nil")")
+                + " codec=\(profile.codec ?? "nil") audioChannels=\(audioChannels) pacingTargetUs=\(sessionFrameTimeMicroseconds) maxKbps=\(profile.maximumBitrateKbps.map(String.init) ?? "nil") initKbps=\(profile.bitrateKbps.map(String.init) ?? "nil")")
 
         let stream = AsyncStream<NativeNVSTTransportTermination>.makeStream()
         terminationStream = stream.stream
@@ -652,6 +656,7 @@ extension NvstBifrostFreeTransport {
             prefilterDenoise: configuredPrefilterDenoise,
             prefilterModel: configuredPrefilterModel,
             colorQuality: configuredColorQuality,
+            audioChannels: configuredAudioChannels,
             timeout: controlTimeout,
             // The negotiator raises this to 1 when the bundle comes up; false is the fallback that
             // keeps feedback as SRTCP on the Mjolnir socket.

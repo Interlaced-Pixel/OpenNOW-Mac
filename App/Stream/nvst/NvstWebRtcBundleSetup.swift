@@ -55,13 +55,13 @@ extension NvstWebRtcBundle {
     /// Supplying `microphone` adds the mic send section to the synthesized offer and attaches the
     /// local sender before the answer is created: NVST has no renegotiation, so a mic m-line that
     /// is not in this first answer can never appear for this session.
-    public func prepare(microphone: MicrophoneSetup? = nil) async throws -> Identity {
-        guard let microphone else { return try await bringUp(includesMicrophone: false, microphone: nil) }
+    public func prepare(microphone: MicrophoneSetup? = nil, channelCount: Int = 2) async throws -> Identity {
+        guard let microphone else { return try await bringUp(includesMicrophone: false, microphone: nil, channelCount: channelCount) }
         do {
-            return try await bringUp(includesMicrophone: true, microphone: microphone)
+            return try await bringUp(includesMicrophone: true, microphone: microphone, channelCount: channelCount)
         } catch BundleError.microphoneNotArmed {
             logger?("NVST bundle rebuilding without the mic section: an answered mic m-line with no usable sender makes the seat withhold game audio")
-            return try await bringUp(includesMicrophone: false, microphone: nil)
+            return try await bringUp(includesMicrophone: false, microphone: nil, channelCount: channelCount)
         }
     }
 
@@ -70,7 +70,7 @@ extension NvstWebRtcBundle {
     /// pass throws `microphoneNotArmed` and the caller rebuilds without the section — live
     /// sessions showed a 3-m-line answer with a dead mid-2 (even `inactive`, nothing sent)
     /// makes the seat withhold game audio, whatever the ANNOUNCE says.
-    private func bringUp(includesMicrophone: Bool, microphone: MicrophoneSetup?) async throws -> Identity {
+    private func bringUp(includesMicrophone: Bool, microphone: MicrophoneSetup?, channelCount: Int = 2) async throws -> Identity {
         guard let credentials = handoff.iceCredentials else { throw BundleError.missingRemoteCredentials }
         guard let remoteFingerprint = credentials.remoteDTLSFingerprint, !remoteFingerprint.isEmpty else {
             throw BundleError.missingRemoteFingerprint
@@ -91,7 +91,8 @@ extension NvstWebRtcBundle {
             remoteFingerprint: remoteFingerprint,
             peerIP: handoff.videoPeerIP,
             peerPort: handoff.videoPeerPort,
-            includesMicrophone: includesMicrophone
+            includesMicrophone: includesMicrophone,
+            channelCount: channelCount
         )
         try await setRemoteDescription(connection, RTCSessionDescription(type: .offer, sdp: offer))
 
