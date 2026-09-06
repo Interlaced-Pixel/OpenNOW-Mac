@@ -366,7 +366,7 @@ struct NativeNVSTMediaStreamSurface: View {
         microphoneEnabled = false
         microphoneDesiredEnabled = false
         microphonePendingStates.removeAll()
-        let initialMicrophoneEnabled = microphoneConfiguration.initiallyEnabled
+        let initialMicrophoneEnabled = microphoneConfiguration.initiallyEnabled && profile.streamMicrophoneEnabled
         antiAFKMouseMovementEnabled = profile.antiAFKMouseMovementEnabled
         networkGovernor = NativeNVSTNetworkGovernor(maximumBitrateKbps: UInt32(max(1, profile.maxBitrateMbps) * 1_000), l4sEnabled: profile.enableL4S)
         nativeStreamHealth = NativeNVSTStreamHealthMonitor()
@@ -851,6 +851,8 @@ struct NativeNVSTMediaStreamSurface: View {
             guard !streamControlsVisible else { return }
             setUnifiedHUDVisible(!unifiedHUDVisible)
         case .toggleMicrophone:
+            let profile = StreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: StreamPreferences.loadDeviceCapabilities())
+            guard profile.microphoneShortcutEnabled else { return }
             toggleNativeMicrophone()
         case .toggleRecording:
             toggleRecording()
@@ -890,6 +892,9 @@ struct NativeNVSTMediaStreamSurface: View {
                     try await path.setMicrophoneEnabled(target)
                     guard !Task.isCancelled, !didEnd else { return }
                     microphoneEnabled = target
+                    if source == "toggle" {
+                        StreamPreferences.saveStreamMicrophoneEnabled(target)
+                    }
                     let enabledMessage = microphoneMode == "voice-activity" ? "Voice Activity On" : "Microphone On"
                     showNativeTransientStreamMessage(target ? enabledMessage : "Microphone Muted")
                     NativeNVSTMediaTelemetry.capture("nvst.ui.microphone.update", level: .info, message: target ? "Native NVST microphone enabled." : "Native NVST microphone muted.", attributes: ["applicationID": configuration.applicationID, "enabled": String(target), "source": source])

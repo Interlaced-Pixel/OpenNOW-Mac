@@ -210,6 +210,7 @@ struct WebRTCMediaStreamHostView: View {
             configuration: configuration,
             sessionProvider: coordinator,
             signaling: coordinator,
+            onMicrophoneStateChange: { enabled in StreamPreferences.saveStreamMicrophoneEnabled(enabled) },
             onAntiAFKStateChange: { enabled in StreamPreferences.saveAntiAFKMouseMovementEnabled(enabled) },
             onVideoEnhancementChange: { mode, sharpness, denoise in
                 StreamPreferences.saveUpscalingSettings(mode: mode, sharpness: sharpness, denoise: denoise, forGame: configuration.applicationID)

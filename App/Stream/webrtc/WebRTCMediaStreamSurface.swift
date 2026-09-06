@@ -212,11 +212,14 @@ struct StreamSessionSidebarLimit: Equatable {
     }
 }
 
+public typealias WebRTCMediaMicrophoneStateChangeCallback = @MainActor @Sendable (_ enabled: Bool) -> Void
+
 @MainActor
 public struct WebRTCMediaStreamSurface: View {
     private let configuration: PreparedLaunchConfiguration
     private let sessionProvider: any StreamSessionProvider
     private let signaling: (any StreamSignalingChannel)?
+    private let onMicrophoneStateChange: WebRTCMediaMicrophoneStateChangeCallback?
     private let onAntiAFKStateChange: WebRTCMediaAntiAFKStateChangeCallback?
     private let onVideoEnhancementChange: WebRTCMediaVideoEnhancementChangeCallback?
     private let preventDisplaySleep: Bool
@@ -265,6 +268,7 @@ public struct WebRTCMediaStreamSurface: View {
     public init(configuration: PreparedLaunchConfiguration,
                 sessionProvider: any StreamSessionProvider,
                 signaling: (any StreamSignalingChannel)? = nil,
+                onMicrophoneStateChange: WebRTCMediaMicrophoneStateChangeCallback? = nil,
                 onAntiAFKStateChange: WebRTCMediaAntiAFKStateChangeCallback? = nil,
                 onVideoEnhancementChange: WebRTCMediaVideoEnhancementChangeCallback? = nil,
                 preventDisplaySleep: Bool = true,
@@ -273,6 +277,7 @@ public struct WebRTCMediaStreamSurface: View {
         self.configuration = configuration
         self.sessionProvider = sessionProvider
         self.signaling = signaling
+        self.onMicrophoneStateChange = onMicrophoneStateChange
         self.onAntiAFKStateChange = onAntiAFKStateChange
         self.onVideoEnhancementChange = onVideoEnhancementChange
         self.preventDisplaySleep = preventDisplaySleep
@@ -294,7 +299,7 @@ public struct WebRTCMediaStreamSurface: View {
                 }
             }
             if !isStreamReady { launchOverlay }
-            if isStreamReady && !quitMenuVisible { microphoneToggleOverlay }
+            if isStreamReady && !quitMenuVisible && runtimeSettings.showStreamMicToggle { microphoneToggleOverlay }
             if statsVisible { statsHUD }
             if unifiedHUDVisible { unifiedHUD }
             if isStreamReady { sessionLimitCountdownOverlay }
@@ -1276,7 +1281,7 @@ public struct WebRTCMediaStreamSurface: View {
                 sessionLimit = StreamSessionSidebarLimit(session: session)
                 publishSessionLimitProgress()
                 runtimeSettings = StreamRuntimeSettings(json: session.metadata["settings"])
-                microphoneEnabled = runtimeSettings.microphoneMode == "voice-activity"
+                microphoneEnabled = runtimeSettings.microphoneMode == "voice-activity" && runtimeSettings.streamMicrophoneEnabled
                 transport.setMicrophoneEnabled(microphoneEnabled)
                 nativeView.directMouseInputEnabled = runtimeSettings.directMouseInput
                 nativeView.setStreamContentSize(width: runtimeSettings.resolutionWidth, height: runtimeSettings.resolutionHeight)
@@ -1392,6 +1397,7 @@ public struct WebRTCMediaStreamSurface: View {
     }
 
     private func microphoneToggleAction(for keyboard: KeyboardEvent) -> StreamInputAction? {
+        guard runtimeSettings.microphoneShortcutEnabled else { return nil }
         guard keyboard.modifiers.intersection(Self.hotkeyModifierMask) == .command, Int(keyboard.keyCode) == Self.microphoneToggleKeyCode else { return nil }
         guard keyboard.isPressed else { return .drop }
         toggleMicrophone()
@@ -1433,6 +1439,7 @@ public struct WebRTCMediaStreamSurface: View {
         case .toggleUnifiedHUD:
             toggleUnifiedHUD()
         case .toggleMicrophone:
+            guard runtimeSettings.microphoneShortcutEnabled else { return }
             toggleMicrophone()
         case .toggleRecording:
             toggleRecording()
@@ -1495,10 +1502,14 @@ public struct WebRTCMediaStreamSurface: View {
         guard runtimeSettings.microphoneMode != "disabled" else {
             microphoneEnabled = false
             transport?.setMicrophoneEnabled(false)
+            onMicrophoneStateChange?(false)
+            StreamPreferences.saveStreamMicrophoneEnabled(false)
             return
         }
         microphoneEnabled.toggle()
         transport?.setMicrophoneEnabled(microphoneEnabled)
+        onMicrophoneStateChange?(microphoneEnabled)
+        StreamPreferences.saveStreamMicrophoneEnabled(microphoneEnabled)
         WebRTCMediaTelemetry.capture("webrtc.ui.microphone.toggle", level: .info, message: microphoneEnabled ? "Microphone enabled." : "Microphone muted.", attributes: ["enabled": String(microphoneEnabled)])
     }
 
@@ -1736,6 +1747,9 @@ private struct StreamRuntimeSettings: Equatable {
     var microphoneVolume = 1.0
     var microphonePushToTalkKeyCode = 9
     var microphonePushToTalkModifierMask = 0
+    var streamMicrophoneEnabled = true
+    var showStreamMicToggle = true
+    var microphoneShortcutEnabled = true
     var suppressInputWhenInactive = true
     var directMouseInput = true
     var antiAFKMouseMovementEnabled = false
@@ -1779,6 +1793,9 @@ private struct StreamRuntimeSettings: Equatable {
         microphoneVolume = Self.double(dictionary["microphoneVolume"], fallback: 1.0)
         microphonePushToTalkKeyCode = Self.int(dictionary["microphonePushToTalkKeyCode"], fallback: 9)
         microphonePushToTalkModifierMask = Self.int(dictionary["microphonePushToTalkModifierMask"])
+        streamMicrophoneEnabled = Self.bool(dictionary["streamMicrophoneEnabled"], fallback: true)
+        showStreamMicToggle = Self.bool(dictionary["showStreamMicToggle"], fallback: true)
+        microphoneShortcutEnabled = Self.bool(dictionary["microphoneShortcutEnabled"], fallback: true)
         suppressInputWhenInactive = Self.bool(dictionary["suppressInputWhenInactive"], fallback: true)
         directMouseInput = Self.bool(dictionary["directMouseInput"], fallback: true)
         antiAFKMouseMovementEnabled = Self.bool(dictionary["antiAFKMouseMovementEnabled"])

@@ -1927,6 +1927,24 @@ final class CatalogViewModel: ObservableObject {
         loadSettingsPreferences()
     }
 
+    var showStreamMicToggle: Bool {
+        StreamPreferences.loadShowStreamMicToggle()
+    }
+
+    func setShowStreamMicToggle(_ enabled: Bool) {
+        StreamPreferences.saveShowStreamMicToggle(enabled)
+        loadSettingsPreferences()
+    }
+
+    var streamMicrophoneEnabled: Bool {
+        StreamPreferences.loadStreamMicrophoneEnabled()
+    }
+
+    func setStreamMicrophoneEnabled(_ enabled: Bool) {
+        StreamPreferences.saveStreamMicrophoneEnabled(enabled)
+        loadSettingsPreferences()
+    }
+
     func restoreStreamingProfileDefaults() {
         StreamPreferences.restoreStreamingProfileDefaults()
         actionMessage = "Streaming profile defaults restored."

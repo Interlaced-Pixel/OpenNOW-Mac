@@ -102,6 +102,9 @@ public struct WebRTCMediaStreamProfile: Equatable, Sendable {
     public var microphonePushToTalkModifierMask: Int
     public var gameVolume: Double
     public var microphoneVolume: Double
+    public var streamMicrophoneEnabled: Bool
+    public var showStreamMicToggle: Bool
+    public var microphoneShortcutEnabled: Bool
     public var upscalingMode: Int
     public var upscalingSharpness: Int
     public var upscalingDenoise: Int
@@ -139,6 +142,9 @@ public struct WebRTCMediaStreamProfile: Equatable, Sendable {
                 microphonePushToTalkModifierMask: Int = 0,
                 gameVolume: Double = 1,
                 microphoneVolume: Double = 1,
+                streamMicrophoneEnabled: Bool = true,
+                showStreamMicToggle: Bool = true,
+                microphoneShortcutEnabled: Bool = true,
                 upscalingMode: Int = 0,
                 upscalingSharpness: Int = 10,
                 upscalingDenoise: Int = 0,
@@ -175,6 +181,9 @@ public struct WebRTCMediaStreamProfile: Equatable, Sendable {
         self.microphonePushToTalkModifierMask = microphonePushToTalkModifierMask
         self.gameVolume = min(max(gameVolume, 0), 1)
         self.microphoneVolume = min(max(microphoneVolume, 0), 1)
+        self.streamMicrophoneEnabled = streamMicrophoneEnabled
+        self.showStreamMicToggle = showStreamMicToggle
+        self.microphoneShortcutEnabled = microphoneShortcutEnabled
         self.upscalingMode = upscalingMode
         self.upscalingSharpness = upscalingSharpness
         self.upscalingDenoise = upscalingDenoise
@@ -215,6 +224,9 @@ public struct WebRTCMediaResolvedStreamSettings: Equatable, Sendable {
     public var microphonePushToTalkModifierMask: Int
     public var gameVolume: Double
     public var microphoneVolume: Double
+    public var streamMicrophoneEnabled: Bool
+    public var showStreamMicToggle: Bool
+    public var microphoneShortcutEnabled: Bool
     public var upscalingMode: Int
     public var upscalingSharpness: Int
     public var upscalingDenoise: Int
@@ -257,6 +269,9 @@ public struct WebRTCMediaResolvedStreamSettings: Equatable, Sendable {
             "microphonePushToTalkModifierMask": microphonePushToTalkModifierMask,
             "gameVolume": gameVolume,
             "microphoneVolume": microphoneVolume,
+            "streamMicrophoneEnabled": streamMicrophoneEnabled,
+            "showStreamMicToggle": showStreamMicToggle,
+            "microphoneShortcutEnabled": microphoneShortcutEnabled,
             "upscalingMode": upscalingMode,
             "upscalingSharpness": upscalingSharpness,
             "upscalingDenoise": upscalingDenoise,
@@ -317,6 +332,9 @@ public enum WebRTCMediaStreamSettingsResolver {
             microphonePushToTalkModifierMask: profile.microphonePushToTalkModifierMask,
             gameVolume: profile.gameVolume,
             microphoneVolume: profile.microphoneVolume,
+            streamMicrophoneEnabled: profile.streamMicrophoneEnabled,
+            showStreamMicToggle: profile.showStreamMicToggle,
+            microphoneShortcutEnabled: profile.microphoneShortcutEnabled,
             upscalingMode: upscalingMode,
             upscalingSharpness: profile.upscalingSharpness,
             upscalingDenoise: profile.upscalingDenoise,

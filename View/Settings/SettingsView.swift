@@ -1277,6 +1277,13 @@ private struct GameplaySettingsPage: View {
                     isOn: viewModel.microphoneShortcutEnabled,
                     action: viewModel.setMicrophoneShortcutEnabled
                 )
+                SettingsDivider()
+                SettingsToggleRow(
+                    title: "Show Stream Mic Toggle",
+                    subtitle: "Display on-screen microphone toggle button during active streams.",
+                    isOn: viewModel.showStreamMicToggle,
+                    action: viewModel.setShowStreamMicToggle
+                )
             }
 
             SettingsCard(title: "Profile Maintenance") {

@@ -278,6 +278,9 @@ public struct StreamPreferenceProfile: Equatable, Sendable {
     public var preventDisplaySleepWhileStreaming = true
     public var gameVolume = 1.0
     public var microphoneVolume = 1.0
+    public var streamMicrophoneEnabled = true
+    public var showStreamMicToggle = true
+    public var microphoneShortcutEnabled = true
     public var microphoneMode = "disabled"
     public var microphoneDeviceId = ""
     public var microphonePushToTalkKeyCode = 9
@@ -469,6 +472,8 @@ public enum StreamPreferences {
         Keys.preventDisplaySleepWhileStreaming,
         Keys.gameVolume,
         Keys.microphoneVolume,
+        Keys.streamMicrophoneEnabled,
+        Keys.showStreamMicToggle,
         Keys.microphoneShortcutEnabled,
         Keys.microphoneMode,
         Keys.microphoneDeviceId,
@@ -1104,6 +1109,10 @@ public enum StreamPreferences {
     public static func savePreventDisplaySleepWhileStreaming(_ value: Bool) { storage.set(value, forKey: k.preventDisplaySleepWhileStreaming) }
     public static func saveGameVolume(_ value: Double) { storage.set(min(max(value, 0.0), 1.0), forKey: k.gameVolume) }
     public static func saveMicrophoneVolume(_ value: Double) { storage.set(min(max(value, 0.0), 1.0), forKey: k.microphoneVolume) }
+    public static func loadStreamMicrophoneEnabled() -> Bool { bool(storage.object(forKey: k.streamMicrophoneEnabled), true) }
+    public static func saveStreamMicrophoneEnabled(_ value: Bool) { storage.set(value, forKey: k.streamMicrophoneEnabled) }
+    public static func loadShowStreamMicToggle() -> Bool { bool(storage.object(forKey: k.showStreamMicToggle), true) }
+    public static func saveShowStreamMicToggle(_ value: Bool) { storage.set(value, forKey: k.showStreamMicToggle) }
     public static func loadMicrophoneShortcutEnabled() -> Bool { bool(storage.object(forKey: k.microphoneShortcutEnabled), true) }
     public static func saveMicrophoneShortcutEnabled(_ value: Bool) { storage.set(value, forKey: k.microphoneShortcutEnabled) }
     public static func saveMicrophoneMode(_ mode: String) { storage.set(microphoneModeOptions.contains { $0.value == mode } ? mode : microphoneModeOptions[0].value, forKey: k.microphoneMode) }
@@ -1191,6 +1200,9 @@ public enum StreamPreferences {
         profile.preventDisplaySleepWhileStreaming = bool(value(dictionary, k.preventDisplaySleepWhileStreaming), true)
         profile.gameVolume = clampedDouble(dictionary, k.gameVolume, 1, 0, 1)
         profile.microphoneVolume = clampedDouble(dictionary, k.microphoneVolume, 1, 0, 1)
+        profile.streamMicrophoneEnabled = bool(value(dictionary, k.streamMicrophoneEnabled), true)
+        profile.showStreamMicToggle = bool(value(dictionary, k.showStreamMicToggle), true)
+        profile.microphoneShortcutEnabled = bool(value(dictionary, k.microphoneShortcutEnabled), true)
         profile.microphoneMode = string(value(dictionary, k.microphoneMode), "disabled")
         if !microphoneModeOptions.contains(where: { $0.value == profile.microphoneMode }) { profile.microphoneMode = "disabled" }
         profile.microphoneDeviceId = string(value(dictionary, k.microphoneDeviceId), "")
@@ -1240,6 +1252,9 @@ public enum StreamPreferences {
             k.preventDisplaySleepWhileStreaming: profile.preventDisplaySleepWhileStreaming,
             k.gameVolume: profile.gameVolume,
             k.microphoneVolume: profile.microphoneVolume,
+            k.streamMicrophoneEnabled: profile.streamMicrophoneEnabled,
+            k.showStreamMicToggle: profile.showStreamMicToggle,
+            k.microphoneShortcutEnabled: profile.microphoneShortcutEnabled,
             k.microphoneMode: profile.microphoneMode,
             k.microphonePushToTalkKeyCode: profile.microphonePushToTalkKeyCode,
             k.microphonePushToTalkModifierMask: profile.microphonePushToTalkModifierMask
@@ -1938,6 +1953,8 @@ public enum StreamPreferences {
         static let preventDisplaySleepWhileStreaming = "PixelNOW.Stream.PreventDisplaySleepWhileStreaming"
         static let gameVolume = "PixelNOW.Stream.GameVolume"
         static let microphoneVolume = "PixelNOW.Stream.MicrophoneVolume"
+        static let streamMicrophoneEnabled = "PixelNOW.Stream.MicrophoneEnabled"
+        static let showStreamMicToggle = "PixelNOW.Stream.ShowStreamMicToggle"
         static let microphoneShortcutEnabled = "PixelNOW.Stream.MicrophoneShortcutEnabled"
         static let microphoneMode = "PixelNOW.Stream.MicrophoneMode"
         static let microphoneDeviceId = "PixelNOW.Stream.MicrophoneDeviceId"
@@ -1957,6 +1974,8 @@ public enum StreamPreferences {
 public final class StreamViewPreferenceSnapshot: NSObject {
     @objc public let directMouseInput: Bool
     @objc public let microphoneShortcutEnabled: Bool
+    @objc public let streamMicrophoneEnabled: Bool
+    @objc public let showStreamMicToggle: Bool
     @objc public let gameVolume: Double
     @objc public let microphoneVolume: Double
     @objc public let maxBitrateMbps: Int
@@ -1977,6 +1996,8 @@ public final class StreamViewPreferenceSnapshot: NSObject {
     init(profile: StreamPreferenceProfile) {
         directMouseInput = profile.directMouseInput
         microphoneShortcutEnabled = StreamPreferences.loadMicrophoneShortcutEnabled()
+        streamMicrophoneEnabled = profile.streamMicrophoneEnabled
+        showStreamMicToggle = profile.showStreamMicToggle
         gameVolume = profile.gameVolume
         microphoneVolume = profile.microphoneVolume
         maxBitrateMbps = profile.maxBitrateMbps
@@ -2001,6 +2022,14 @@ public final class StreamViewPreferenceSnapshot: NSObject {
 public final class StreamViewPreferences: NSObject {
     @objc public static func loadViewPreferenceSnapshot() -> StreamViewPreferenceSnapshot {
         StreamViewPreferenceSnapshot(profile: StreamPreferences.loadProfile())
+    }
+
+    @objc public static func saveStreamMicrophoneEnabled(_ enabled: Bool) {
+        StreamPreferences.saveStreamMicrophoneEnabled(enabled)
+    }
+
+    @objc public static func saveShowStreamMicToggle(_ enabled: Bool) {
+        StreamPreferences.saveShowStreamMicToggle(enabled)
     }
 
     @objc public static func upscalingModeLabels() -> [String] {
