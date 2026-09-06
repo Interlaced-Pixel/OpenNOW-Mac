@@ -395,14 +395,14 @@ public final class NVSTMetalVideoView: NSView, MTKViewDelegate {
     }
 
     public func draw(in view: MTKView) {
-        guard let (pixelBuffer, _) = bufferHolder.get(),
+        guard let (pixelBuffer, _) = bufferHolder.consumeIfNew(),
               let currentDrawable = metalView.currentDrawable,
               let commandBuffer = commandQueue?.makeCommandBuffer(),
               let ciContext else {
             return
         }
 
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.downMirrored)
         let sourceWidth = CVPixelBufferGetWidth(pixelBuffer)
         let sourceHeight = CVPixelBufferGetHeight(pixelBuffer)
         let outputWidth = currentDrawable.texture.width
@@ -421,7 +421,7 @@ public final class NVSTMetalVideoView: NSView, MTKViewDelegate {
                width: sourceWidth,
                height: sourceHeight,
                pixelFormat: .bgra8Unorm,
-               usage: [.shaderRead, .renderTarget],
+               usage: [.shaderRead, .shaderWrite, .renderTarget],
                label: "NVSTMetalVideoView Source"
            ),
            let outputTexture = reusableTexture(
