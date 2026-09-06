@@ -307,7 +307,7 @@ public final class NativeWebRTCTransport: NSObject, WebRTCStreamTransport, @unch
         return 0
     }
 
-    private static func keyboardCodes(forMacKeyCode macKeyCode: UInt16) -> (keyCode: UInt16, scanCode: UInt16) {
+    static func keyboardCodes(forMacKeyCode macKeyCode: UInt16) -> (keyCode: UInt16, scanCode: UInt16) {
         keyboardCodeMap[macKeyCode] ?? (macKeyCode, macKeyCode)
     }
 

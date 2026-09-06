@@ -1,4 +1,4 @@
-import Foundation
+import CoreMedia
 import Foundation
 @preconcurrency import WebRTC
 
@@ -31,6 +31,15 @@ public final class RemoteCoOpHostVideoRelay: @unchecked Sendable {
 
     public func renderVideoFrame(_ frame: RTCVideoFrame) {
         let currentSinks = lock.withLock { Array(sinks.values) }
+        for sink in currentSinks { sink.renderVideoFrame(frame) }
+    }
+
+    public func renderPixelBuffer(_ pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
+        let currentSinks = lock.withLock { Array(sinks.values) }
+        guard !currentSinks.isEmpty else { return }
+        let buffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
+        let timestampNs = presentationTime.isValid ? Int64(CMTimeGetSeconds(presentationTime) * 1_000_000_000) : 0
+        let frame = RTCVideoFrame(buffer: buffer, rotation: ._0, timeStampNs: timestampNs)
         for sink in currentSinks { sink.renderVideoFrame(frame) }
     }
 }

@@ -757,7 +757,7 @@ final class LibWebRTCAudio: NSObject, @unchecked Sendable {
         return id.contains("audio") || id.contains("mic")
     }
 
-    fileprivate static func defaultAudioDevice(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
+    static func defaultAudioDevice(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
         var device = AudioDeviceID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = propertyAddress(selector)

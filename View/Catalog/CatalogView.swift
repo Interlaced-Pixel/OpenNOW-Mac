@@ -1276,7 +1276,6 @@ private struct CatalogSidebar: View {
         switch destination {
         case .home: return "gamecontroller.fill"
         case .library: return "rectangle.stack.fill"
-        case .favorites: return "heart.fill"
         }
     }
 
@@ -1521,7 +1520,6 @@ private struct CatalogMainMenuPanel: View {
         switch destination {
         case .home: return "gamecontroller.fill"
         case .library: return "rectangle.stack.fill"
-        case .favorites: return "heart.fill"
         }
     }
 
@@ -1529,7 +1527,6 @@ private struct CatalogMainMenuPanel: View {
         switch destination {
         case .home: return "Browse and launch cloud games"
         case .library: return "Games synced from connected stores"
-        case .favorites: return "Saved games for quick access"
         }
     }
 }
@@ -2302,7 +2299,7 @@ private struct CatalogContentView: View {
     }
 
     private func shouldUseGrid(for destination: CatalogDestination) -> Bool {
-        !viewModel.isBrowseMode && (destination == .library || destination == .favorites)
+        !viewModel.isBrowseMode && destination == .library
     }
 
     private func selectedGameBelongs(to section: CatalogSectionModel) -> Bool {
@@ -2481,7 +2478,6 @@ private struct CatalogExperienceHeader: View {
         switch viewModel.selectedCatalogDestination {
         case .home: return "Discover and launch supported games from the cloud."
         case .library: return "Your connected store libraries, ready to play in the cloud."
-        case .favorites: return "Your saved games, gathered in one place."
         }
     }
 
@@ -2797,7 +2793,6 @@ struct CatalogEmptyDestinationView: View {
         switch destination {
         case .home: return "gamecontroller.fill"
         case .library: return "rectangle.stack.fill"
-        case .favorites: return "heart.fill"
         }
     }
 
@@ -2805,7 +2800,6 @@ struct CatalogEmptyDestinationView: View {
         switch destination {
         case .home: return "No games to show"
         case .library: return "Your library is empty"
-        case .favorites: return "No favorites yet"
         }
     }
 
@@ -2813,7 +2807,6 @@ struct CatalogEmptyDestinationView: View {
         switch destination {
         case .home: return "Refresh the catalog or adjust search and filters to find supported GeForce NOW games."
         case .library: return "Connect or sync your game store accounts to populate My Library."
-        case .favorites: return "Open a game detail panel and use the heart button to add it to My Favorites."
         }
     }
 
@@ -2821,7 +2814,6 @@ struct CatalogEmptyDestinationView: View {
         switch destination {
         case .home: return viewModel.isBrowseMode ? "REFRESH" : "REFRESH CATALOG"
         case .library: return "OPEN CONNECTIONS"
-        case .favorites: return "BROWSE GAMES"
         }
     }
 
@@ -2831,8 +2823,6 @@ struct CatalogEmptyDestinationView: View {
             viewModel.refresh()
         case .library:
             viewModel.showSettings(.connections)
-        case .favorites:
-            viewModel.showCatalogDestination(.home)
         }
     }
 }

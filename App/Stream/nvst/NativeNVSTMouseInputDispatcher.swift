@@ -1,8 +1,44 @@
+import Darwin
 import Foundation
 
 enum NativeNVSTInput: Equatable, Sendable {
     case event(UserInputEvent)
     case absoluteMove(NativeNVSTAbsoluteMouseEvent)
+}
+
+/// A thread-safe handle on the view model's current input dispatcher.
+///
+/// The dispatcher itself is `Sendable` and its `enqueue` is lock-based, so anything can push into
+/// one - but the *reference* lives on a `@MainActor` view model, which is what forces callers onto
+/// the main actor just to read it. That is fine for UI-driven input, where the event started on the
+/// main thread anyway. It is not fine for Remote Co-Op guest input: those packets arrive on
+/// libwebrtc's network thread, and hopping to a main actor that is also driving a 120 fps Metal
+/// surface put the guest's stick movement behind whatever the renderer was doing.
+///
+/// The view model exposes `inputDispatcher` as a passthrough over one of these, so every existing
+/// assignment keeps the holder current and off-actor senders can reach the dispatcher directly.
+final class NativeNVSTInputDispatcherHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: NativeNVSTInputDispatcher?
+
+    var dispatcher: NativeNVSTInputDispatcher? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+        set {
+            lock.lock()
+            storage = newValue
+            lock.unlock()
+        }
+    }
+
+    /// Enqueues without touching the main actor. A nil dispatcher means the stream is torn down or
+    /// not started, and the event is dropped - which is what every main-actor call site does too.
+    func enqueue(_ event: UserInputEvent) {
+        dispatcher?.enqueue(event)
+    }
 }
 
 final class NativeNVSTInputDispatcher: Sendable {
@@ -87,7 +123,7 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
     private let capacity: Int
     private let protectedCapacity: Int
     private let ordinaryCapacity: Int
-    private let lock = NSLock()
+    private var lock = os_unfair_lock_s()
     private var inputs: [NativeNVSTInput] = []
     private var finished = false
     private var droppedCount = 0
@@ -100,62 +136,68 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
     }
 
     var isFinished: Bool {
-        lock.withLock { finished && inputs.isEmpty }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return finished && inputs.isEmpty
     }
 
     var count: Int {
-        lock.withLock { inputs.count }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return inputs.count
     }
 
     var droppedInputCount: Int {
-        lock.withLock { droppedCount }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return droppedCount
     }
 
     func append(_ input: NativeNVSTInput) -> Bool {
-        lock.withLock {
-            guard !finished else { return false }
-            if coalesce(input) { return true }
-            makeReservedCapacityIfNeeded(for: input)
-            if inputs.count >= capacity {
-                if let staleIndex = inputs.indices.first(where: {
-                    Self.isLossy(inputs[$0]) && !isProtectedAbsoluteMove(at: $0) && !isProspectiveAbsoluteButtonPair(at: $0, incoming: input)
-                }) {
-                    inputs.remove(at: staleIndex)
-                } else if Self.isNeutralizing(input), let pressIndex = inputs.firstIndex(where: Self.isNonNeutralButtonOrKeyPress) {
-                    inputs.remove(at: pressIndex)
-                } else if Self.isNeutralizing(input) {
-                    inputs.removeFirst()
-                } else if (!Self.isLossy(input) || Self.isAbsoluteMove(input)),
-                          inputs.count < capacityLimit(for: input) {
-                    inputs.append(input)
-                    return true
-                } else {
-                    droppedCount += 1
-                    return false
-                }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !finished else { return false }
+        if coalesce(input) { return true }
+        makeReservedCapacityIfNeeded(for: input)
+        if inputs.count >= capacity {
+            if let staleIndex = inputs.indices.first(where: {
+                Self.isLossy(inputs[$0]) && !isProtectedAbsoluteMove(at: $0) && !isProspectiveAbsoluteButtonPair(at: $0, incoming: input)
+            }) {
+                inputs.remove(at: staleIndex)
+            } else if Self.isNeutralizing(input), let pressIndex = inputs.firstIndex(where: Self.isNonNeutralButtonOrKeyPress) {
+                inputs.remove(at: pressIndex)
+            } else if Self.isNeutralizing(input) {
+                inputs.removeFirst()
+            } else if (!Self.isLossy(input) || Self.isAbsoluteMove(input)),
+                      inputs.count < capacityLimit(for: input) {
+                inputs.append(input)
+                return true
+            } else {
+                droppedCount += 1
+                return false
             }
-            inputs.append(input)
-            return true
         }
+        inputs.append(input)
+        return true
     }
 
     func removeFirst() -> NativeNVSTInput? {
-        lock.withLock {
-            guard !inputs.isEmpty else { return nil }
-            return inputs.removeFirst()
-        }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !inputs.isEmpty else { return nil }
+        return inputs.removeFirst()
     }
 
     func finish(discardingStaleInput: Bool) {
-        lock.withLock {
-            guard !finished else { return }
-            finished = true
-            if discardingStaleInput {
-                let staleIndices = inputs.indices.filter { Self.isStaleAtShutdown(inputs[$0]) }
-                for index in staleIndices.reversed() { inputs.remove(at: index) }
-            } else {
-                inputs.removeAll(keepingCapacity: false)
-            }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !finished else { return }
+        finished = true
+        if discardingStaleInput {
+            let staleIndices = inputs.indices.filter { Self.isLossy(inputs[$0]) && !isProtectedAbsoluteMove(at: $0) }
+            for index in staleIndices.reversed() { inputs.remove(at: index) }
+        } else {
+            inputs.removeAll(keepingCapacity: false)
         }
     }
 
@@ -201,11 +243,6 @@ private final class NativeNVSTInputBuffer: @unchecked Sendable {
         case .event:
             return false
         }
-    }
-
-    private static func isStaleAtShutdown(_ input: NativeNVSTInput) -> Bool {
-        guard case .event(.gamepad(let state)) = input else { return false }
-        return state.buttons.isEmpty && !isNeutralizing(input)
     }
 
     private static func isAbsoluteMove(_ input: NativeNVSTInput) -> Bool {

@@ -16,6 +16,7 @@ struct NativeNVSTStreamSidebarCapabilities: Equatable, Sendable {
 
     static let standard = NativeNVSTStreamSidebarCapabilities(availableFeatures: [
         .microphone,
+        .recording,
         .antiAFK,
         .floatingStats,
         .networkHealth,

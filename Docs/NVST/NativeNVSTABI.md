@@ -361,3 +361,36 @@ This file records verified NVIDIA ABI facts used to keep the native NVST path sa
 - Deterministic CI validates ABI, payload conversion, state-machine behavior, native object construction, callback ownership, and teardown without cloud credentials.
 - `.github/workflows/nvst-authenticated.yml` is the protected real-runtime gate. It requires `_NVST_TEST_TOKEN` and `_NVST_TEST_APP_ID`, creates an AppKit surface, allocates a CloudMatch session, executes real Geronimo start and pump readiness, remains connected for five seconds, and performs a callback-driven stop.
 - A passing deterministic suite is not evidence of authenticated launch parity. Release readiness requires a passing protected workflow against the exact runtime manifest.
+
+## Verified Native Media Recording ABI
+
+- `VTDecoder` decodes incoming H.264/HEVC/AV1 frames via Apple's VideoToolbox framework into `CVPixelBuffer` frames.
+- `_ZTV9VTDecoder` primary vtable layout:
+  - Offset `-0x10`: offset-to-top (`0`).
+  - Offset `-0x08`: typeinfo pointer `&typeinfo for VTDecoder`.
+  - Offset `+0x00`...`+0x30`: virtual destructors and internal decoder management.
+  - Offset `+0x38`: `VTDecoder::initialize` (`VideoDecoderInitializeSlotOffset`).
+  - Offset `+0x48`: `VTDecoder::decode(const NvstVideoDecodeUnit_t&, bool)` (`_ZN9VTDecoder6decodeERK21NvstVideoDecodeUnit_tb`, `VideoDecoderDecodeSlotOffset`).
+- `VTDecoder::decode` returns a `VTRenderer*`. At `VTRenderer + 0x108`, a pointer to `VTVideoFrame*` is stored. Inside `VTVideoFrame`, the decoded `CVPixelBufferRef` is stored at offset `+0x48`.
+- Inside `VTDecoder` itself, the decoded `CVPixelBufferRef` is also held temporarily at `VTDecoder + 0x238` during `decodeCallback` and transferred to `VTVideoFrame + 0x48` upon successful decode.
+- By allocating a cloned vtable of size `0xa0` bytes, preserving Itanium prefix entries, and intercepting slot `+0x48`, PixelNOW invokes the original `decode` method and retrieves the decoded `CVPixelBufferRef` with zero CPU memory copies.
+- `AudioUnitsAudioRenderer` implements `AudioStreamProvider` and `NvstAudioSink`, delivering decoded linear PCM game audio to macOS AudioUnits.
+- Multiple inheritance and subobject layout in `AudioUnitsAudioRenderer`:
+  - Primary subobject at offset `+0x00`:
+    - `_ZTV23AudioUnitsAudioRenderer` primary vtable layout:
+      - Offset `-0x10`: offset-to-top (`0`).
+      - Offset `-0x08`: typeinfo pointer `&typeinfo for AudioUnitsAudioRenderer`.
+      - Offset `+0x80`: `AudioUnitsAudioRenderer::operator()(const NvstAudioFrame_t*)` (`_ZN23AudioUnitsAudioRendererclEPK16NvstAudioFrame_t`, `AudioUnitsAudioRendererCallSlotOffset`).
+  - Audio sink subobject at offset `+0xc0` (`AudioUnitsAudioRendererSubobjectOffset`):
+    - Initialized and registered with `IOInterface` at virtual slot `0xf8`.
+    - Secondary vtable layout for `NvstAudioSink` subobject:
+      - Offset `-0x10`: offset-to-top (`-192` / `-0xc0`).
+      - Offset `-0x08`: typeinfo pointer `&typeinfo for AudioUnitsAudioRenderer`.
+      - Offset `+0x10` (slot 2, `AudioUnitsAudioSinkCallSlotOffset`): thunk `non-virtual thunk to AudioUnitsAudioRenderer::operator()(NvstAudioFrame_t const*)` (`__ZThn192_N23AudioUnitsAudioRendererclEPK16NvstAudioFrame_t`).
+- `NvstAudioFrame_t` structure layout verified in `AudioUnitsAudioRenderer::queueAudio`:
+  - Offset `+0x28`: pointer to raw linear PCM audio data (`const uint8_t *`).
+  - Offset `+0x30`: audio payload length in bytes (`uint32_t`).
+  - Audio format is 48,000 Hz, 2 channels (stereo), 16-bit linear PCM (`PlatformAudioSettings` initialized with `0x020000020000bb80ULL`).
+- By allocating cloned vtables for both the primary instance (`0xd0` bytes) and the `+0xc0` audio sink subobject (`0x30` bytes), PixelNOW intercepts both slot `+0x80` and subobject slot `+0x10`, guaranteeing that raw linear PCM frames are reliably captured regardless of whether Geronimo invokes the primary renderer or the registered `NvstAudioSink` subobject.
+- Vtable clones are tracked in `gAudioRendererSessions` for both pointer addresses and cleaned up upon session teardown and destruction.
+

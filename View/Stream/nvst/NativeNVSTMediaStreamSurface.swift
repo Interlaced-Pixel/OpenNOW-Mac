@@ -318,6 +318,8 @@ struct NativeNVSTMediaStreamSurface: View {
     @State private var nativeFailure: FailurePresentation?
     @State private var nativeAudioDeviceMonitor: NativeNVSTAudioDeviceMonitor?
     @State private var streamingFullScreenWindow: NSWindow?
+    @State private var recordingStatus = WebRTCStreamRecordingStatus.idle
+    @State private var recordingNotificationTask: Task<Void, Never>?
     private let nativeInputFailureReporter = NativeNVSTInputFailureReporter()
 
     var body: some View {
@@ -349,7 +351,7 @@ struct NativeNVSTMediaStreamSurface: View {
 
     private func startIfNeeded() {
         guard startTask == nil, path == nil, !didEnd else { return }
-        guard let nativeView, let nativeVideoSurfaceHandle = Self.nativeVideoSurfaceHandle(for: nativeView) else {
+        guard let nativeView, nativeView.window != nil else {
             loadingStepIndex = StreamLaunchStep.checkNetworkRoute.rawValue
             return
         }
@@ -381,45 +383,44 @@ struct NativeNVSTMediaStreamSurface: View {
         }
         audioDeviceMonitor.start()
         nativeAudioDeviceMonitor = audioDeviceMonitor
-        let transport = NativeNVSTBifrostTransport(
-            nativeVideoSurfaceHandle: nativeVideoSurfaceHandle,
-            nativeRendererReady: { [weak nativeView] in
-                guard let nativeView else { return false }
-                nativeView.setNativeNVSTVideoVisible(true)
-                return nativeView.nativeNVSTRendererSurfaceReady
+        let bifrostFreeSink = nativeView.attachNvstBifrostFreeRenderer(targetFps: Int32(max(30, profile.fps))).frameSink
+        let diagnosticLog = NvstDiagnosticLog()
+        let transport = NvstBifrostFreeTransport(
+            pixelBufferSink: { pixelBuffer, presentationTime, isKeyframe in
+                bifrostFreeSink.render(pixelBuffer: pixelBuffer, presentationTime: presentationTime, isKeyframe: isKeyframe)
             },
-            cursorVisibilityHandler: { [weak nativeView] visible in
-                guard let nativeView else { return }
-                nativeView.applyServerCursorVisibility(visible)
-            },
-            prepareVideoSurfaceForShutdown: {
-                nativeView.prepareNativeNVSTRendererForShutdown()
-            },
-            restoreVideoSurfaceAfterRecovery: {
-                nativeView.setNativeNVSTVideoVisible(true)
-            },
-            hapticHandler: { [weak nativeView] command in
-                nativeView?.playHaptic(command)
-            },
-            hapticResetHandler: { [weak nativeView] in
-                nativeView?.stopHaptics()
+            configuredFps: profile.fps,
+            configuredMaxBitrateKbps: profile.maxBitrateMbps * 1_000,
+            logger: { message in
+                NativeNVSTMediaTelemetry.capture("nvst.bifrost_free", level: .info, message: message)
+                diagnosticLog.append(message)
             }
         )
+        Task {
+            await transport.setRemoteCursorVisibilityHandler { [weak nativeView] isVisible in
+                nativeView?.applyServerCursorVisibility(isVisible)
+            }
+            await transport.setHapticEventHandler { [weak nativeView] events in
+                for event in events {
+                    nativeView?.playHaptic(NativeNVSTHapticCommand(
+                        playerIndex: Int(event.gamepadIndex),
+                        lowFrequency: event.leftMotor,
+                        highFrequency: event.rightMotor,
+                        durationMilliseconds: event.effectiveDurationMilliseconds
+                    ))
+                }
+            }
+            await transport.setRecordingStatusHandler { status in
+                handleRecordingStatusChanged(status)
+            }
+        }
         let path = NativeNVSTStreamingPath(sessionProvider: sessionProvider, transport: transport, automaticRecovery: .singleAttempt)
         let inputDispatcher = NativeNVSTInputDispatcher { input in
             switch input {
             case .event(let event):
-                do {
-                    try await path.send(event)
-                } catch {
-                    nativeInputFailureReporter.report(operation: "event", error: error, applicationID: configuration.applicationID)
-                }
+                path.sendNow(event)
             case .absoluteMove(let event):
-                do {
-                    try await path.sendAbsoluteMouseMove(event)
-                } catch {
-                    nativeInputFailureReporter.report(operation: "absolute-move", error: error, applicationID: configuration.applicationID)
-                }
+                path.sendAbsoluteMouseMoveNow(event)
             }
         }
         self.path = path
@@ -439,7 +440,10 @@ struct NativeNVSTMediaStreamSurface: View {
                 showStreamControls(completion: completion)
                 return true
             },
-            commandHandler: handleNativeCommand
+            commandHandler: handleNativeCommand,
+            terminationDrainHandler: { [path] in
+                _ = try? await path.stopForApplicationTermination(reason: .userRequested, message: "Application terminating.")
+            }
         )
         startTask = Task {
             do {
@@ -620,8 +624,10 @@ struct NativeNVSTMediaStreamSurface: View {
         microphoneMode = "disabled"
         microphonePendingStates.removeAll()
         antiAFKMouseMovementEnabled = false
+        recordingStatus = .idle
         nativeView?.stopHaptics()
         nativeView?.setNativeNVSTVideoVisible(false)
+        nativeView?.detachNvstBifrostFreeRenderer()
         nativeView?.prepareNativeNVSTRendererForShutdown()
         guard !didEnd else {
             inputDispatcher?.cancel()
@@ -700,17 +706,9 @@ struct NativeNVSTMediaStreamSurface: View {
                     self.inputDispatcher = NativeNVSTInputDispatcher { input in
                         switch input {
                         case .event(let event):
-                            do {
-                                try await path.send(event)
-                            } catch {
-                                self.nativeInputFailureReporter.report(operation: "event", error: error, applicationID: self.configuration.applicationID)
-                            }
+                            path.sendNow(event)
                         case .absoluteMove(let event):
-                            do {
-                                try await path.sendAbsoluteMouseMove(event)
-                            } catch {
-                                self.nativeInputFailureReporter.report(operation: "absolute-move", error: error, applicationID: self.configuration.applicationID)
-                            }
+                            path.sendAbsoluteMouseMoveNow(event)
                         }
                     }
                     streamControlsVisible = true
@@ -805,7 +803,7 @@ struct NativeNVSTMediaStreamSurface: View {
 
     private func configureInput(for view: NativeNVSTStreamView) {
         view.onInputEvent = { [weak view] event in
-            guard path != nil, let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd else { return }
+            guard let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd else { return }
             if view.remoteInputEnabled && !NativeNVSTInputDispatcher.isNeutralizing(event) {
                 guard NSApplication.shared.isActive, view.streamWindowHasInputFocus else {
                     NativeNVSTMediaTelemetry.capture(
@@ -831,8 +829,8 @@ struct NativeNVSTMediaStreamSurface: View {
         view.onCommand = { command in
             handleNativeCommand(command)
         }
-        view.onAbsoluteMouseMove = { event in
-            guard isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd,
+        view.onAbsoluteMouseMove = { [weak view] event in
+            guard let view, isConnected, !unifiedHUDVisible, !streamControlsVisible, !isEnding, !didEnd,
                   view.remoteInputEnabled, view.mouseInputMode == .absolute else { return }
             guard view.isEmittingNeutralizingAbsolutePosition ||
                     (NSApplication.shared.isActive && view.streamWindowHasInputFocus) else { return }
@@ -855,8 +853,7 @@ struct NativeNVSTMediaStreamSurface: View {
         case .toggleMicrophone:
             toggleNativeMicrophone()
         case .toggleRecording:
-            showNativeTransientStreamMessage("Recording is unavailable with native NVST.")
-            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.unavailable", level: .warning, message: "Native NVST recording shortcut requested without a registered recorder pipeline.", attributes: ["applicationID": configuration.applicationID])
+            toggleRecording()
         case .toggleAntiAFK:
             toggleNativeAntiAFKMouseMovement()
         case .showQuitMenu:
@@ -962,9 +959,108 @@ struct NativeNVSTMediaStreamSurface: View {
         microphoneUpdateTask = nil
         antiAFKMouseMovementTask?.cancel()
         antiAFKMouseMovementTask = nil
+        recordingNotificationTask?.cancel()
+        recordingNotificationTask = nil
         transientStreamMessageTask?.cancel()
         transientStreamMessageTask = nil
         transientStreamMessage = ""
+    }
+
+    private var recordingIsBusy: Bool {
+        if case .finishing = recordingStatus { return true }
+        return false
+    }
+
+    private var recordingCanStop: Bool {
+        if case .starting = recordingStatus { return true }
+        return recordingStatus.isRecording
+    }
+
+    private var recordingStatusText: String {
+        switch recordingStatus {
+        case .idle: return "Idle"
+        case .starting: return "Starting"
+        case .recording(_, let elapsedSeconds): return recordingElapsedText(elapsedSeconds)
+        case .finishing: return "Saving"
+        case .finished: return "Saved"
+        case .failed: return "Failed"
+        }
+    }
+
+    private func recordingElapsedText(_ elapsedSeconds: Double) -> String {
+        let seconds = max(0, Int(elapsedSeconds.rounded(.down)))
+        return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+    }
+
+    private func toggleRecording() {
+        if recordingCanStop {
+            Task { await path?.stopRecording() }
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.stop", level: .info, message: "Stream recording stop requested.", attributes: ["applicationID": configuration.applicationID])
+            return
+        }
+        guard !recordingIsBusy, isConnected, !isEnding, !didEnd, let path else { return }
+        let profile = StreamPreferences.launchProfile(forGame: configuration.applicationID, capabilities: StreamPreferences.loadDeviceCapabilities())
+        let recordingConfiguration = WebRTCStreamRecordingConfiguration(
+            title: configuration.title,
+            applicationID: configuration.applicationID,
+            width: profile.resolution.width,
+            height: profile.resolution.height,
+            fps: profile.fps,
+            videoBitrateMbps: profile.recordingVideoBitrateMbps,
+            audioBitrateKbps: profile.recordingAudioBitrateKbps,
+            enhancedVideoEnabled: profile.recordingEnhancedVideoEnabled,
+            microphoneDeviceId: profile.microphoneDeviceId,
+            microphoneVolume: profile.microphoneVolume,
+            microphoneEnabled: profile.microphoneMode != "disabled"
+        )
+        recordingStatus = .starting
+        Task {
+            do {
+                try await path.startRecording(configuration: recordingConfiguration)
+                NativeNVSTMediaTelemetry.capture("nvst.ui.recording.start", level: .info, message: "Stream recording start requested.", attributes: ["applicationID": configuration.applicationID])
+            } catch {
+                recordingStatus = .failed(error.localizedDescription)
+                showNativeTransientStreamMessage("Recording failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func handleRecordingStatusChanged(_ status: WebRTCStreamRecordingStatus) {
+        recordingNotificationTask?.cancel()
+        let previousStatus = recordingStatus
+        recordingStatus = status
+        logRecordingStatusChanged(status, previousStatus: previousStatus)
+        if case .finished(let recording) = status {
+            showNativeTransientStreamMessage("Recording saved: \(recording.title) (\(String(format: "%.1f", recording.durationSeconds))s)")
+        } else if case .failed(let message) = status {
+            showNativeTransientStreamMessage("Recording failed: \(message)")
+        }
+        guard status.isTerminal else { return }
+        recordingNotificationTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard recordingStatus == status else { return }
+            recordingStatus = .idle
+            recordingNotificationTask = nil
+        }
+    }
+
+    private func logRecordingStatusChanged(_ status: WebRTCStreamRecordingStatus, previousStatus: WebRTCStreamRecordingStatus) {
+        switch status {
+        case .idle:
+            return
+        case .starting:
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.starting", level: .info, message: "Stream recording accepted start request.", attributes: ["applicationID": configuration.applicationID])
+        case .recording:
+            guard !previousStatus.isRecording else { return }
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.active", level: .info, message: "Stream recording captured its first video frame.", attributes: ["applicationID": configuration.applicationID])
+        case .finishing:
+            guard previousStatus != .finishing else { return }
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.finishing", level: .info, message: "Stream recording is saving.", attributes: ["applicationID": configuration.applicationID])
+        case .finished(let recording):
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.finished", level: .info, message: "Stream recording saved.", attributes: ["applicationID": configuration.applicationID, "file": recording.videoURL.lastPathComponent, "durationSeconds": String(format: "%.2f", recording.durationSeconds), "fileSizeBytes": String(recording.fileSizeBytes)])
+        case .failed(let message):
+            NativeNVSTMediaTelemetry.capture("nvst.ui.recording.failed", level: .warning, message: message, attributes: ["applicationID": configuration.applicationID])
+        }
     }
 
     private func showStreamControls(completion: NativeNVSTMediaStreamQuitDecisionHandler? = nil) {
@@ -1397,7 +1493,7 @@ struct NativeNVSTMediaStreamSurface: View {
     private var nativeHUDStatusPanel: some View {
         HStack(spacing: 8) {
             NativeNVSTStreamHUDMetricCard(title: "Mic", value: nativeMicrophoneStatusText, positive: microphoneEnabled && microphoneAvailable)
-            NativeNVSTStreamHUDMetricCard(title: "Rec", value: "Unavailable", positive: false)
+            NativeNVSTStreamHUDMetricCard(title: "Rec", value: recordingStatusText, positive: recordingStatus.isRecording)
             NativeNVSTStreamHUDMetricCard(title: "AFK", value: antiAFKMouseMovementEnabled ? "On" : "Off", positive: antiAFKMouseMovementEnabled)
             if sessionLimit != nil {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1422,12 +1518,12 @@ struct NativeNVSTMediaStreamSurface: View {
                     action: toggleNativeMicrophone
                 )
                 NativeNVSTStreamHUDActionRow(
-                    title: "Record",
-                    subtitle: "Unavailable with native NVST",
-                    systemName: "record.circle",
-                    isActive: false,
-                    isDisabled: !sidebarCapabilities.supports(.recording),
-                    action: {}
+                    title: recordingCanStop ? "Stop Recording" : "Record",
+                    subtitle: recordingStatusText,
+                    systemName: recordingStatus.isRecording ? "record.circle.fill" : "record.circle",
+                    isActive: recordingStatus.isRecording,
+                    isDisabled: !sidebarCapabilities.supports(.recording) || !isConnected || recordingIsBusy,
+                    action: toggleRecording
                 )
                 NativeNVSTStreamHUDActionRow(
                     title: antiAFKMouseMovementEnabled ? "Disable Anti-AFK" : "Enable Anti-AFK",
@@ -1575,11 +1671,6 @@ struct NativeNVSTMediaStreamSurface: View {
             .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.pixelNowGreen.opacity(0.32), lineWidth: 1))
         }
-    }
-
-    private static func nativeVideoSurfaceHandle(for view: NativeNVSTStreamView) -> UInt? {
-        guard let videoWindow = view.nativeNVSTVideoWindow() else { return nil }
-        return UInt(bitPattern: Unmanaged.passUnretained(videoWindow).toOpaque())
     }
 
     private func beginStreamingPerformanceMode() {

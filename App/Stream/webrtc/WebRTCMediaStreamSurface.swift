@@ -1122,7 +1122,10 @@ public struct WebRTCMediaStreamSurface: View {
             fps: runtimeSettings.fps,
             videoBitrateMbps: runtimeSettings.recordingVideoBitrateMbps,
             audioBitrateKbps: runtimeSettings.recordingAudioBitrateKbps,
-            enhancedVideoEnabled: runtimeSettings.recordingEnhancedVideoEnabled
+            enhancedVideoEnabled: runtimeSettings.recordingEnhancedVideoEnabled,
+            microphoneDeviceId: runtimeSettings.microphoneDeviceId,
+            microphoneVolume: runtimeSettings.microphoneVolume,
+            microphoneEnabled: runtimeSettings.microphoneMode != "disabled"
         )
         recordingStatus = .starting
         transport.startRecording(configuration: recordingConfiguration)
@@ -1513,7 +1516,10 @@ public struct WebRTCMediaStreamSurface: View {
                 showQuitMenu(completion: completion)
                 return true
             },
-            commandHandler: handle
+            commandHandler: handle,
+            terminationDrainHandler: {
+                await transport?.disconnect()
+            }
         )
     }
 
@@ -1726,6 +1732,8 @@ private struct StreamRuntimeSettings: Equatable {
     var resolutionHeight = 1080
     var fps = 60
     var microphoneMode = "disabled"
+    var microphoneDeviceId = ""
+    var microphoneVolume = 1.0
     var microphonePushToTalkKeyCode = 9
     var microphonePushToTalkModifierMask = 0
     var suppressInputWhenInactive = true
@@ -1767,6 +1775,8 @@ private struct StreamRuntimeSettings: Equatable {
         resolutionHeight = resolution.height
         fps = Self.int(dictionary["fps"], fallback: 60)
         microphoneMode = Self.string(dictionary["microphoneMode"], fallback: "disabled")
+        microphoneDeviceId = Self.string(dictionary["microphoneDeviceId"])
+        microphoneVolume = Self.double(dictionary["microphoneVolume"], fallback: 1.0)
         microphonePushToTalkKeyCode = Self.int(dictionary["microphonePushToTalkKeyCode"], fallback: 9)
         microphonePushToTalkModifierMask = Self.int(dictionary["microphonePushToTalkModifierMask"])
         suppressInputWhenInactive = Self.bool(dictionary["suppressInputWhenInactive"], fallback: true)
@@ -1792,6 +1802,13 @@ private struct StreamRuntimeSettings: Equatable {
         if let value = value as? Int { return value }
         if let value = value as? NSNumber { return value.intValue }
         if let value = value as? String { return Int(value) ?? fallback }
+        return fallback
+    }
+
+    private static func double(_ value: Any?, fallback: Double = 0) -> Double {
+        if let value = value as? Double { return value }
+        if let value = value as? NSNumber { return value.doubleValue }
+        if let value = value as? String { return Double(value) ?? fallback }
         return fallback
     }
 

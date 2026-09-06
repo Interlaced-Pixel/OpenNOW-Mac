@@ -5,6 +5,12 @@ import Foundation
 import QuartzCore
 @preconcurrency import WebRTC
 
+public typealias StreamRecording = WebRTCStreamRecording
+public typealias StreamRecordingLibrary = WebRTCStreamRecordingLibrary
+public typealias StreamRecordingConfiguration = WebRTCStreamRecordingConfiguration
+public typealias StreamRecordingStatus = WebRTCStreamRecordingStatus
+public typealias StreamRecorder = WebRTCStreamRecorder
+
 public struct WebRTCStreamRecording: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let title: String
@@ -123,8 +129,23 @@ public struct WebRTCStreamRecordingConfiguration: Equatable, Sendable {
     public let videoBitrateMbps: Int
     public let audioBitrateKbps: Int
     public let enhancedVideoEnabled: Bool
+    public let microphoneDeviceId: String
+    public let microphoneVolume: Double
+    public let microphoneEnabled: Bool
 
-    public init(title: String, applicationID: String, width: Int, height: Int, fps: Int, videoBitrateMbps: Int, audioBitrateKbps: Int, enhancedVideoEnabled: Bool) {
+    public init(
+        title: String,
+        applicationID: String,
+        width: Int,
+        height: Int,
+        fps: Int,
+        videoBitrateMbps: Int,
+        audioBitrateKbps: Int,
+        enhancedVideoEnabled: Bool,
+        microphoneDeviceId: String = "",
+        microphoneVolume: Double = 1.0,
+        microphoneEnabled: Bool = false
+    ) {
         self.title = title.isEmpty ? "GeForce NOW Stream" : title
         self.applicationID = applicationID
         self.width = max(1, width)
@@ -133,6 +154,9 @@ public struct WebRTCStreamRecordingConfiguration: Equatable, Sendable {
         self.videoBitrateMbps = max(0, videoBitrateMbps)
         self.audioBitrateKbps = min(max(audioBitrateKbps, 64), 320)
         self.enhancedVideoEnabled = enhancedVideoEnabled
+        self.microphoneDeviceId = microphoneDeviceId
+        self.microphoneVolume = min(max(microphoneVolume, 0.0), 2.0)
+        self.microphoneEnabled = microphoneEnabled
     }
 }
 
@@ -159,8 +183,8 @@ public enum WebRTCStreamRecordingStatus: Equatable, Sendable {
     }
 }
 
-final class WebRTCStreamRecorder: @unchecked Sendable {
-    var onStatusChanged: (@MainActor @Sendable (WebRTCStreamRecordingStatus) -> Void)?
+public final class WebRTCStreamRecorder: @unchecked Sendable {
+    public var onStatusChanged: (@MainActor @Sendable (WebRTCStreamRecordingStatus) -> Void)?
 
     private enum VideoFrameSource {
         case native
@@ -176,6 +200,8 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
     private var videoInput: AVAssetWriterInput?
     private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var audioInput: AVAssetWriterInput?
+    private var microphoneCapturer: StreamRecordingMicrophoneCapturer?
+    private var audioMixer: StreamRecordingAudioMixer?
     private var configuration: WebRTCStreamRecordingConfiguration?
     private var id = UUID()
     private var outputURL: URL?
@@ -199,20 +225,20 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
     private var pendingNativeVideoRecordingId: UUID?
     private var pendingEnhancedVideoFrameCount = 0
 
-    init(firstFrameTimeout: DispatchTimeInterval = .seconds(5)) {
+    public init(firstFrameTimeout: DispatchTimeInterval = .seconds(5)) {
         self.firstFrameTimeout = firstFrameTimeout
     }
 
-    var wantsEnhancedVideo: Bool { configuration?.enhancedVideoEnabled == true && isRecording }
-    var isRecording: Bool {
+    public var wantsEnhancedVideo: Bool { configuration?.enhancedVideoEnabled == true && isRecording }
+    public var isRecording: Bool {
         guard configuration != nil, !finishing, !failed else { return false }
         guard let writer else { return true }
         return writer.status == .unknown || writer.status == .writing
     }
 
-    func start(configuration: WebRTCStreamRecordingConfiguration) {
-        queue.async {
-            guard self.configuration == nil, self.writer == nil else { return }
+    public func start(configuration: WebRTCStreamRecordingConfiguration) {
+        queue.async { [weak self] in
+            guard let self, self.configuration == nil, self.writer == nil else { return }
             do {
                 let directory = try WebRTCStreamRecordingLibrary.ensureDirectory(forGameTitle: configuration.title)
                 self.id = UUID()
@@ -233,6 +259,19 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
                 self.outputURL = url
                 self.startedAt = self.createdAt
                 self.firstHostTime = CACurrentMediaTime()
+                if configuration.microphoneEnabled {
+                    let capturer = StreamRecordingMicrophoneCapturer(preferredDeviceId: configuration.microphoneDeviceId)
+                    capturer.onAudioSample = { [weak self] sampleBuffer in
+                        self?.appendMicrophoneAudio(sampleBuffer)
+                    }
+                    self.microphoneCapturer = capturer
+                    capturer.start()
+                }
+                let mixer = StreamRecordingAudioMixer(microphoneVolume: configuration.microphoneVolume, microphoneEnabled: configuration.microphoneEnabled)
+                mixer.onMixedAudioBuffer = { [weak self] sampleBuffer in
+                    self?.writeAudioSampleBuffer(sampleBuffer)
+                }
+                self.audioMixer = mixer
                 self.emit(.starting)
                 self.scheduleFirstFrameTimeout(recordingId: self.id)
             } catch {
@@ -242,11 +281,11 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
         }
     }
 
-    func stop() {
+    public func stop() {
         queue.async { self.finish() }
     }
 
-    func appendVideoFrame(_ frame: RTCVideoFrame) {
+    public func appendVideoFrame(_ frame: RTCVideoFrame) {
         guard let recordingId = beginVideoFrameAppend(source: .native) else { return }
         let captureHostTime = CACurrentMediaTime()
         if let buffer = frame.buffer as? RTCCVPixelBuffer, Self.isWritableBGRA(buffer.pixelBuffer) {
@@ -272,23 +311,58 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
         }
     }
 
-    func appendEnhancedPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
+    public func appendPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
+        guard let recordingId = beginVideoFrameAppend(source: .native) else { return }
+        appendPixelBuffer(pixelBuffer, recordingId: recordingId, source: .native, captureHostTime: CACurrentMediaTime())
+    }
+
+    public func appendEnhancedPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
         guard let recordingId = beginVideoFrameAppend(source: .enhanced) else { return }
         appendPixelBuffer(pixelBuffer, recordingId: recordingId, source: .enhanced, captureHostTime: CACurrentMediaTime())
     }
 
-    func appendGameAudio(audioBufferList: UnsafeRawPointer?, frameCount: UInt32, sampleRate: Double, channels: UInt32) {
+    public func appendNativePixelBuffer(_ pixelBuffer: CVPixelBuffer) {
+        appendPixelBuffer(pixelBuffer)
+    }
+
+    public func appendGameAudioSamples(_ samples: [Float], sampleRate: Double, channels: UInt32) {
+        let channelCount = max(1, Int(channels))
+        guard !samples.isEmpty, samples.count % channelCount == 0 else { return }
+        var interleaved = [Int16](unsafeUninitializedCapacity: samples.count) { buffer, initializedCount in
+            for index in 0..<samples.count {
+                let clamped = min(max(samples[index], -1), 1)
+                buffer[index] = Int16(clamped * 32767)
+            }
+            initializedCount = samples.count
+        }
+        let frameCount = UInt32(samples.count / channelCount)
+        let data = interleaved.withUnsafeMutableBytes { Data($0) }
+        appendGameAudio(data: data, frameCount: frameCount, sampleRate: sampleRate, channels: channels)
+    }
+
+    public func appendGameAudio(audioBufferList: UnsafeRawPointer?, frameCount: UInt32, sampleRate: Double, channels: UInt32) {
         guard let audioBufferList else { return }
         let copied = Self.audioData(from: audioBufferList.assumingMemoryBound(to: AudioBufferList.self), channels: max(1, Int(channels)))
         guard !copied.isEmpty else { return }
+        audioMixer?.appendGameAudio(data: copied, frameCount: frameCount, sampleRate: sampleRate, channels: channels)
+    }
+
+    public func appendGameAudio(data: Data, frameCount: UInt32, sampleRate: Double, channels: UInt32) {
+        guard !data.isEmpty else { return }
+        audioMixer?.appendGameAudio(data: data, frameCount: frameCount, sampleRate: sampleRate, channels: channels)
+    }
+
+    public func appendMicrophoneAudio(_ sampleBuffer: CMSampleBuffer) {
+        audioMixer?.appendMicrophoneAudio(sampleBuffer: sampleBuffer)
+    }
+
+    private func writeAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         queue.async {
             guard self.isRecording,
                   self.capturedVideoFrame,
                   self.writer?.status == .writing,
                   let input = self.audioInput,
                   input.isReadyForMoreMediaData else { return }
-            guard let time = self.presentationTime() else { return }
-            guard let sampleBuffer = Self.makeAudioSampleBuffer(data: copied, frameCount: frameCount, sampleRate: sampleRate, channels: channels, presentationTime: time) else { return }
             input.append(sampleBuffer)
         }
     }
@@ -325,6 +399,7 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
             startedAt = Date()
             firstHostTime = captureHostTime
             emit(.recording(startedAt: startedAt ?? createdAt, elapsedSeconds: 0))
+            audioMixer?.start()
         }
         guard let time = presentationTime(hostTime: captureHostTime) else { return }
         let normalizedTime = CMTimeSubtract(time, firstPresentationTime)
@@ -353,6 +428,8 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
         guard !finishing else { return }
         finishing = true
         emit(.finishing)
+        microphoneCapturer?.stop()
+        audioMixer?.flush()
         guard let writer else {
             reset()
             emit(.failed(Self.message(for: WebRTCStreamRecorderError.noFramesCaptured)))
@@ -426,6 +503,10 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
     }
 
     private func reset() {
+        microphoneCapturer?.stop()
+        microphoneCapturer = nil
+        audioMixer?.stop()
+        audioMixer = nil
         writer = nil
         videoInput = nil
         pixelBufferAdaptor = nil
@@ -529,8 +610,9 @@ final class WebRTCStreamRecorder: @unchecked Sendable {
             writer.shouldOptimizeForNetworkUse = false
             let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings(configuration: configuration, width: width, height: height))
             videoInput.expectsMediaDataInRealTime = true
+            let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
             let attributes: [String: Any] = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
                 kCVPixelBufferWidthKey as String: width,
                 kCVPixelBufferHeightKey as String: height,
                 kCVPixelBufferIOSurfacePropertiesKey as String: [:],

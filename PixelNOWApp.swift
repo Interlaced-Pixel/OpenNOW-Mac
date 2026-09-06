@@ -196,6 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         Log.info(.app, "NSApplication will terminate")
+        WebRTCMediaStreamLifecycle.drainForTermination()
+        NativeNVSTMediaStreamLifecycle.drainForTermination()
         for window in NSApp.windows where window.isVisible && !window.styleMask.contains(.fullScreen) {
             window.saveFrame(usingName: "PixelNOWMainWindow")
         }

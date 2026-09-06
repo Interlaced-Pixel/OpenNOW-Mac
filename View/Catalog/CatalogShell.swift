@@ -59,6 +59,15 @@ struct CatalogShell: View {
                     onForget: onForget
                 )
             }
+            .overlay {
+                if let candidate = viewModel.favoriteReplacementCandidate {
+                    FavoriteLimitReplacementOverlay(
+                        viewModel: viewModel,
+                        candidateGame: candidate
+                    )
+                    .transition(.opacity)
+                }
+            }
             .focusable(true)
             .focusEffectDisabled()
             .focused($catalogHasFocus)

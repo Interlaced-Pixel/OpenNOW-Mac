@@ -75,7 +75,6 @@ enum CatalogMainPage: String, CaseIterable, Identifiable {
 enum CatalogDestination: String, CaseIterable, Identifiable {
     case home
     case library
-    case favorites
 
     var id: String { rawValue }
 
@@ -83,7 +82,6 @@ enum CatalogDestination: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Games"
         case .library: return "My Library"
-        case .favorites: return "My Favorites"
         }
     }
 }
@@ -181,8 +179,10 @@ final class CatalogViewModel: ObservableObject {
     @Published var previousGameSession: CatalogPreviousGameSession?
     @Published var playtimeStatistics = CatalogPlaytimeStatistics.empty
     @Published var subscriptionStatus = CatalogSubscriptionStatus.unavailable
+    static let maxFavoritesLimit = 5
     @Published var favoriteGameIdentities: Set<String> = []
     @Published var favoriteGames: [CatalogGameObject] = []
+    @Published var favoriteReplacementCandidate: CatalogGameObject?
     @Published var selectedGameRevealRequest: CatalogGameRevealRequest?
     @Published var catalogImageCacheSummary = "Calculating"
     @Published var isStorePickerVisible = false
@@ -307,10 +307,6 @@ final class CatalogViewModel: ObservableObject {
     var catalogSections: [CatalogSectionModel] {
         if selectedCatalogDestination == .library, !isBrowseMode {
             return libraryGames.isEmpty ? [] : [CatalogSectionModel(id: "my-library", title: "My Library", games: libraryGames, kind: .library)]
-        }
-        if selectedCatalogDestination == .favorites, !isBrowseMode {
-            let games = favoriteGames
-            return games.isEmpty ? [] : [CatalogSectionModel(id: "remote-favorites", title: "My Favorites", games: games, kind: .panel)]
         }
         if selectedCatalogDestination == .home, !isBrowseMode {
             let games = favoriteGames.isEmpty ? featuredGames : favoriteGames
@@ -1122,7 +1118,7 @@ final class CatalogViewModel: ObservableObject {
     }
 
     func isFavorite(_ game: CatalogGameObject) -> Bool {
-        game.isFavorited || favoriteGameIdentities.contains(Self.identity(for: game))
+        favoriteGameIdentities.contains(Self.identity(for: game))
     }
 
     func toggleFavorite(for game: CatalogGameObject) {
@@ -1179,6 +1175,11 @@ final class CatalogViewModel: ObservableObject {
                 }
             }
         } else {
+            if favoriteGames.count >= Self.maxFavoritesLimit {
+                favoriteReplacementCandidate = selectedGame
+                return
+            }
+
             favoriteGameIdentities.insert(identity)
             updateGameFavoriteState(identity: identity, isFavorited: true)
             let favoriteSnapshot = Self.snapshotObject(for: selectedGame)
@@ -1197,6 +1198,74 @@ final class CatalogViewModel: ObservableObject {
                         self.updateGameFavoriteState(identity: identity, isFavorited: false)
                         if self.refreshAuthIfNeeded(error: error) { return }
                         self.errorMessage = error.isEmpty ? "Unable to add this game to favorites." : error
+                    }
+                }
+            }
+        }
+    }
+
+    func cancelFavoriteReplacement() {
+        favoriteReplacementCandidate = nil
+    }
+
+    func replaceFavorite(existingGame: CatalogGameObject, with newGame: CatalogGameObject) {
+        favoriteReplacementCandidate = nil
+        let oldAppId = Self.favoriteAppId(for: existingGame)
+        let oldIdentity = Self.identity(for: existingGame)
+        let newAppId = Self.favoriteAppId(for: newGame)
+        let newIdentity = Self.identity(for: newGame)
+        guard !oldAppId.isEmpty, !oldIdentity.isEmpty, !newAppId.isEmpty, !newIdentity.isEmpty else { return }
+
+        let oldTitle = existingGame.title
+        let newTitle = newGame.title
+        let previousGames = CatalogSendableValue(favoriteGames)
+        let previousIdentities = favoriteGameIdentities
+        let selfBox = CatalogWeakObject(self)
+
+        favoriteGameIdentities.remove(oldIdentity)
+        favoriteGameIdentities.insert(newIdentity)
+        updateGameFavoriteState(identity: oldIdentity, isFavorited: false)
+        updateGameFavoriteState(identity: newIdentity, isFavorited: true)
+
+        let newSnapshot = Self.snapshotObject(for: newGame)
+        newSnapshot.isFavorited = true
+
+        if let replaceIndex = favoriteGames.firstIndex(where: { Self.identity(for: $0) == oldIdentity }) {
+            favoriteGames[replaceIndex] = newSnapshot
+        } else {
+            favoriteGames.removeAll { Self.identity(for: $0) == oldIdentity }
+            favoriteGames.insert(newSnapshot, at: 0)
+        }
+
+        actionMessage = "Updating favorites..."
+        GameServiceSwiftAdapter.removeFavoriteApp(oldAppId) { removeSuccess, removeError in
+            Task { @MainActor in
+                guard let self = selfBox.value else { return }
+                guard removeSuccess else {
+                    self.favoriteGames = previousGames.value
+                    self.favoriteGameIdentities = previousIdentities
+                    self.updateGameFavoriteState(identity: oldIdentity, isFavorited: true)
+                    self.updateGameFavoriteState(identity: newIdentity, isFavorited: false)
+                    if self.refreshAuthIfNeeded(error: removeError) { return }
+                    self.errorMessage = removeError.isEmpty ? "Unable to replace favorite game." : removeError
+                    return
+                }
+
+                GameServiceSwiftAdapter.addFavoriteApp(newAppId) { addSuccess, addError in
+                    Task { @MainActor in
+                        guard let self = selfBox.value else { return }
+                        if addSuccess {
+                            self.actionMessage = "Replaced \(oldTitle) with \(newTitle)."
+                            self.loadFavorites()
+                        } else {
+                            self.favoriteGames = previousGames.value
+                            self.favoriteGameIdentities = previousIdentities
+                            self.updateGameFavoriteState(identity: oldIdentity, isFavorited: true)
+                            self.updateGameFavoriteState(identity: newIdentity, isFavorited: false)
+                            GameServiceSwiftAdapter.addFavoriteApp(oldAppId) { _, _ in }
+                            if self.refreshAuthIfNeeded(error: addError) { return }
+                            self.errorMessage = addError.isEmpty ? "Unable to add \(newTitle) to favorites." : addError
+                        }
                     }
                 }
             }
@@ -1963,7 +2032,7 @@ final class CatalogViewModel: ObservableObject {
                     self.schedulePatchingPollIfNeeded()
                 } else if self.refreshAuthIfNeeded(error: error) {
                     self.updateFavoriteGames([])
-                } else if self.selectedCatalogDestination == .favorites, self.errorMessage.isEmpty {
+                } else if self.errorMessage.isEmpty {
                     self.errorMessage = error.isEmpty ? "Unable to load GeForce NOW favorites." : error
                 }
             }
@@ -1978,9 +2047,16 @@ final class CatalogViewModel: ObservableObject {
             guard !identity.isEmpty, identities.insert(identity).inserted else { continue }
             game.isFavorited = true
             uniqueGames.append(game)
+            if uniqueGames.count >= Self.maxFavoritesLimit {
+                break
+            }
         }
         favoriteGames = uniqueGames
         favoriteGameIdentities = identities
+        for game in allKnownGames {
+            let ident = Self.identity(for: game)
+            game.isFavorited = identities.contains(ident)
+        }
     }
 
     private func loadAccountAndStores() {

@@ -772,6 +772,19 @@ public enum StreamPreferences {
         storage.synchronize()
     }
 
+    public static func regionName(forStreamingBaseUrl baseUrl: String) -> String {
+        let regions = loadCachedRegions()
+        if let host = URLComponents(string: normalizedBaseUrl(baseUrl))?.host,
+           let matched = regions.first(where: { URLComponents(string: $0.url)?.host?.caseInsensitiveCompare(host) == .orderedSame }) {
+            return matched.name
+        }
+        let selected = loadSelectedRegionUrl()
+        if !selected.isEmpty, let chosen = cachedRegionChoice(regions: regions, selectedRegionUrl: selected) {
+            return chosen.name
+        }
+        return ""
+    }
+
     public static func loadCachedRegions() -> [StreamRegionOption] {
         loadCachedRegions(userId: AccountStorageKeys.activeUserId())
     }

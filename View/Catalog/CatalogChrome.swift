@@ -51,7 +51,6 @@ private struct TopNavigationGlassBar: View {
         HStack(spacing: 18) {
             Button("Home") { viewModel.showGames() }
             Button("Library") { viewModel.showCatalogDestination(.library) }
-            Button("Favorites") { viewModel.showCatalogDestination(.favorites) }
             Button("Recordings") { viewModel.showRecordings() }
             Button("Settings") { viewModel.showSettings() }
             Button { viewModel.refresh() } label: { Image(systemName: "arrow.clockwise") }

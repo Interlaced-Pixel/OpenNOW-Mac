@@ -20,8 +20,7 @@ let package = Package(
         .target(
             name: "PixelNOW",
             dependencies: [
-                .product(name: "Sentry", package: "sentry-cocoa"),
-                "NativeGeronimoShim"
+                .product(name: "Sentry", package: "sentry-cocoa")
             ],
             path: ".",
             exclude: [
@@ -31,7 +30,6 @@ let package = Package(
                 "PixelNOWApp.swift",
                 "App/Stream/webrtc/WebRTCMediaStreamSurface.swift",
                 "PixelNOW.xcodeproj",
-                "App/Stream/nvst/NativeGeronimo",
                 "Resources",
                 "View",
                 "ViewModel",
@@ -52,12 +50,6 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(["-F", packageRoot, "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", packageRoot])
             ]
-        ),
-        .target(
-            name: "NativeGeronimoShim",
-            path: "App/Stream/nvst/NativeGeronimo",
-            sources: ["NativeNVSTGeronimoShim.mm"],
-            publicHeadersPath: "."
         )
     ]
 )

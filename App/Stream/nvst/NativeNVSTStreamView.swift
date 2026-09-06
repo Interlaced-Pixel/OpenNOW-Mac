@@ -17,6 +17,13 @@ private final class NativeNVSTVideoSurfaceView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
     }
+
+    override func layout() {
+        super.layout()
+        for subview in subviews {
+            subview.frame = bounds
+        }
+    }
 }
 
 @MainActor
@@ -209,6 +216,23 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
         videoSurface
     }
 
+    private var nvstBifrostFreeRenderer: NvstBifrostFreeVideoRenderer?
+
+    public func attachNvstBifrostFreeRenderer(targetFps: Int32) -> NvstBifrostFreeVideoRenderer {
+        nvstBifrostFreeRenderer?.detach()
+        let renderer = NvstBifrostFreeVideoRenderer(parentView: videoSurface, targetFps: targetFps)
+        nvstBifrostFreeRenderer = renderer
+        nativeNVSTRendererEnabled = true
+        nativeNVSTRendererPreparedForShutdown = false
+        renderer.layoutVideoView()
+        return renderer
+    }
+
+    public func detachNvstBifrostFreeRenderer() {
+        nvstBifrostFreeRenderer?.detach()
+        nvstBifrostFreeRenderer = nil
+    }
+
     public func nativeNVSTVideoWindow() -> NSWindow? {
         guard window != nil else { return nil }
         layoutSubtreeIfNeeded()
@@ -239,12 +263,17 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     public func setNativeNVSTVideoVisible(_ visible: Bool) {
         nativeNVSTVideoVisible = visible
         if visible { nativeNVSTRendererPreparedForShutdown = false }
+        nvstBifrostFreeRenderer?.setVideoVisible(visible)
+        nvstBifrostFreeRenderer?.layoutVideoView()
         if !nativeNVSTRendererPreparedForShutdown { _ = embedNativeNVSTMetalViewIfAvailable() }
         nativeNVSTMetalView?.isHidden = !visible
         nativeNVSTRendererWindow.alphaValue = 0
     }
 
     public var nativeNVSTRendererSurfaceReady: Bool {
+        if let renderer = nvstBifrostFreeRenderer {
+            return renderer.isSurfaceReady
+        }
         guard nativeNVSTRendererEnabled, nativeNVSTVideoVisible, !nativeNVSTRendererPreparedForShutdown,
               let metalView = nativeNVSTMetalView, metalView.superview === videoSurface,
               let metalLayer = metalView.layer as? CAMetalLayer else { return false }
@@ -252,6 +281,7 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     }
 
     public func prepareNativeNVSTRendererForShutdown() {
+        detachNvstBifrostFreeRenderer()
         removePointerLockNotifications()
         if isPointerLocked {
             disablePointerLock()
@@ -283,39 +313,37 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
 
     public var streamWindowHasInputFocus: Bool {
         guard NSApplication.shared.isActive, let window else { return false }
-        let keyWindow = NSApplication.shared.keyWindow
-        if keyWindow === window { return true }
-        return nativeNVSTRendererEnabled && keyWindow === nativeNVSTRendererWindow
+        return NSApplication.shared.keyWindow === window
     }
 
     public func restoreInputFocus() {
-        guard remoteInputEnabled, NSApplication.shared.isActive else { return }
-        synchronizeSDLKeyboardFocus()
+        guard remoteInputEnabled, NSApplication.shared.isActive, window?.isKeyWindow == true else { return }
         window?.makeFirstResponder(self)
         if locksPointerWhenRelativeModeSelected, mouseInputMode == .relative, directMouseInputEnabled {
-            synchronizeRelativePointerCapture()
+            setPointerLocked(true)
         }
     }
 
     public func applyServerCursorVisibility(_ visible: Bool) {
         mouseInputMode = visible || !directMouseInputEnabled ? .absolute : .relative
         if mouseInputMode == .relative {
-            synchronizeSDLKeyboardFocus()
             synchronizeRelativePointerCapture()
         } else {
-            synchronizeSDLKeyboardFocus()
             setPointerLocked(false)
         }
     }
 
     public func synchronizeRelativePointerCapture() {
         guard remoteInputEnabled, directMouseInputEnabled, mouseInputMode == .relative else { return }
-        synchronizeSDLKeyboardFocus()
         window?.makeFirstResponder(self)
         setPointerLocked(true)
     }
 
     private func synchronizeSDLKeyboardFocus() {
+        guard nvstBifrostFreeRenderer == nil else {
+            nativeNVSTRendererWindow.keyboardFocusEnabled = false
+            return
+        }
         guard !nativeNVSTRendererPreparedForShutdown else {
             nativeNVSTRendererWindow.keyboardFocusEnabled = false
             return
@@ -342,8 +370,12 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     public override func layout() {
         super.layout()
         videoSurface.frame = videoContentFrame()
+        for subview in videoSurface.subviews {
+            subview.frame = videoSurface.bounds
+        }
+        nvstBifrostFreeRenderer?.layoutVideoView()
         nativeNVSTMetalView?.frame = videoSurface.bounds
-        if nativeNVSTRendererEnabled {
+        if nativeNVSTRendererEnabled && nativeNVSTRendererWindow.parent != nil {
             updateNativeNVSTRendererWindowFrame()
             updateNativeNVSTPresentation()
             if !nativeNVSTRendererPreparedForShutdown { _ = embedNativeNVSTMetalViewIfAvailable() }
@@ -724,24 +756,12 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
             MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
         let windowToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, !self.nativeNVSTRendererWindow.isKeyWindow else { return }
-                self.handleFocusLoss()
-            }
+            MainActor.assumeIsolated { self?.handleFocusLoss() }
         }
         let becameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restoreInputFocus() }
         }
-        let rendererResignToken = center.addObserver(forName: NSWindow.didResignKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.window?.isKeyWindow != true else { return }
-                self.handleFocusLoss()
-            }
-        }
-        let rendererBecameKeyToken = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nativeNVSTRendererWindow, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.synchronizeRelativePointerCapture() }
-        }
-        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken, rendererResignToken, rendererBecameKeyToken]
+        pointerLockNotificationTokens = [appToken, windowToken, becameKeyToken]
     }
 
     private func removePointerLockNotifications() {
