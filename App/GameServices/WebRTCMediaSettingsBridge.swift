@@ -1,7 +1,7 @@
 import Foundation
 
 func webRTCMediaCapabilities(from capabilities: StreamDeviceCapabilities) -> WebRTCMediaDeviceCapabilities {
-    let connectedGamepads = NativeWebRTCGamepadMonitor.connectedGamepadCount()
+    let connectedGamepads = NativeNVSTGamepadMonitor.connectedGamepadCount()
     let reservedRemoteGamepads = RemoteCoOpPreferencesStore.reservedControllerSlotsForLaunch()
     return WebRTCMediaDeviceCapabilities(
         h264HardwareDecodeSupported: capabilities.h264HardwareDecodeSupported,

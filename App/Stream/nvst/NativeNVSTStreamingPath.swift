@@ -79,10 +79,7 @@ public protocol NativeNVSTSessionProvider: Sendable {
     func startNativeNVSTSession(configuration: PreparedLaunchConfiguration) async throws -> NativeNVSTSessionAllocation
     func recoverNativeNVSTSession(configuration: PreparedLaunchConfiguration, session: StreamSessionDescriptor) async throws -> NativeNVSTSessionAllocation
     func finishSession(_ session: StreamSessionDescriptor, reason: StreamEndReason) async throws
-    /// Looks up the session actually holding the seat when a session-limit is hit at
-    /// connect time. The limit error carries no blocker identity, so this queries the
-    /// server for active sessions and returns a conflict describing the real blocker
-    /// (never the excluded session). Returns nil when no blocker can be resolved.
+
     func lookupActiveSessionConflict(excludingSessionID sessionID: String, applicationID: String) async -> StreamSessionConflict?
 }
 
@@ -115,7 +112,6 @@ public protocol NativeNVSTTransport: Sendable {
     func setDynamicStreamingMode(_ mode: NativeNVSTDynamicStreamingMode) async throws
     func setL4SEnabled(_ enabled: Bool) async throws
     func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws
-    func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws
     func startRecording(configuration: WebRTCStreamRecordingConfiguration) async
     func stopRecording() async
     func setRecordingStatusHandler(_ handler: (@MainActor @Sendable (WebRTCStreamRecordingStatus) -> Void)?) async
@@ -148,13 +144,10 @@ public extension NativeNVSTTransport {
     func setDynamicStreamingMode(_ mode: NativeNVSTDynamicStreamingMode) async throws { throw NativeNVSTError.notRunning }
     func setL4SEnabled(_ enabled: Bool) async throws { throw NativeNVSTError.notRunning }
     func updateGamepadTopology(_ topology: NativeNVSTGamepadTopology) async throws { throw NativeNVSTError.notRunning }
-    func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws { throw NativeNVSTError.notRunning }
     func setMicrophoneConfiguration(_ configuration: NativeNVSTMicrophoneConfiguration) async throws {}
     func microphoneStatus() async -> NativeNVSTMicrophoneStatus { .disabled }
     func setLocalAudioPlaybackMuted(_ muted: Bool) async throws { throw NativeNVSTError.notRunning }
 
-    /// Recording is optional for a transport. The status handler is the only channel the UI
-    /// listens on, so a transport that never installs one simply leaves the HUD at `.idle`.
     func startRecording(configuration: WebRTCStreamRecordingConfiguration) async {}
     func stopRecording() async {}
     func setRecordingStatusHandler(_ handler: (@MainActor @Sendable (WebRTCStreamRecordingStatus) -> Void)?) async {}
@@ -232,22 +225,16 @@ public actor NativeNVSTStreamingPath {
     var startedAt: ContinuousClock.Instant?
     private var terminalTask: Task<Void, Never>?
     private var cancelStartTask: Task<Void, Never>?
-    /// Recoveries started inside the current `recoveryAttemptWindow`; the budget, not a flag.
+
     private var recoveryAttempts = 0
     private var recoveryWindowStartedAt: ContinuousClock.Instant?
-    /// True while a recovery is rebuilding the transport, so a termination event the teardown
-    /// itself produces, or a second caller, cannot start a parallel one or end the session.
+
     private var isRecovering = false
     private var reportContinuations: [UUID: AsyncStream<StreamReport>.Continuation] = [:]
 
-    /// How many reconnects to the same cloud session are attempted before the stream is declared
-    /// lost, and the window they are counted in. A Wi-Fi roam or a sleeping router comes back in
-    /// seconds, not on the first retry; the seat keeps a disconnected session resumable for
-    /// minutes, so the attempts are cheap and the alternative is a dead stream the user has to
-    /// relaunch by hand.
     public static let maximumRecoveryAttempts = 4
     public static let recoveryAttemptWindow: Duration = .seconds(120)
-    /// Pause before each attempt after the first: the network usually needs a moment.
+
     public static let recoveryAttemptDelays: [Duration] = [.zero, .seconds(2), .seconds(4), .seconds(6)]
 
     public init(sessionProvider: any NativeNVSTSessionProvider,
@@ -299,14 +286,14 @@ public actor NativeNVSTStreamingPath {
 
     private func startStreaming(configuration: PreparedLaunchConfiguration,
                                 progress: (@Sendable (StreamProgress) async -> Void)?) async throws -> StreamSessionDescriptor {
-        WebRTCMediaTelemetry.capture("nvst.path.start", level: .info, message: "Starting native NVST streaming path.", attributes: ["configurationId": configuration.id.uuidString, "applicationID": configuration.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.path.start", level: .info, message: "Starting native NVST streaming path.", attributes: ["configurationId": configuration.id.uuidString, "applicationID": configuration.applicationID])
 
         try Task.checkCancellation()
         try await publishProgress(configuration: configuration, step: .checkNetworkRoute, message: "Checking native NVST runtime...", progress: progress)
         do {
             _ = try await transport.prepare()
         } catch {
-            WebRTCMediaTelemetry.capture("nvst.path.runtime.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
+            NativeNVSTMediaTelemetry.capture("nvst.path.runtime.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
             throw error
         }
 
@@ -317,7 +304,7 @@ public actor NativeNVSTStreamingPath {
             allocation = try await sessionProvider.startNativeNVSTSession(configuration: configuration)
         } catch {
             if error is CancellationError || Task.isCancelled { throw error }
-            WebRTCMediaTelemetry.capture("nvst.path.session_provider.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
+            NativeNVSTMediaTelemetry.capture("nvst.path.session_provider.error", level: .error, message: Self.message(for: error), attributes: ["applicationID": configuration.applicationID])
             throw error
         }
 
@@ -331,15 +318,12 @@ public actor NativeNVSTStreamingPath {
         } catch {
             await transport.disconnect()
             await mediaSession.finish()
-            // On a resume attempt allocation.session IS the session the user is trying to
-            // reclaim, and it can still be live on the device that started it. `.paused` tears
-            // down our side without telling the seat to stop — stopping it here killed the other
-            // device's stream on every failed resume.
+
             let releaseReason: StreamEndReason = allocation.isResume
                 ? .paused
                 : (Task.isCancelled ? .userRequested : .failed)
             if error as? NativeNVSTError == .sessionLimitReached {
-                // The blocking session is a different one whose identity this error does not carry.
+
                 try? await sessionProvider.finishSession(allocation.session, reason: releaseReason)
                 if let conflict = await sessionProvider.lookupActiveSessionConflict(
                     excludingSessionID: allocation.session.id,
@@ -351,7 +335,7 @@ public actor NativeNVSTStreamingPath {
             }
             try? await sessionProvider.finishSession(allocation.session, reason: releaseReason)
             if error is CancellationError || Task.isCancelled { throw error }
-            WebRTCMediaTelemetry.capture("nvst.path.transport.error", level: .error, message: Self.message(for: error), attributes: ["sessionId": allocation.session.id])
+            NativeNVSTMediaTelemetry.capture("nvst.path.transport.error", level: .error, message: Self.message(for: error), attributes: ["sessionId": allocation.session.id])
             throw error
         }
 
@@ -364,7 +348,7 @@ public actor NativeNVSTStreamingPath {
         state = .running(allocation.session)
         monitorTransportTermination()
         try await publishProgress(configuration: configuration, step: .connected, message: "Connected over native NVST.", isReady: true, progress: progress)
-        WebRTCMediaTelemetry.capture("nvst.path.connected", level: .info, message: "Native NVST streaming path connected.", attributes: ["sessionId": allocation.session.id, "applicationID": allocation.session.applicationID])
+        NativeNVSTMediaTelemetry.capture("nvst.path.connected", level: .info, message: "Native NVST streaming path connected.", attributes: ["sessionId": allocation.session.id, "applicationID": allocation.session.applicationID])
         return allocation.session
     }
 
@@ -401,9 +385,6 @@ public actor NativeNVSTStreamingPath {
         try await transport.setLocalAudioPlaybackMuted(muted)
     }
 
-    /// Returns whether the recorder was actually started. The caller shows "Starting" optimistically
-    /// and the recorder is the only thing that ever emits a status, so a silent refusal here would
-    /// leave the HUD stuck on it forever with no way back.
     @discardableResult
     public func startRecording(configuration: WebRTCStreamRecordingConfiguration) async -> Bool {
         guard activeSession != nil else { return false }
@@ -457,11 +438,6 @@ public actor NativeNVSTStreamingPath {
         try await transport.updateGamepadTopology(topology)
     }
 
-    public func updateGamepadTopology(_ topology: NativeWebRTCGamepadTopology) async throws {
-        guard activeSession != nil else { throw NativeNVSTError.notRunning }
-        try await transport.updateGamepadTopology(topology)
-    }
-
     public func stop(reason: StreamEndReason = .userRequested, message: String = "Native NVST stream ended.") async throws -> StreamReport {
         try await stop(reason: reason, message: message, forApplicationTermination: false)
     }
@@ -485,7 +461,7 @@ public actor NativeNVSTStreamingPath {
         startedAt = nil
         recoveryAttempts = 0
         recoveryWindowStartedAt = nil
-        WebRTCMediaTelemetry.capture("nvst.path.stop", level: .info, message: message, attributes: ["sessionId": activeSession.id, "reason": reason.rawValue])
+        NativeNVSTMediaTelemetry.capture("nvst.path.stop", level: .info, message: message, attributes: ["sessionId": activeSession.id, "reason": reason.rawValue])
         if forApplicationTermination {
             await transport.disconnectForApplicationTermination()
         } else {
@@ -527,7 +503,7 @@ public actor NativeNVSTStreamingPath {
         startedAt = nil
         recoveryAttempts = 0
         recoveryWindowStartedAt = nil
-        WebRTCMediaTelemetry.capture("nvst.path.pause", level: .info, message: message, attributes: ["sessionId": activeSession.id])
+        NativeNVSTMediaTelemetry.capture("nvst.path.pause", level: .info, message: message, attributes: ["sessionId": activeSession.id])
         do {
             try await transport.pause()
             try? await sessionProvider.finishSession(activeSession, reason: .paused)
@@ -576,8 +552,7 @@ public actor NativeNVSTStreamingPath {
     private func stopSessionIfCancelled(_ session: StreamSessionDescriptor, isResume: Bool) async throws {
         guard Task.isCancelled else { return }
         await transport.disconnect()
-        // Cancelling a resume must leave the reclaimed session alive: it belongs to whichever
-        // device is still streaming it.
+
         try? await sessionProvider.finishSession(session, reason: isResume ? .paused : .userRequested)
         throw CancellationError()
     }
@@ -625,7 +600,6 @@ public actor NativeNVSTStreamingPath {
     }
 }
 
-// Transport death and recovery.
 extension NativeNVSTStreamingPath {
 
     private func monitorTransportTermination() {
@@ -642,8 +616,7 @@ extension NativeNVSTStreamingPath {
 
     private func handleTransportTermination(_ termination: NativeNVSTTransportTermination) async {
         guard let activeSession else { return }
-        // A recovery in flight tears the transport down itself; the termination that produces is
-        // not a second failure.
+
         guard !isRecovering else { return }
         terminalTask = nil
         if automaticRecovery == .singleAttempt, NativeNVSTRecoveryPolicy.permitsRecovery(termination), activeAllocation != nil, launchConfiguration != nil {
@@ -667,8 +640,7 @@ extension NativeNVSTStreamingPath {
         let message: String
         switch termination {
         case .sessionTerminated(let info):
-            // `.paused` keeps the cloud session alive; `.remoteEnded` tells the session
-            // provider to stop it, which would quit the game.
+
             reason = info.isPause ? .paused : .remoteEnded
             message = info.message.isEmpty
                 ? (info.isPause ? "Native NVST stream paused." : "Native NVST stream ended remotely.")
@@ -688,7 +660,6 @@ extension NativeNVSTStreamingPath {
         publish(report)
     }
 
-    /// Whether a reconnect to the current session is still allowed by the attempt budget.
     public func canRecoverInPlace() -> Bool {
         guard automaticRecovery == .singleAttempt, activeSession != nil, activeAllocation != nil, launchConfiguration != nil, !isRecovering else { return false }
         if let started = recoveryWindowStartedAt, started.duration(to: .now) > Self.recoveryAttemptWindow { return true }
@@ -697,15 +668,6 @@ extension NativeNVSTStreamingPath {
 
     public var isRecoveringInPlace: Bool { isRecovering }
 
-    /// Reconnects to the same cloud session without ending it: tears the transport down, asks
-    /// CloudMatch to resume the session on this device (which is where the seat publishes a fresh
-    /// RTSPS control endpoint), and negotiates again. Tries up to `maximumRecoveryAttempts` times
-    /// inside `recoveryAttemptWindow`, pausing `recoveryAttemptDelays` between tries so a network
-    /// that is still coming back gets the chance to. Returns false once the budget is spent or the
-    /// session went away; the caller ends the stream then.
-    ///
-    /// Callers: the transport's own termination event, and the host's stall watchdog and network
-    /// path monitor — a stream whose UDP simply stopped never raises a termination at all.
     public func recoverInPlace(reason: String) async -> Bool {
         guard canRecoverInPlace(), let session = activeSession, let configuration = launchConfiguration else { return false }
         isRecovering = true
@@ -725,7 +687,7 @@ extension NativeNVSTStreamingPath {
                 try? await Task.sleep(for: delay)
             }
             guard activeSession?.id == session.id, !Task.isCancelled else { return false }
-            WebRTCMediaTelemetry.capture("nvst.path.recovery.attempt", level: .info, message: "Reconnecting native NVST session in place.", attributes: ["sessionId": session.id, "attempt": String(attempt + 1), "reason": reason])
+            NativeNVSTMediaTelemetry.capture("nvst.path.recovery.attempt", level: .info, message: "Reconnecting native NVST session in place.", attributes: ["sessionId": session.id, "attempt": String(attempt + 1), "reason": reason])
             if await recover(session: session, configuration: configuration, attempt: attempt + 1) {
                 return true
             }
@@ -749,10 +711,10 @@ extension NativeNVSTStreamingPath {
             }
             activeAllocation = refreshed
             monitorTransportTermination()
-            WebRTCMediaTelemetry.capture("nvst.path.recovered", level: .info, message: "Native NVST session recovered.", attributes: ["sessionId": session.id, "attempt": String(attempt)])
+            NativeNVSTMediaTelemetry.capture("nvst.path.recovered", level: .info, message: "Native NVST session recovered.", attributes: ["sessionId": session.id, "attempt": String(attempt)])
             return true
         } catch {
-            WebRTCMediaTelemetry.capture("nvst.path.recovery.failed", level: .warning, message: Self.message(for: error), attributes: ["sessionId": session.id, "attempt": String(attempt)])
+            NativeNVSTMediaTelemetry.capture("nvst.path.recovery.failed", level: .warning, message: Self.message(for: error), attributes: ["sessionId": session.id, "attempt": String(attempt)])
             await transport.resetForRecovery()
         }
         return false

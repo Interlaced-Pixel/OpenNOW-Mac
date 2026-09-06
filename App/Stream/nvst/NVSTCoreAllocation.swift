@@ -1,27 +1,19 @@
-//  Reading the seat's allocation: the stream profile it implies, and where the session is running.
-//
-
 import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
 
-extension NvstBifrostFreeTransport {
-    // MARK: - Allocation plumbing
+extension NVSTCoreTransport {
 
     struct StreamProfile: Equatable, Sendable {
         var resolution: String?
         var fps: Int?
         var codec: String?
         var bitrateKbps: Int?
-        /// The user's ceiling specifically. `bitrateKbps` accepts either key and drives the initial
-        /// and peak rates; this one only ever comes from `maxBitrateKbps`, because announcing a cap
-        /// that was really an initial rate would clamp the stream to its starting point.
+
         var maximumBitrateKbps: Int?
     }
 
-    /// Reads the negotiated profile out of the allocation's session JSON so ANNOUNCE advertises
-    /// what the seat already agreed to.
     static func streamProfile(from allocation: NativeNVSTSessionAllocation) -> StreamProfile {
         var profile = StreamProfile()
         for json in [allocation.sessionInfoJSON, allocation.settingsJSON, allocation.rawSessionJSON] {
@@ -31,10 +23,7 @@ extension NvstBifrostFreeTransport {
             if profile.resolution == nil, let resolution = negotiated["resolution"] as? String, !resolution.isEmpty {
                 profile.resolution = resolution
             }
-            // fps can live at the top level or inside `selectedVideoMode`/`selectedEncodeMode`,
-            // and as a number or a string — the same places `NVSTCoreTransport` reads it. Missing it
-            // is not cosmetic: the pacing feedback then defaults to 60 fps, and the seat's delay
-            // controller holds the stream there even when 120 was negotiated.
+
             if profile.fps == nil {
                 let candidates: [Any?] = [
                     negotiated["fps"], object["fps"],
@@ -67,7 +56,6 @@ extension NvstBifrostFreeTransport {
         return profile
     }
 
-    /// `host:port` or bare host → host.
     static func host(from signalingServer: String) -> String? {
         let trimmed = signalingServer.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
@@ -82,7 +70,6 @@ extension NvstBifrostFreeTransport {
         }
     }
 
-    /// Reads the negotiated or requested audio channels (2 for stereo, 6 for 5.1, 8 for 7.1) out of the allocation.
     static func sessionAudioChannels(from allocation: NativeNVSTSessionAllocation) -> Int {
         for json in [allocation.settingsJSON, allocation.sessionInfoJSON, allocation.rawSessionJSON] {
             guard let data = json.data(using: .utf8),

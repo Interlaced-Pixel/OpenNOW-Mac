@@ -18,11 +18,6 @@ struct GameLaunchSettingsSheet: View {
         StreamPreferences.loadDeviceCapabilities()
     }
 
-    private var nativeNVSTAvailable: Bool {
-        if case .success = NVSTNativeRuntime.availability() { return true }
-        return false
-    }
-
     private var isQualityLocked: Bool {
         profile.streamingQualityProfileIndex != 0
     }
@@ -33,7 +28,7 @@ struct GameLaunchSettingsSheet: View {
 
     enum LaunchSettingsTab: String, CaseIterable, Identifiable {
         case display = "Display & Video"
-        case transport = "Transport & Server"
+        case transport = "Server Location"
         case enhancement = "Enhancement"
         case inputAudio = "Input & Audio"
 
@@ -42,7 +37,7 @@ struct GameLaunchSettingsSheet: View {
         var icon: String {
             switch self {
             case .display: return "display"
-            case .transport: return "antenna.radiowaves.left.and.right"
+            case .transport: return "network"
             case .enhancement: return "sparkles"
             case .inputAudio: return "gamecontroller"
             }
@@ -404,33 +399,6 @@ struct GameLaunchSettingsSheet: View {
 
     private var transportTabContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            settingSectionHeader("Streaming Transport")
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("", selection: Binding(
-                    get: { profile.transportModeIndex },
-                    set: { newMode in
-                        profile.transportModeIndex = newMode
-                        profile.transportMode = StreamPreferences.transportModeOptions[newMode]
-                        saveCurrentProfile()
-                    }
-                )) {
-                    ForEach(StreamPreferences.transportModeOptions.indices, id: \.self) { idx in
-                        let opt = StreamPreferences.transportModeOptions[idx]
-                        let locked = opt.value == "nvst" && !nativeNVSTAvailable
-                        Text(opt.label + (locked ? " (Unavailable)" : "")).tag(idx)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(profile.transportMode.value == "nvst"
-                     ? "Native NVST connects directly through high-throughput native RTSP transport."
-                     : "WebRTC standard transport for maximum compatibility.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-
-            Divider().background(Color.white.opacity(0.08))
-
             settingSectionHeader("Server Location Override")
             VStack(alignment: .leading, spacing: 8) {
                 Picker("Region", selection: Binding(

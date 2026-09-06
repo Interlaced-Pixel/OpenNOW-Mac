@@ -101,32 +101,6 @@ struct GameCardContextMenuContent: View {
                 .disabled(profile.streamingQualityProfileIndex != 0)
 
                 Menu {
-                    Button {
-                        profile.transportModeIndex = 0
-                        profile.transportMode = StreamPreferences.transportModeOptions[0]
-                        saveProfile()
-                    } label: {
-                        HStack {
-                            Text("WebRTC")
-                            if profile.transportModeIndex == 0 { Image(systemName: "checkmark") }
-                        }
-                    }
-
-                    Button {
-                        profile.transportModeIndex = 1
-                        profile.transportMode = StreamPreferences.transportModeOptions[1]
-                        saveProfile()
-                    } label: {
-                        HStack {
-                            Text("Native / NVST")
-                            if profile.transportModeIndex == 1 { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    Label("Transport: \(profile.transportMode.label)", systemImage: "antenna.radiowaves.left.and.right")
-                }
-
-                Menu {
                     ForEach(StreamPreferences.codecOptions.indices, id: \.self) { idx in
                         let codec = StreamPreferences.codecOptions[idx]
                         Button {

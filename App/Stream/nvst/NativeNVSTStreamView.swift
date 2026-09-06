@@ -36,7 +36,6 @@ private final class NativeNVSTRendererWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
-
 @MainActor
 public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClient {
     public var onInputEvent: ((UserInputEvent) -> Void)?
@@ -216,21 +215,39 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
         videoSurface
     }
 
-    private var nvstBifrostFreeRenderer: NvstBifrostFreeVideoRenderer?
+    private var nvstCoreRenderer: NVSTCoreVideoRenderer?
 
-    public func attachNvstBifrostFreeRenderer(targetFps: Int32) -> NvstBifrostFreeVideoRenderer {
-        nvstBifrostFreeRenderer?.detach()
-        let renderer = NvstBifrostFreeVideoRenderer(parentView: videoSurface, targetFps: targetFps)
-        nvstBifrostFreeRenderer = renderer
+    public func attachNVSTCoreRenderer(targetFps: Int32) -> NVSTCoreVideoRenderer {
+        nvstCoreRenderer?.detach()
+        let renderer = NVSTCoreVideoRenderer(parentView: videoSurface, targetFps: targetFps)
+        nvstCoreRenderer = renderer
         nativeNVSTRendererEnabled = true
         nativeNVSTRendererPreparedForShutdown = false
         renderer.layoutVideoView()
         return renderer
     }
 
+    public func attachNvstBifrostFreeRenderer(targetFps: Int32) -> NVSTCoreVideoRenderer {
+        attachNVSTCoreRenderer(targetFps: targetFps)
+    }
+
+    public func detachNVSTCoreRenderer() {
+        nvstCoreRenderer?.detach()
+        nvstCoreRenderer = nil
+    }
+
     public func detachNvstBifrostFreeRenderer() {
-        nvstBifrostFreeRenderer?.detach()
-        nvstBifrostFreeRenderer = nil
+        detachNVSTCoreRenderer()
+    }
+
+    private func _unusedAttach(targetFps: Int32) -> NVSTCoreVideoRenderer {
+        nvstCoreRenderer?.detach()
+        let renderer = NVSTCoreVideoRenderer(parentView: videoSurface, targetFps: targetFps)
+        nvstCoreRenderer = renderer
+        nativeNVSTRendererEnabled = true
+        nativeNVSTRendererPreparedForShutdown = false
+        renderer.layoutVideoView()
+        return renderer
     }
 
     public func nativeNVSTVideoWindow() -> NSWindow? {
@@ -263,15 +280,15 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     public func setNativeNVSTVideoVisible(_ visible: Bool) {
         nativeNVSTVideoVisible = visible
         if visible { nativeNVSTRendererPreparedForShutdown = false }
-        nvstBifrostFreeRenderer?.setVideoVisible(visible)
-        nvstBifrostFreeRenderer?.layoutVideoView()
+        nvstCoreRenderer?.setVideoVisible(visible)
+        nvstCoreRenderer?.layoutVideoView()
         if !nativeNVSTRendererPreparedForShutdown { _ = embedNativeNVSTMetalViewIfAvailable() }
         nativeNVSTMetalView?.isHidden = !visible
         nativeNVSTRendererWindow.alphaValue = 0
     }
 
     public var nativeNVSTRendererSurfaceReady: Bool {
-        if let renderer = nvstBifrostFreeRenderer {
+        if let renderer = nvstCoreRenderer {
             return renderer.isSurfaceReady
         }
         guard nativeNVSTRendererEnabled, nativeNVSTVideoVisible, !nativeNVSTRendererPreparedForShutdown,
@@ -281,7 +298,7 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     }
 
     public func prepareNativeNVSTRendererForShutdown() {
-        detachNvstBifrostFreeRenderer()
+        detachNVSTCoreRenderer()
         removePointerLockNotifications()
         if isPointerLocked {
             disablePointerLock()
@@ -340,7 +357,7 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
     }
 
     private func synchronizeSDLKeyboardFocus() {
-        guard nvstBifrostFreeRenderer == nil else {
+        guard nvstCoreRenderer == nil else {
             nativeNVSTRendererWindow.keyboardFocusEnabled = false
             return
         }
@@ -373,7 +390,7 @@ public final class NativeNVSTStreamView: NSView, @preconcurrency NSTextInputClie
         for subview in videoSurface.subviews {
             subview.frame = videoSurface.bounds
         }
-        nvstBifrostFreeRenderer?.layoutVideoView()
+        nvstCoreRenderer?.layoutVideoView()
         nativeNVSTMetalView?.frame = videoSurface.bounds
         if nativeNVSTRendererEnabled && nativeNVSTRendererWindow.parent != nil {
             updateNativeNVSTRendererWindowFrame()

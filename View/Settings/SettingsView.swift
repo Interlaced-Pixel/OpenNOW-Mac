@@ -1138,18 +1138,6 @@ private struct ExperimentalFeaturesSettingsPage: View {
                 )
             }
 
-            SettingsCard(title: "Stream Transport") {
-                SettingsToggleRow(
-                    title: "Native/NVST Transport",
-                    subtitle: viewModel.nativeNVSTRuntimeAvailable
-                        ? "Off uses the default WebRTC session path. On requests native NVST secure RTSP transport with matching CloudMatch headers."
-                        : viewModel.nativeNVSTRuntimeMessage,
-                    isOn: viewModel.streamProfile.transportMode.value == "nvst",
-                    isLocked: !viewModel.nativeNVSTRuntimeAvailable,
-                    action: viewModel.setNVSTTransportEnabled
-                )
-            }
-
             SettingsCard(title: "Recording") {
                 SettingsToggleRow(
                     title: "Recording Editor Early Beta",
@@ -1198,7 +1186,7 @@ private struct GameplaySettingsPage: View {
                 SettingsOptionRow(title: "Color Precision", subtitle: qualityLocked ? lockedProfileSubtitle : "10-bit modes require HEVC, AV1, or Auto support.", options: StreamPreferences.colorQualityOptions.map(\.label), selectedIndex: viewModel.streamProfile.colorQualityIndex, enabled: StreamPreferences.colorQualityOptions.map { StreamPreferences.colorQualitySupported($0, codec: viewModel.streamProfile.codec, capabilities: viewModel.streamCapabilities) }, isLocked: qualityLocked, action: viewModel.setColorQualityIndex)
             }
 
-            SettingsCard(title: "Stream Transport") {
+            SettingsCard(title: "Stream Delivery") {
                 SettingsOptionRow(title: "Quality Profile", subtitle: "Maps to the vendor streaming profile sent with the session request.", options: StreamPreferences.streamingQualityProfileOptions.map(\.label), selectedIndex: viewModel.streamProfile.streamingQualityProfileIndex, action: viewModel.setStreamingQualityProfileIndex)
                 SettingsDivider()
                 SettingsToggleRow(title: "Cloud G-Sync", subtitle: qualityLocked ? lockedProfileSubtitle : "Request cloud-side G-Sync when the server and stream mode support it.", isOn: viewModel.streamProfile.enableCloudGsync, isLocked: qualityLocked, action: viewModel.setCloudGsyncEnabled)
@@ -1257,11 +1245,10 @@ private struct GameplaySettingsPage: View {
             SettingsCard(title: "Audio") {
                 SettingsSliderRow(
                     title: "Game Volume",
-                    valueText: viewModel.streamProfile.transportMode.value == "nvst" ? "WebRTC only" : percentText(viewModel.streamProfile.gameVolume),
+                    valueText: percentText(viewModel.streamProfile.gameVolume),
                     value: viewModel.streamProfile.gameVolume,
                     range: 0...1,
                     step: 0.01,
-                    isLocked: viewModel.streamProfile.transportMode.value == "nvst",
                     action: viewModel.setGameVolume
                 )
                 SettingsDivider()

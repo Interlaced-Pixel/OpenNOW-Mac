@@ -339,7 +339,6 @@ public enum StreamPreferences {
         StreamColorQualityOption(label: "10-bit 4:4:4", value: "10bit_444")
     ]
     public static let transportModeOptions = [
-        StreamTransportModeOption(label: "WebRTC", value: "webrtc"),
         StreamTransportModeOption(label: "Native/NVST", value: "nvst")
     ]
     public static let streamingQualityProfileOptions = [
@@ -1061,8 +1060,8 @@ public enum StreamPreferences {
     public static func saveCodecIndex(_ value: Int) { storage.set(clamp(value, 0, codecOptions.count - 1), forKey: k.codecIndex) }
     public static func saveBitrateIndex(_ value: Int) { storage.set(clamp(value, 0, bitrateOptions.count - 1), forKey: k.bitrateIndex) }
     public static func saveColorQualityIndex(_ value: Int) { storage.set(clamp(value, 0, colorQualityOptions.count - 1), forKey: k.colorQualityIndex) }
-    public static func saveTransportModeIndex(_ value: Int) { storage.set(clamp(value, 0, transportModeOptions.count - 1), forKey: k.transportModeIndex) }
-    public static func saveNVSTTransportEnabled(_ value: Bool) { saveTransportModeIndex(value ? 1 : 0) }
+    public static func saveTransportModeIndex(_ value: Int) { storage.set(0, forKey: k.transportModeIndex) }
+    public static func saveNVSTTransportEnabled(_ value: Bool) { saveTransportModeIndex(0) }
     public static func saveStreamingQualityProfileIndex(_ value: Int) {
         let index = clamp(value, 0, streamingQualityProfileOptions.count - 1)
         storage.set(index, forKey: k.streamingQualityProfileIndex)
@@ -1161,8 +1160,8 @@ public enum StreamPreferences {
         profile.maxBitrateMbps = profile.bitrate.mbps
         profile.colorQualityIndex = clampedInt(dictionary, k.colorQualityIndex, 0, colorQualityOptions.count)
         profile.colorQuality = colorQualityOptions[profile.colorQualityIndex]
-        profile.transportModeIndex = clampedInt(dictionary, k.transportModeIndex, 0, transportModeOptions.count)
-        profile.transportMode = transportModeOptions[profile.transportModeIndex]
+        profile.transportModeIndex = 0
+        profile.transportMode = transportModeOptions[0]
         profile.streamingQualityProfileIndex = clampedInt(dictionary, k.streamingQualityProfileIndex, 0, streamingQualityProfileOptions.count)
         profile.streamingQualityProfileOption = streamingQualityProfileOptions[profile.streamingQualityProfileIndex]
         profile.streamingQualityProfile = profile.streamingQualityProfileOption.value
@@ -1555,7 +1554,7 @@ public enum StreamPreferences {
     }
 
     private static func serverInfoRequest(baseUrl: String, token: String, headers: CloudMatchClientHeaders? = nil) -> URLRequest {
-        let requestHeaders = headers ?? CloudMatchClientHeaders.browserWebRTC(clientId: nvClientId, userAgent: browserUserAgent())
+        let requestHeaders = headers ?? CloudMatchClientHeaders.nativeGFNPC
         var request = CloudMatchRequestFactory.serverInfoRequest(baseURLString: normalizedBaseUrl(baseUrl), accessToken: token, deviceId: DeviceIdentity.stableCloudmatchDeviceId(), headers: requestHeaders, timeoutInterval: 4) ?? URLRequest(url: URL(string: defaultStreamingBaseUrl + String(CloudMatch.Endpoint.serverInfo.path.dropFirst()))!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         return request

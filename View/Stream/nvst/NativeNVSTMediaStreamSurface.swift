@@ -265,7 +265,6 @@ private final class NativeNVSTInputFailureReporter: @unchecked Sendable {
     }
 }
 
-
 @MainActor
 struct NativeNVSTMediaStreamSurface: View {
     private struct FailurePresentation: Identifiable {
@@ -383,16 +382,16 @@ struct NativeNVSTMediaStreamSurface: View {
         }
         audioDeviceMonitor.start()
         nativeAudioDeviceMonitor = audioDeviceMonitor
-        let bifrostFreeSink = nativeView.attachNvstBifrostFreeRenderer(targetFps: Int32(max(30, profile.fps))).frameSink
+        let coreSink = nativeView.attachNVSTCoreRenderer(targetFps: Int32(max(30, profile.fps))).frameSink
         let diagnosticLog = NvstDiagnosticLog()
-        let transport = NvstBifrostFreeTransport(
+        let transport = NVSTCoreTransport(
             pixelBufferSink: { pixelBuffer, presentationTime, isKeyframe in
-                bifrostFreeSink.render(pixelBuffer: pixelBuffer, presentationTime: presentationTime, isKeyframe: isKeyframe)
+                coreSink.render(pixelBuffer: pixelBuffer, presentationTime: presentationTime, isKeyframe: isKeyframe)
             },
             configuredFps: profile.fps,
             configuredMaxBitrateKbps: profile.maxBitrateMbps * 1_000,
             logger: { message in
-                NativeNVSTMediaTelemetry.capture("nvst.bifrost_free", level: .info, message: message)
+                NativeNVSTMediaTelemetry.capture("nvst.core", level: .info, message: message)
                 diagnosticLog.append(message)
             }
         )
@@ -627,7 +626,7 @@ struct NativeNVSTMediaStreamSurface: View {
         recordingStatus = .idle
         nativeView?.stopHaptics()
         nativeView?.setNativeNVSTVideoVisible(false)
-        nativeView?.detachNvstBifrostFreeRenderer()
+        nativeView?.detachNVSTCoreRenderer()
         nativeView?.prepareNativeNVSTRendererForShutdown()
         guard !didEnd else {
             inputDispatcher?.cancel()
@@ -1761,4 +1760,3 @@ struct NativeNVSTStreamHostView: NSViewRepresentable {
         }
     }
 }
-

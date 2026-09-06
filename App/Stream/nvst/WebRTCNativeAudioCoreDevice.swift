@@ -12,10 +12,22 @@ private let coreAudioRecordingCallback: AURenderCallback = { refCon, actionFlags
     let device = Unmanaged<OPNCoreAudioRTCDevice>.fromOpaque(refCon).takeUnretainedValue()
     return device.captureRecording(actionFlags: actionFlags, timestamp: timestamp, busNumber: Int(busNumber), frameCount: frameCount)
 }
+enum LibWebRTCAudio {
+    static func defaultAudioDevice(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else {
+            return AudioDeviceID(kAudioObjectUnknown)
+        }
+        return device
+    }
+}
 
-/// What the CoreAudio RTC device needs from whoever owns it. NVST has no libwebrtc session, but it
-/// does need the playout tee this device provides, because that is the only place decoded game
-/// audio crosses out of libwebrtc and into our code.
 protocol OPNCoreAudioRTCDeviceOwner: AnyObject {
     func handleGameAudioFrame(_ audioBufferList: UnsafeRawPointer?, frameCount: UInt32, sampleRate: Double, channels: UInt32)
     func handleMicrophoneAudioFrame(_ audioBufferList: UnsafeRawPointer?, frameCount: UInt32, sampleRate: Double, channels: UInt32)
@@ -33,18 +45,11 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     private var inputDevice = AudioDeviceID(kAudioObjectUnknown)
     private var recordingScratch = [Int16]()
     let monitorsDefaultDeviceChanges: Bool
-    /// Bumped by every default-output notification so a burst collapses into one rebind.
+
     var selfDeviceChangeGeneration: UInt64 = 0
     private weak var delegate: RTCAudioDeviceDelegate?
     private var lastMicrophoneLevelReportNanoseconds: UInt64 = 0
 
-    /// Silences this Mac's speakers only, applied in `renderPlayout` *after* the frame has been teed
-    /// to the relay and the recorder.
-    ///
-    /// This is the only correct place for it. Muting further upstream - `RTCAudioTrack.isEnabled` or
-    /// `RTCAudioSource.volume` - stops libwebrtc producing the samples at all, which silences a
-    /// Remote Co-Op guest and a recording along with the speakers. Read on the CoreAudio render
-    /// thread, so it is plain and atomic rather than lock-guarded.
     var isPlayoutMuted = false
 
     private(set) var deviceInputSampleRate = 48_000.0
@@ -61,20 +66,10 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
     private(set) var isRecordingInitialized = false
     private(set) var isRecording = false
 
-    /// Whether the default output device this device bound to still exists. `false` means CoreAudio
-    /// reported no default output at all, in which case playout cannot start and the caller is
-    /// better off with libwebrtc's own device.
     var hasUsableOutputDevice: Bool {
         audioQueue.sync { outputDevice != AudioDeviceID(kAudioObjectUnknown) }
     }
 
-    /// Follows the default output device itself instead of waiting to be told.
-    ///
-    /// `OPNLibWebRTCAudio` drives `handleDefaultDeviceChange()` for the libwebrtc session, but it is
-    /// tied to an `OPNLibWebRTCSessionImpl` the NVST bundle never creates — so without this the
-    /// bundle's playout unit stays pinned to whatever device was default when the stream started,
-    /// and plugging in headphones mid-session leaves the game playing out the speakers. Off by
-    /// default so the WebRTC path keeps its single driver and does not hot-swap twice per change.
     init(owner: (any OPNCoreAudioRTCDeviceOwner)?, monitorsDefaultDeviceChanges: Bool = false) {
         self.owner = owner
         self.monitorsDefaultDeviceChanges = monitorsDefaultDeviceChanges
@@ -170,8 +165,7 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
         if status != noErr { clearAudioBufferList(outputData) }
         if status == noErr {
             owner?.handleGameAudioFrame(UnsafeRawPointer(outputData), frameCount: frameCount, sampleRate: deviceOutputSampleRate, channels: UInt32(outputNumberOfChannels))
-            // After the tee, never before: a Remote Co-Op guest and a recording are fed from the
-            // line above and must keep hearing the game while these speakers are silent.
+
             if isPlayoutMuted { clearAudioBufferList(outputData) }
         }
         return status
@@ -308,12 +302,6 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
         return true
     }
 
-    /// The output device's IO buffer, in seconds: 5 ms, the seat's own Opus frame. A device left at
-    /// its default (512 frames, 10.7 ms at 48 kHz; some USB interfaces sit at 4096) adds that much
-    /// to every sample's path to the speaker, on top of the jitter buffer's dwell that the HUD's
-    /// A/V row already reports. The device's own range clamps the request, and whatever the device
-    /// actually settled on is read back into `outputIOBufferDuration`, which libwebrtc reads for
-    /// its playout-delay estimate and the A/V estimate now includes.
     static let preferredOutputBufferSeconds = 0.005
 
     private func applyOutputBufferFrameSize(unit: AudioUnit, device: AudioDeviceID) {
@@ -339,8 +327,6 @@ final class OPNCoreAudioRTCDevice: NSObject, RTCAudioDevice, @unchecked Sendable
         ])
     }
 
-    /// Device latency plus the IO buffer: how long a sample libwebrtc hands the render callback
-    /// takes to reach the speaker, beyond the jitter buffer's dwell.
     var outputPathLatencySeconds: TimeInterval { outputLatency + outputIOBufferDuration }
 
     private func createHALOutputUnit() -> AudioUnit? {

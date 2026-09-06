@@ -1,9 +1,3 @@
-//  CatalogViewModel.swift
-//  PixelNOW
-//
-//  Created by Jayian on 6/14/26.
-//
-
 import AppKit
 import Combine
 import Foundation
@@ -1698,16 +1692,6 @@ final class CatalogViewModel: ObservableObject {
         loadSettingsPreferences()
     }
 
-    func setNVSTTransportEnabled(_ enabled: Bool) {
-        if enabled, !nativeNVSTRuntimeAvailable {
-            actionMessage = nativeNVSTRuntimeMessage
-            return
-        }
-        StreamPreferences.saveNVSTTransportEnabled(enabled)
-        actionMessage = enabled ? "Native/NVST stream transport selected." : "WebRTC stream transport selected."
-        loadSettingsPreferences()
-    }
-
     func setStreamingQualityProfileIndex(_ index: Int) {
         StreamPreferences.saveStreamingQualityProfileIndex(index)
         loadSettingsPreferences()
@@ -2148,10 +2132,6 @@ final class CatalogViewModel: ObservableObject {
             case .failure(let error):
                 nativeNVSTRuntimeAvailable = false
                 nativeNVSTRuntimeMessage = error.errorDescription ?? "Native NVST runtime is unavailable."
-            }
-            if !nativeNVSTRuntimeAvailable, profile.transportMode.value == "nvst" {
-                StreamPreferences.saveNVSTTransportEnabled(false)
-                profile = StreamPreferences.effectiveProfile(StreamPreferences.loadProfile(), capabilities: capabilities)
             }
             let snapshot = CatalogSettingsPreferencesSnapshot(
                 capabilities: capabilities,
@@ -2778,7 +2758,7 @@ struct CatalogPlaytimeStatistics: Codable, Equatable {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         lastPlayedTitle = trimmedTitle
         lastPlayedAt = endedAt
-        
+
         var recents = recentTitles ?? (trimmedTitle.isEmpty ? [] : [trimmedTitle])
         if !trimmedTitle.isEmpty {
             if let idx = recents.firstIndex(of: trimmedTitle) {

@@ -1,10 +1,3 @@
-//
-//  PixelNOWApp.swift
-//  PixelNOW
-//
-//  Created by Jayian on 6/14/26.
-//
-
 import AppKit
 import Darwin
 import SwiftUI
@@ -196,7 +189,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         Log.info(.app, "NSApplication will terminate")
-        WebRTCMediaStreamLifecycle.drainForTermination()
         NativeNVSTMediaStreamLifecycle.drainForTermination()
         for window in NSApp.windows where window.isVisible && !window.styleMask.contains(.fullScreen) {
             window.saveFrame(usingName: "PixelNOWMainWindow")
@@ -258,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var hasActiveStream: Bool {
-        WebRTCMediaStreamLifecycle.hasActiveStream || NativeNVSTMediaStreamLifecycle.hasActiveStream
+        NativeNVSTMediaStreamLifecycle.hasActiveStream
     }
 
     enum ActiveStreamShortcutCommand {
@@ -273,31 +265,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func dispatchActiveStreamCommand(_ command: ActiveStreamShortcutCommand) -> Bool {
-        if WebRTCMediaStreamLifecycle.hasActiveStream {
-            return WebRTCMediaStreamLifecycle.sendCommand(webRTCCommand(for: command))
-        }
         if NativeNVSTMediaStreamLifecycle.hasActiveStream {
             return NativeNVSTMediaStreamLifecycle.sendCommand(nvstCommand(for: command))
         }
         return false
     }
 
-    private func requestActiveStreamQuitDecision(completion: @escaping WebRTCMediaStreamQuitDecisionHandler) -> Bool {
-        if WebRTCMediaStreamLifecycle.hasActiveStream {
-            return WebRTCMediaStreamLifecycle.requestApplicationQuitDecision(completion: completion)
-        }
+    private func requestActiveStreamQuitDecision(completion: @escaping NativeNVSTMediaStreamQuitDecisionHandler) -> Bool {
         if NativeNVSTMediaStreamLifecycle.hasActiveStream {
             return NativeNVSTMediaStreamLifecycle.requestApplicationQuitDecision(completion: completion)
         }
         return false
-    }
-
-    private func webRTCCommand(for command: ActiveStreamShortcutCommand) -> WebRTCMediaStreamCommand {
-        switch command {
-        case .toggleMicrophone: return .toggleMicrophone
-        case .toggleRecording: return .toggleRecording
-        case .toggleAntiAFK: return .toggleAntiAFK
-        }
     }
 
     private func nvstCommand(for command: ActiveStreamShortcutCommand) -> NativeNVSTMediaStreamCommand {
@@ -309,14 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func streamCommand(for event: NSEvent) -> ActiveStreamShortcutCommand? {
-        if let command = WebRTCMediaStreamCommand.shortcutCommand(keyCode: UInt16(event.keyCode), modifierFlags: event.modifierFlags) {
-            switch command {
-            case .toggleMicrophone: return .toggleMicrophone
-            case .toggleRecording: return .toggleRecording
-            case .toggleAntiAFK: return .toggleAntiAFK
-            default: return nil
-            }
-        }
         if let command = NativeNVSTMediaStreamCommand.shortcutCommand(keyCode: UInt16(event.keyCode), modifierFlags: event.modifierFlags) {
             switch command {
             case .toggleMicrophone: return .toggleMicrophone

@@ -28,7 +28,6 @@ let package = Package(
                 "LICENSE",
                 "README.md",
                 "PixelNOWApp.swift",
-                "App/Stream/webrtc/WebRTCMediaStreamSurface.swift",
                 "PixelNOW.xcodeproj",
                 "Resources",
                 "View",

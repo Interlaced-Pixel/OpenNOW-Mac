@@ -1,9 +1,3 @@
-//  CatalogView.swift
-//  PixelNOW
-//
-//  Created by Jayian on 6/14/26.
-//
-
 import AppKit
 import AVKit
 import Combine
@@ -188,7 +182,6 @@ struct CatalogView: View {
                 )
                 .transition(.opacity)
 
-
                 if viewModel.isLaunchFlowVisible {
                     VendorLaunchFlowOverlay(viewModel: viewModel)
                         .transition(.opacity)
@@ -246,32 +239,18 @@ struct CatalogView: View {
     }
 
     private var isAccountLifecycleBlocked: Bool {
-        viewModel.isLaunchFlowVisible || viewModel.activeStreamConfiguration != nil || WebRTCMediaStreamLifecycle.hasActiveStream || NativeNVSTMediaStreamLifecycle.hasActiveStream
+        viewModel.isLaunchFlowVisible || viewModel.activeStreamConfiguration != nil || NativeNVSTMediaStreamLifecycle.hasActiveStream
     }
 
     @ViewBuilder
     private func streamHost(for configuration: PreparedLaunchConfiguration) -> some View {
-        switch StreamTransportSelector.selectedTransport(forGame: configuration.applicationID) {
-        case .webRTC:
-            WebRTCMediaStreamHostView(
-                configuration: configuration,
-                onProgress: { progress in viewModel.updateActiveStreamProgress(progress) },
-                onRequiredSessionAd: { ad in
-                    try await viewModel.presentRequiredStreamAd(ad)
-                },
-                onEnd: { success, message, report in
-                    viewModel.finishActiveStream(success: success, message: message, report: report)
-                }
-            )
-        case .nativeNVST:
-            NativeNVSTMediaStreamHostView(
-                configuration: configuration,
-                onProgress: { progress in viewModel.updateActiveStreamProgress(progress) },
-                onEnd: { success, message, report in
-                    viewModel.finishActiveStream(success: success, message: message, report: report)
-                }
-            )
-        }
+        NativeNVSTMediaStreamHostView(
+            configuration: configuration,
+            onProgress: { progress in viewModel.updateActiveStreamProgress(progress) },
+            onEnd: { success, message, report in
+                viewModel.finishActiveStream(success: success, message: message, report: report)
+            }
+        )
     }
 
     private func guardedSwitch(_ account: LoginAccount) {
@@ -621,45 +600,22 @@ private struct VendorStreamLaunchLoadingOverlay: View {
         let queuePosition = progress?.queuePosition
         let cancelAction = viewModel.cancelActiveStreamLaunch
         let accessoryPresented = viewModel.activeStreamAdPlayback != nil
-        Group {
-            if let configuration, StreamTransportSelector.selectedTransport(forGame: configuration.applicationID) == .nativeNVST {
-                NativeNVSTStreamLaunchLoadingScreen(
-                    title: title,
-                    stage: viewModel.activeStreamAdPlayback == nil ? NativeNVSTStreamLaunchLoadingStage.label(stepIndex: progress?.currentStepIndex ?? -1, queuePosition: queuePosition) : "Sponsored break",
-                    artworkURL: configuration.nativeNVSTLoadingArtworkURL,
-                    queuePosition: queuePosition,
-                    accessoryPresented: accessoryPresented,
-                    cancelAction: cancelAction
-                ) {
-                    if let ad = viewModel.activeStreamAdPlayback {
-                        VendorEmbeddedSessionAdPlayer(
-                            ad: ad,
-                            onFinished: { watchedTimeInMs in viewModel.finishRequiredStreamAdPlayback(watchedTimeInMs: watchedTimeInMs) },
-                            onFailed: { message in viewModel.failRequiredStreamAdPlayback(message) }
-                        )
-                    } else {
-                        EmptyView()
-                    }
-                }
+        NativeNVSTStreamLaunchLoadingScreen(
+            title: title,
+            stage: viewModel.activeStreamAdPlayback == nil ? NativeNVSTStreamLaunchLoadingStage.label(stepIndex: progress?.currentStepIndex ?? -1, queuePosition: queuePosition) : "Sponsored break",
+            artworkURL: configuration?.nativeNVSTLoadingArtworkURL,
+            queuePosition: queuePosition,
+            accessoryPresented: accessoryPresented,
+            cancelAction: cancelAction
+        ) {
+            if let ad = viewModel.activeStreamAdPlayback {
+                VendorEmbeddedSessionAdPlayer(
+                    ad: ad,
+                    onFinished: { watchedTimeInMs in viewModel.finishRequiredStreamAdPlayback(watchedTimeInMs: watchedTimeInMs) },
+                    onFailed: { message in viewModel.failRequiredStreamAdPlayback(message) }
+                )
             } else {
-                WebRTCStreamLaunchLoadingScreen(
-                    title: title,
-                    stage: viewModel.activeStreamAdPlayback == nil ? WebRTCStreamLaunchLoadingStage.label(stepIndex: progress?.currentStepIndex ?? -1, queuePosition: queuePosition) : "Sponsored break",
-                    artworkURL: configuration?.webRTCLoadingArtworkURL,
-                    queuePosition: queuePosition,
-                    accessoryPresented: accessoryPresented,
-                    cancelAction: cancelAction
-                ) {
-                    if let ad = viewModel.activeStreamAdPlayback {
-                        VendorEmbeddedSessionAdPlayer(
-                            ad: ad,
-                            onFinished: { watchedTimeInMs in viewModel.finishRequiredStreamAdPlayback(watchedTimeInMs: watchedTimeInMs) },
-                            onFailed: { message in viewModel.failRequiredStreamAdPlayback(message) }
-                        )
-                    } else {
-                        EmptyView()
-                    }
-                }
+                EmptyView()
             }
         }
     }

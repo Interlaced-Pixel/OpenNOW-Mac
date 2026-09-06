@@ -341,3 +341,30 @@ public enum StreamingPathError: Error, Equatable, Sendable {
     case invalidOffer
     case notRunning
 }
+
+public protocol StreamSessionStartCancellable: Sendable {
+    func cancelSessionStart() async
+}
+
+public protocol StreamSessionProvider: Sendable {
+    func startSession(configuration: PreparedLaunchConfiguration) async throws -> StreamOffer
+    func finishSession(_ session: StreamSessionDescriptor, reason: StreamEndReason) async throws
+}
+
+public protocol StreamSignalingChannel: Sendable {
+    func sendAnswer(_ answer: StreamAnswer, for session: StreamSessionDescriptor) async throws
+    func sendLocalIceCandidate(_ candidate: StreamIceCandidate, for session: StreamSessionDescriptor) async throws
+    func remoteIceCandidates(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamIceCandidate>
+    func remoteOffers(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamOffer>
+    func remoteEndEvents(for session: StreamSessionDescriptor) async throws -> AsyncStream<String>
+}
+
+public extension StreamSignalingChannel {
+    func remoteOffers(for session: StreamSessionDescriptor) async throws -> AsyncStream<StreamOffer> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+
+    func remoteEndEvents(for session: StreamSessionDescriptor) async throws -> AsyncStream<String> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+}

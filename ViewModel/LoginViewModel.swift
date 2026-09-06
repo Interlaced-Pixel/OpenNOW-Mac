@@ -1,9 +1,3 @@
-//  LoginViewModel.swift
-//  PixelNOW
-//
-//  Created by Jayian on 6/14/26.
-//
-
 import AppKit
 import Combine
 import Foundation
@@ -216,7 +210,7 @@ final class LoginViewModel: ObservableObject {
     }
 
     private var isAccountLifecycleBlocked: Bool {
-        WebRTCMediaStreamLifecycle.hasActiveStream || NativeNVSTMediaStreamLifecycle.hasActiveStream
+        NativeNVSTMediaStreamLifecycle.hasActiveStream
     }
 
     private func beginOAuth(preservingCurrentAccount: Bool) async {
