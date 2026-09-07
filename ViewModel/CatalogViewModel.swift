@@ -183,6 +183,13 @@ final class CatalogViewModel: ObservableObject {
     @Published var ownershipFlowStage = CatalogOwnershipFlowStage.hidden
     @Published var ownershipFlowMessage = ""
     @Published var queuedPatchingLaunchGameTitle = ""
+    @Published var desktopLaunchInProgress = false
+    @Published var desktopMacroStatus = ""
+    @Published var desktopMacroInitialDelay: Double = StreamPreferences.loadDesktopMacroInitialDelay()
+    @Published var desktopMacroKeystrokeDelay: Double = StreamPreferences.loadDesktopMacroKeystrokeDelay()
+    @Published var desktopMacroNavigationDelay: Double = StreamPreferences.loadDesktopMacroNavigationDelay()
+    @Published var desktopMacroDownloadDelay: Double = StreamPreferences.loadDesktopMacroDownloadDelay()
+    @Published var desktopCustomAppId: String = StreamPreferences.loadDesktopCustomAppId()
 
     let account: LoginAccount
     let session: LoginSession
@@ -632,6 +639,94 @@ final class CatalogViewModel: ObservableObject {
 
     func launch(game: CatalogGameObject, variantIndex: Int? = nil) {
         beginVendorLaunch(game: game, variantIndex: variantIndex)
+    }
+
+    func launchDesktop() {
+        let customAppId = desktopCustomAppId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedAppId: String
+
+        if let valid = LaunchAppId.resolve(customAppId) {
+            resolvedAppId = valid.stringValue
+            Log.info(.launch, "Using custom configured GFN appId for desktop launch: \(resolvedAppId)")
+        } else {
+            let steamCandidates = allKnownGames.filter { game in
+                game.variants.contains { variant in
+                    variant.appStore.lowercased().contains("steam")
+                }
+            }
+
+            let explicitInstallToPlay = steamCandidates.filter { game in
+                game.variants.contains { variant in
+                    variant.appStore.lowercased().contains("steam") && variant.installTimeInMinutes > 0
+                }
+            }
+
+            if let randomGame = explicitInstallToPlay.randomElement() ?? steamCandidates.randomElement(),
+               let variant = randomGame.variants.first(where: { $0.appStore.lowercased().contains("steam") }),
+               let valid = LaunchAppId.resolve(variant.id.isEmpty ? randomGame.launchAppId : variant.id) {
+                resolvedAppId = valid.stringValue
+                Log.info(.launch, "Selected random Install-to-Play game for desktop launch: \(randomGame.title) (appId=\(resolvedAppId))")
+            } else {
+                resolvedAppId = "100346011"
+                Log.info(.launch, "Using default Install-to-Play appId for desktop launch: \(resolvedAppId)")
+            }
+        }
+
+        let desktopGame = CatalogGameObject()
+        desktopGame.id = "desktop-salsanow-\(resolvedAppId)"
+        desktopGame.uuid = desktopGame.id
+        desktopGame.launchAppId = resolvedAppId
+        desktopGame.title = "Windows Desktop"
+        desktopGame.shortName = "SalsaNOW Desktop"
+        desktopGame.gameDescription = "Full Windows desktop environment powered by SalsaNOW on GeForce NOW."
+        desktopGame.isInLibrary = true
+        desktopGame.imageUrl = "https://salsanowfiles.work/RepoImages/SalsaNOW_Banner.png"
+        desktopGame.heroImageUrl = "https://salsanowfiles.work/RepoImages/SalsaNOW_Banner.png"
+
+        let variant = CatalogGameVariantObject()
+        variant.id = resolvedAppId
+        variant.appStore = "Steam"
+        variant.inLibrary = true
+        variant.librarySelected = true
+        variant.installTimeInMinutes = 1
+        desktopGame.variants = [variant]
+
+        selectGame(desktopGame)
+        launch(game: desktopGame)
+    }
+
+    func setDesktopMacroInitialDelay(_ value: Double) {
+        desktopMacroInitialDelay = value
+        StreamPreferences.saveDesktopMacroInitialDelay(value)
+    }
+
+    func setDesktopMacroKeystrokeDelay(_ value: Double) {
+        desktopMacroKeystrokeDelay = value
+        StreamPreferences.saveDesktopMacroKeystrokeDelay(value)
+    }
+
+    func setDesktopMacroNavigationDelay(_ value: Double) {
+        desktopMacroNavigationDelay = value
+        StreamPreferences.saveDesktopMacroNavigationDelay(value)
+    }
+
+    func setDesktopMacroDownloadDelay(_ value: Double) {
+        desktopMacroDownloadDelay = value
+        StreamPreferences.saveDesktopMacroDownloadDelay(value)
+    }
+
+    func setDesktopCustomAppId(_ value: String) {
+        desktopCustomAppId = value
+        StreamPreferences.saveDesktopCustomAppId(value)
+    }
+
+    func resetDesktopMacroSettings() {
+        StreamPreferences.restoreDesktopMacroDefaults()
+        desktopMacroInitialDelay = StreamPreferences.loadDesktopMacroInitialDelay()
+        desktopMacroKeystrokeDelay = StreamPreferences.loadDesktopMacroKeystrokeDelay()
+        desktopMacroNavigationDelay = StreamPreferences.loadDesktopMacroNavigationDelay()
+        desktopMacroDownloadDelay = StreamPreferences.loadDesktopMacroDownloadDelay()
+        desktopCustomAppId = StreamPreferences.loadDesktopCustomAppId()
     }
 
     func queuePatchingLaunch(game: CatalogGameObject, variantIndex: Int? = nil) {

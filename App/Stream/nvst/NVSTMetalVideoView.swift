@@ -395,7 +395,7 @@ public final class NVSTMetalVideoView: NSView, MTKViewDelegate {
     }
 
     public func draw(in view: MTKView) {
-        guard let (pixelBuffer, _) = bufferHolder.consumeIfNew(),
+        guard let (pixelBuffer, _) = bufferHolder.get(),
               let currentDrawable = metalView.currentDrawable,
               let commandBuffer = commandQueue?.makeCommandBuffer(),
               let ciContext else {

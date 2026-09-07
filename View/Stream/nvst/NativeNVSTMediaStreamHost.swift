@@ -83,7 +83,7 @@ struct NativeNVSTStreamLaunchLoadingScreen<Accessory: View>: View {
                     endPoint: .bottom
                 )
                 RadialGradient(
-                    colors: [Color.pixelNowGreen.opacity(0.18), .clear],
+                    colors: [Color.pixelNowBlue.opacity(0.18), .clear],
                     center: .center,
                     startRadius: 12,
                     endRadius: compact ? 260 : 480

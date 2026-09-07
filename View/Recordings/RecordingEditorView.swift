@@ -60,7 +60,7 @@ struct RecordingEditorView: View {
                         .frame(height: 16)
                         .background(Color.pixelNowGreen)
                 }
-                Text("Drag the green handles to trim. Drag across the timeline to select a cut.")
+                Text("Drag the blue handles to trim. Drag across the timeline to select a cut.")
                     .font(.recordingsNvidia(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)

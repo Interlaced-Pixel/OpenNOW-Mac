@@ -525,8 +525,8 @@ private struct LibrarySidePanel: View {
                     SidePanelChip(
                         icon: "checkmark.circle.fill",
                         text: "In Library",
-                        tintColor: Color.green.opacity(0.2),
-                        foregroundColor: .green
+                        tintColor: Color.pixelNowBlue.opacity(0.2),
+                        foregroundColor: Color.pixelNowBlue
                     )
                 }
                 if hasFree {
@@ -600,8 +600,8 @@ private struct LibrarySidePanel: View {
                     SidePanelChip(
                         icon: tech.icon,
                         text: tech.title,
-                        tintColor: Color(red: 0.46, green: 0.72, blue: 0.0).opacity(0.18),
-                        foregroundColor: Color(red: 0.55, green: 0.85, blue: 0.0)
+                        tintColor: Color.pixelNowBlue.opacity(0.18),
+                        foregroundColor: Color(red: 0.35, green: 0.68, blue: 1.0)
                     )
                 }
             }

@@ -67,6 +67,8 @@ extension NvstWebRtcBundle {
             }
             if isNew {
                 logger?("NVST bundle input protocol version \(version) from '\(dataChannel.label)'")
+                _ = dataChannel.sendData(buffer)
+                startInputHeartbeat()
                 onInputProtocolNegotiated?(version)
             }
         }
@@ -90,6 +92,10 @@ extension NvstWebRtcBundle {
                 }
                 if isNew {
                     logger?("NVST bundle input protocol version \(version) from inbound command")
+                    if let control = openControlChannel, control.readyState == .open, let encoded = try? command.encoded {
+                        _ = control.sendData(RTCDataBuffer(data: encoded, isBinary: true))
+                    }
+                    startInputHeartbeat()
                     onInputProtocolNegotiated?(version)
                 }
                 return
@@ -243,11 +249,20 @@ extension NvstWebRtcBundle {
 
     public func audioReception() async -> AudioReception? {
         guard let connection = currentPeerConnection() else { return nil }
-
         guard connection.signalingState != .closed else { return nil }
-        let report = await withCheckedContinuation { continuation in
-            connection.statistics { continuation.resume(returning: $0) }
+        return await withCheckedContinuation { continuation in
+            let box = StatisticsContinuationBox(continuation)
+            connection.statistics { rtcReport in
+                box.resume(returning: Self.parseAudioReception(from: rtcReport))
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                box.resume(returning: nil)
+            }
         }
+    }
+
+    private static func parseAudioReception(from report: RTCStatisticsReport) -> AudioReception? {
         var reception = AudioReception()
         var sawAudio = false
         for (_, statistics) in report.statistics
@@ -299,5 +314,22 @@ extension NvstWebRtcBundle {
         guard !alreadyOpen else { return }
         logger?("NVST bundle control channel open id=\(dataChannel.channelId)")
         onControlChannelOpen?()
+    }
+}
+
+private final class StatisticsContinuationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<NvstWebRtcBundle.AudioReception?, Never>?
+
+    init(_ continuation: CheckedContinuation<NvstWebRtcBundle.AudioReception?, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(returning value: NvstWebRtcBundle.AudioReception?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: value)
     }
 }

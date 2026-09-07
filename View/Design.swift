@@ -45,10 +45,10 @@ enum Design {
         static let selection = Color(red: 138 / 255, green: 92 / 255, blue: 255 / 255)
         static let selectionFill = selection.opacity(0.14)
         static let selectionStroke = selection.opacity(0.62)
-        static let action = Color(red: 118 / 255, green: 210 / 255, blue: 28 / 255)
-        static let ready = Color(red: 76 / 255, green: 201 / 255, blue: 89 / 255)
+        static let action = Color.pixelNowBlue
+        static let ready = Color(red: 0.15, green: 0.75, blue: 0.98)
         static let warning = Color(red: 232 / 255, green: 148 / 255, blue: 58 / 255)
-        static let brand = Color(red: 118 / 255, green: 230 / 255, blue: 26 / 255)
+        static let brand = Color.pixelNowBlue
     }
 
     enum Glass {
@@ -59,7 +59,7 @@ enum Design {
         static let panelShadowOpacity: Double = 0.30
     }
 
-    static let accent = Color.pixelNowGreen
+    static let accent = Color.pixelNowBlue
 
     static func clamped(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
         min(max(value, minimum), maximum)

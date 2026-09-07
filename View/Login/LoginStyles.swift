@@ -89,10 +89,11 @@ struct SecondaryLoginButtonStyle: ButtonStyle {
 }
 
 extension Color {
-    static let pixelNowGreen = Color(red: 0.46, green: 0.90, blue: 0.10)
-    static let gfnBackgroundGreen = Color(red: 8 / 255, green: 18 / 255, blue: 29 / 255)
-    static let gfnPanel = Color(red: 17 / 255, green: 34 / 255, blue: 48 / 255)
-    static let gfnCharcoal = Color(red: 5 / 255, green: 12 / 255, blue: 20 / 255)
+    static let pixelNowBlue = Color(red: 0.08, green: 0.48, blue: 0.98)
+    static let pixelNowGreen = pixelNowBlue // Kept for complete symbol compatibility with new PlayStation blue palette
+    static let gfnBackgroundGreen = Color(red: 8 / 255, green: 14 / 255, blue: 29 / 255)
+    static let gfnPanel = Color(red: 17 / 255, green: 26 / 255, blue: 48 / 255)
+    static let gfnCharcoal = Color(red: 5 / 255, green: 8 / 255, blue: 20 / 255)
     static let gfnStroke = Color.white.opacity(0.12)
     static let gfnTextSecondary = Color.white.opacity(0.72)
     static let gfnTextTertiary = Color.white.opacity(0.48)

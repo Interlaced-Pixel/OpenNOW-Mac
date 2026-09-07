@@ -101,6 +101,7 @@ public actor NVSTCoreTransport: NativeNVSTTransport {
     private var heartbeatTask: Task<Void, Never>?
     var controlKeepAliveTask: Task<Void, Never>?
     var qosFeedbackTask: Task<Void, Never>?
+    var initialKeyframeTask: Task<Void, Never>?
     var qosSequence: UInt32 = 0
     var lastQosBytesReceived: UInt64 = 0
     var lastQosDelayMicroseconds: UInt32 = 0
@@ -320,7 +321,7 @@ public actor NVSTCoreTransport: NativeNVSTTransport {
         }
     }
 
-    private func logCounters() async {
+    private func logCountersSync() {
         guard let receiver else { return }
         let stats = receiver.stats
 
@@ -349,9 +350,6 @@ public actor NVSTCoreTransport: NativeNVSTTransport {
                        negotiatedFps.map(String.init) ?? "nil",
                        peakIntervalFps > 60.5 ? ">" : "<=",
                        peakIntervalMbps > 24 ? ">" : "<="))
-        let audio = await bundle?.audioReception()
-        logger?("NVST audio tracks=\(bundle?.remoteAudioTrackCount ?? 0) pktIn=\(audio?.packets ?? 0) bytesIn=\(audio?.bytes ?? 0)"
-                + " samples=\(audio?.samples ?? 0) concealed=\(audio?.concealed ?? 0) discarded=\(audio?.discarded ?? 0) ssrc=\(audio?.ssrc.map(String.init) ?? "-")")
         let video = videoPipeline?.snapshot ?? NvstVideoPipeline.Counters()
         logger?("NVST counters auth=\(stats.authenticatedPackets) fec=\(stats.fecPackets) dropped=\(stats.droppedPackets) rtpLoss=\(stats.finalizedLossPackets) frames=\(stats.framesEmitted) keyframes=\(stats.keyframesEmitted) recoveries=\(stats.recoveries) sofFlagged=\(stats.startOfFrameFlagged) sofOk=\(stats.startOfFrameAccepted) abandoned=\(stats.abandonedFrames) rrFail=\(stats.receiverReportFailures)\(stats.lastReceiverReportFailure.map { " rrErr=\($0)" } ?? "") multiBlock=\(stats.multiBlockPackets) maxBlock=\(stats.highestFecLastBlock) decoded=\(decoder?.decodedFrameCount ?? 0) decodeFailed=\(decoder?.failedFrameCount ?? 0) decodeErr=\(decoder?.failureStatusSummary ?? "-") noParamSets=\(video.missingParameterSetFrames) idrOut=\(idrRequestsSent) invalidOut=\(invalidationsSent) inputOut=\(inputEventsSent) padOut=\(gamepadPacketsSent) padFail=\(gamepadSendFailures) padDropped=\(gamepadPacketsDroppedForUnannouncedPad) padReg=\(didRegisterGamepad) textTyped=\(textCharactersTyped) textDroppedBytes=\(textBytesDropped) inputReady=\(bundle?.isInputReady == true) rrOut=\(stats.receiverReportsSent) frac=\(stats.lastFractionLost) lost=\(stats.lastCumulativeLost) jitter=\(stats.lastJitter) seqSpan=\(stats.sequenceSpan) negFps=\(negotiatedFps.map(String.init) ?? "nil") mediaSeconds=\(String(format: "%.2f", Double(stats.lastRtpTimestamp &- (stats.firstRtpTimestamp ?? 0)) / Double(NvstVideoToolboxDecoder.clockRate))) fidxChanges=\(stats.frameIndexChanges) maxFrame=\(stats.maxFrameBytesPerSecond.map { String($0) }.joined(separator: ",")) bytesPerSec=\(stats.frameBytesPerSecond.map { String($0 / 1000) }.joined(separator: ",")) fpsPerSec=\(stats.framesPerSecond.map(String.init).joined(separator: ",")) paceOut=\(video.pacingReportsSent) paceFail=\(video.pacingReportFailures) ackOut=\(video.frameAcksSent) ackFail=\(video.frameAckFailures) qosOut=\(qosReportsSent) qosFail=\(qosReportFailures) rtpStatsOut=\(rtpStatsReportsSent) ccStatsOut=\(controlStatsReportsSent) ssrc=\(stats.boundSSRC.map { String(format: "0x%08x", $0) } ?? "-")")
 
@@ -364,6 +362,15 @@ public actor NVSTCoreTransport: NativeNVSTTransport {
                 + " decoderSessions=\(decoder?.sessionCreationCount ?? 0)"
                 + " hwDecode=\(decoder?.isHardwareAccelerated == true)"
                 + " decode\(decoder?.stageTimingSummary ?? "-")")
+    }
+
+    private func logCounters() async {
+        guard let receiver else { return }
+        logCountersSync()
+        let audio = await bundle?.audioReception()
+        logger?("NVST audio tracks=\(bundle?.remoteAudioTrackCount ?? 0) pktIn=\(audio?.packets ?? 0) bytesIn=\(audio?.bytes ?? 0)"
+                + " samples=\(audio?.samples ?? 0) concealed=\(audio?.concealed ?? 0) discarded=\(audio?.discarded ?? 0) ssrc=\(audio?.ssrc.map(String.init) ?? "-")")
+        let stats = receiver.stats
         await logHudCounters(receiver: receiver, stats: stats)
     }
 
@@ -570,7 +577,9 @@ extension NVSTCoreTransport {
         controlKeepAliveTask = nil
         qosFeedbackTask?.cancel()
         qosFeedbackTask = nil
-        await logCounters()
+        initialKeyframeTask?.cancel()
+        initialKeyframeTask = nil
+        logCountersSync()
         feedbackSender?.stop()
         feedbackSender = nil
 

@@ -5,8 +5,8 @@ public typealias NativeNVSTMediaStreamProgressCallback = @MainActor @Sendable (_
 public typealias NativeNVSTMediaStreamEndCallback = @MainActor @Sendable (_ success: Bool, _ message: String, _ report: StreamReport?) -> Void
 
 enum NativeNVSTMediaStreamTheme {
-    static let accent = Color(red: 0.46, green: 0.90, blue: 0.10)
-    static let accentSoft = Color(red: 0.67, green: 1.0, blue: 0.36)
+    static let accent = Color(red: 0.08, green: 0.48, blue: 0.98)
+    static let accentSoft = Color(red: 0.35, green: 0.68, blue: 1.0)
     static let appBar = Color(red: 45 / 255, green: 45 / 255, blue: 45 / 255)
     static let surface = Color(red: 25 / 255, green: 25 / 255, blue: 25 / 255)
     static let panel = Color(red: 23 / 255, green: 23 / 255, blue: 23 / 255)
@@ -319,6 +319,8 @@ struct NativeNVSTMediaStreamSurface: View {
     @State private var streamingFullScreenWindow: NSWindow?
     @State private var recordingStatus = WebRTCStreamRecordingStatus.idle
     @State private var recordingNotificationTask: Task<Void, Never>?
+    @State private var desktopMacroEngine: DesktopMacroEngine?
+    @State private var desktopMacroState: DesktopMacroState = .idle
     private let nativeInputFailureReporter = NativeNVSTInputFailureReporter()
 
     var body: some View {
@@ -471,6 +473,9 @@ struct NativeNVSTMediaStreamSurface: View {
                     loadingStepIndex = StreamLaunchStep.connected.rawValue
                     startNativeStatsPolling(path: path)
                     refreshAntiAFKMouseMovementTask()
+                    if isDesktopLaunch {
+                        startDesktopMacroExecution()
+                    }
                     onProgress?(StreamProgress(configuration: configuration.progressConfiguration, step: .connected, message: "Connected over native NVST.", isReady: true))
                     NativeNVSTMediaTelemetry.capture("nvst.ui.connected", level: .info, message: "Native NVST stream connected.", attributes: ["sessionId": session.id])
                     return true
@@ -965,9 +970,34 @@ struct NativeNVSTMediaStreamSurface: View {
         antiAFKMouseMovementTask = nil
         recordingNotificationTask?.cancel()
         recordingNotificationTask = nil
+        desktopMacroEngine?.cancel()
+        desktopMacroEngine = nil
         transientStreamMessageTask?.cancel()
         transientStreamMessageTask = nil
         transientStreamMessage = ""
+    }
+
+    private var isDesktopLaunch: Bool {
+        configuration.metadata["isDesktopLaunch"] == "true"
+    }
+
+    private func startDesktopMacroExecution() {
+        guard isDesktopLaunch, isConnected, let dispatcher = inputDispatcher else { return }
+        desktopMacroEngine?.cancel()
+        let timings = DesktopMacroTimings(
+            initialDelay: StreamPreferences.loadDesktopMacroInitialDelay(),
+            keystrokeDelay: StreamPreferences.loadDesktopMacroKeystrokeDelay(),
+            navigationDelay: StreamPreferences.loadDesktopMacroNavigationDelay(),
+            downloadDelay: StreamPreferences.loadDesktopMacroDownloadDelay()
+        )
+        let engine = DesktopMacroEngine { event in
+            dispatcher.enqueue(event)
+        }
+        desktopMacroEngine = engine
+        engine.execute(timings: timings) { state in
+            desktopMacroState = state
+            showNativeTransientStreamMessage(state.displayMessage)
+        }
     }
 
     private var recordingIsBusy: Bool {
@@ -1537,6 +1567,16 @@ struct NativeNVSTMediaStreamSurface: View {
                     isDisabled: !sidebarCapabilities.supports(.antiAFK) || !isConnected,
                     action: toggleNativeAntiAFKMouseMovement
                 )
+                if isDesktopLaunch {
+                    NativeNVSTStreamHUDActionRow(
+                        title: "Run Desktop Macro",
+                        subtitle: desktopMacroState.displayMessage,
+                        systemName: "desktopcomputer",
+                        isActive: desktopMacroState != .idle && desktopMacroState != .completed,
+                        isDisabled: !isConnected,
+                        action: startDesktopMacroExecution
+                    )
+                }
                 NativeNVSTStreamHUDActionRow(
                     title: nativeStatsVisible ? "Hide Floating Stats" : "Show Floating Stats",
                     subtitle: "Detailed overlay",

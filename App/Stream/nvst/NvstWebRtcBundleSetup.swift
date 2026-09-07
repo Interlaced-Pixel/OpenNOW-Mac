@@ -504,6 +504,7 @@ extension NvstWebRtcBundle {
         channels.forEach { $0.close() }
         connection?.close()
         sink?.stop()
+        stopInputHeartbeat()
     }
 
     /// Writes one plain RTCP payload to the feedback channel. Plain, because DTLS already encrypts
@@ -697,5 +698,48 @@ extension NvstWebRtcBundle {
         lock.withLock { createdChannels.append(contentsOf: created) }
         logger?("NVST bundle created \(created.count) channels: " + created.map { "\($0.channelId):\($0.label)" }.joined(separator: ", "))
         return created.count
+    }
+
+    func startInputHeartbeat() {
+        lock.lock()
+        guard inputHeartbeatTimer == nil else {
+            lock.unlock()
+            return
+        }
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + .seconds(2), repeating: .seconds(2))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.sendInputHeartbeat()
+        }
+        inputHeartbeatTimer = timer
+        timer.resume()
+        lock.unlock()
+        logger?("NVST input heartbeat started (2.0s interval)")
+    }
+
+    func stopInputHeartbeat() {
+        lock.lock()
+        inputHeartbeatTimer?.cancel()
+        inputHeartbeatTimer = nil
+        lock.unlock()
+    }
+
+    func sendInputHeartbeat() {
+        let heartbeatData = NvstRemoteInput.heartbeat
+        lock.lock()
+        let reliableInput = openReliableInputChannel
+        let control = openControlChannel
+        let partialInput = openInputChannel
+        lock.unlock()
+
+        let rtcBuffer = RTCDataBuffer(data: heartbeatData, isBinary: true)
+        if let reliableInput, reliableInput.readyState == .open {
+            _ = reliableInput.sendData(rtcBuffer)
+        } else if let control, control.readyState == .open {
+            _ = control.sendData(rtcBuffer)
+        } else if let partialInput, partialInput.readyState == .open {
+            _ = partialInput.sendData(rtcBuffer)
+        }
     }
 }

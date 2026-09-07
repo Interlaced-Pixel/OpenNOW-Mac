@@ -181,6 +181,7 @@ public final class NvstWebRtcBundle: NSObject, RTCPeerConnectionDelegate, RTCDat
     }
 
     var negotiatedInputProtocolVersion: UInt16?
+    var inputHeartbeatTimer: DispatchSourceTimer?
     var openCustomChannels: [String: RTCDataChannel] = [:]
     var inputMessagesSent = 0
     var inputSendFailures = 0

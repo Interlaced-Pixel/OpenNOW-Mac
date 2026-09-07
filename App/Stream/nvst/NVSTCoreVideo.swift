@@ -547,12 +547,35 @@ extension NVSTCoreTransport {
     func requestInitialKeyframe() {
         guard let bundle, bundle.isControlChannelOpen else { return }
         lastIdrRequestAt = Date()
-        guard bundle.sendControl(.idrRequest()) else {
+        if bundle.sendControl(.idrRequest()) {
+            idrRequestsSent += 1
+            logger?("NVST initial IDR request sent")
+        } else {
             logger?("NVST initial IDR request write failed")
-            return
         }
-        idrRequestsSent += 1
-        logger?("NVST initial IDR request sent")
+
+        initialKeyframeTask?.cancel()
+        initialKeyframeTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                let frames = await self.receiver?.stats.framesEmitted ?? 0
+                if frames > 0 { return }
+                guard await !self.isTornDown else { return }
+                await self.sendInitialIdrRetry()
+            }
+        }
+    }
+
+    func sendInitialIdrRetry() {
+        guard let bundle, bundle.isControlChannelOpen else { return }
+        lastIdrRequestAt = Date()
+        if bundle.sendControl(.idrRequest()) {
+            idrRequestsSent += 1
+            logger?("NVST initial IDR request retry sent (#\(idrRequestsSent))")
+        } else {
+            logger?("NVST initial IDR request retry write failed")
+        }
     }
 
     func activateInputIfNegotiated() {

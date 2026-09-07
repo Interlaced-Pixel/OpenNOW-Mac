@@ -1146,6 +1146,64 @@ private struct ExperimentalFeaturesSettingsPage: View {
                     action: setRecordingEditorEarlyBetaEnabled
                 )
             }
+
+            SettingsCard(title: "Desktop Launch & SalsaNOW") {
+                SettingsInfoRow(
+                    label: "SalsaNOW Integration",
+                    value: "Automated Steam Browser"
+                )
+                SettingsDivider()
+                SettingsSliderRow(
+                    title: "Startup Wait Delay",
+                    valueText: String(format: "%.1f seconds", viewModel.desktopMacroInitialDelay),
+                    value: viewModel.desktopMacroInitialDelay,
+                    range: 2.0...30.0,
+                    step: 0.5,
+                    action: viewModel.setDesktopMacroInitialDelay
+                )
+                SettingsDivider()
+                SettingsSliderRow(
+                    title: "Keystroke Delay",
+                    valueText: String(format: "%.0f ms", viewModel.desktopMacroKeystrokeDelay * 1000),
+                    value: viewModel.desktopMacroKeystrokeDelay,
+                    range: 0.02...0.30,
+                    step: 0.01,
+                    action: viewModel.setDesktopMacroKeystrokeDelay
+                )
+                SettingsDivider()
+                SettingsSliderRow(
+                    title: "Navigation Delay",
+                    valueText: String(format: "%.1f seconds", viewModel.desktopMacroNavigationDelay),
+                    value: viewModel.desktopMacroNavigationDelay,
+                    range: 0.2...4.0,
+                    step: 0.1,
+                    action: viewModel.setDesktopMacroNavigationDelay
+                )
+                SettingsDivider()
+                SettingsSliderRow(
+                    title: "Download Wait Delay",
+                    valueText: String(format: "%.1f seconds", viewModel.desktopMacroDownloadDelay),
+                    value: viewModel.desktopMacroDownloadDelay,
+                    range: 1.0...15.0,
+                    step: 0.5,
+                    action: viewModel.setDesktopMacroDownloadDelay
+                )
+                SettingsDivider()
+                SettingsTextFieldRow(
+                    title: "Custom GFN App ID",
+                    subtitle: "Leave blank to auto-detect a random Install-to-Play game from your library.",
+                    text: viewModel.desktopCustomAppId,
+                    placeholder: "e.g. 100346011",
+                    action: viewModel.setDesktopCustomAppId
+                )
+                SettingsDivider()
+                HStack {
+                    Spacer()
+                    SettingsActionButton(title: "Reset Macro Timings to Defaults", tone: .secondary) {
+                        viewModel.resetDesktopMacroSettings()
+                    }
+                }
+            }
         }
     }
 

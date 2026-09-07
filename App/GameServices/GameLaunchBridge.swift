@@ -237,6 +237,9 @@ public final class GameLaunchBridge {
         if game.displaysOwnRatingDuringGameplay { metadata["gameDisplayOwnRating"] = "true" }
         if let selectedVariant, !selectedVariant.appStore.isEmpty { metadata["storeName"] = selectedVariant.appStore }
         if !imageUrls.isEmpty { metadata["loadingScreenshotUrls"] = imageUrls.joined(separator: "\n") }
+        if game.id.hasPrefix("desktop-salsanow") || game.shortName == "SalsaNOW Desktop" {
+            metadata["isDesktopLaunch"] = "true"
+        }
         return metadata
     }
 }

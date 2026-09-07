@@ -9,7 +9,6 @@ struct HomeDashboardView: View {
         GeometryReader { geometry in
             VStack(spacing: 20) {
                 HStack(alignment: .top, spacing: 20) {
-                    // UPPER LEFT: Featured Games
                     VStack(spacing: 12) {
                         GameDetailOverlayPanel(
                             game: store.selectedGame,
@@ -52,15 +51,9 @@ struct HomeDashboardView: View {
                 }
 
                 Spacer()
-
-                HStack(alignment: .top, spacing: 20) {
-                    // LOWER LEFT: CloudMatch Info
-                    CloudMatchWidgetView(selectedRegionUrl: viewModel.selectedSettingsRegionUrl, regionOptions: viewModel.settingsRegionOptions)
-                        .frame(maxWidth: .infinity)
-                }
             }
             .padding(.horizontal, 40)
-            .padding(.top, 120) // Push below chrome
+            .padding(.top, 120)
             .padding(.bottom, 20)
             .background(PixelPatternBackground())
         }
@@ -68,49 +61,175 @@ struct HomeDashboardView: View {
 }
 
 struct PixelPatternBackground: View {
+    private static let glyphBitmaps: [[[UInt8]]] = [
+        [
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [1, 1, 0, 0, 0, 0, 1, 1]
+        ],
+        [
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0]
+        ],
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1]
+        ],
+        [
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 1, 0, 0, 1, 0, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1]
+        ]
+    ]
+
+    private static let glyphColors: [Color] = [
+        Color(red: 0.12, green: 0.52, blue: 1.0),
+        Color(red: 0.98, green: 0.28, blue: 0.38),
+        Color(red: 0.90, green: 0.32, blue: 0.72),
+        Color(red: 0.15, green: 0.75, blue: 0.98)
+    ]
+
     var body: some View {
         GeometryReader { geometry in
-            Canvas { context, size in
-                let invader: [[Int]] = [
-                    [0,0,1,0,0,0,0,0,1,0,0],
-                    [0,0,0,1,0,0,0,1,0,0,0],
-                    [0,0,1,1,1,1,1,1,1,0,0],
-                    [0,1,1,0,1,1,1,0,1,1,0],
-                    [1,1,1,1,1,1,1,1,1,1,1],
-                    [1,0,1,1,1,1,1,1,1,0,1],
-                    [1,0,1,0,0,0,0,0,1,0,1],
-                    [0,0,0,1,1,0,1,1,0,0,0]
-                ]
-                
-                let pixelSize: CGFloat = 8
-                let invaderWidth = CGFloat(invader[0].count) * pixelSize
-                let invaderHeight = CGFloat(invader.count) * pixelSize
-                
-                let spacingX: CGFloat = 80
-                let spacingY: CGFloat = 80
-                
-                var path = Path()
-                
-                for startY in stride(from: 0, to: size.height, by: invaderHeight + spacingY) {
-                    for startX in stride(from: 0, to: size.width, by: invaderWidth + spacingX) {
-                        for (r, row) in invader.enumerated() {
-                            for (c, val) in row.enumerated() {
+            ZStack {
+                Color(red: 0.035, green: 0.043, blue: 0.078)
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.08, green: 0.35, blue: 0.95).opacity(0.18),
+                        .clear
+                    ],
+                    center: .topLeading,
+                    startRadius: 40,
+                    endRadius: 750
+                )
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.52, green: 0.15, blue: 0.68).opacity(0.12),
+                        .clear
+                    ],
+                    center: .bottomTrailing,
+                    startRadius: 60,
+                    endRadius: 700
+                )
+
+                Canvas { context, size in
+                    let cellWidth: CGFloat = 110
+                    let cellHeight: CGFloat = 110
+                    let cols = Int(ceil(size.width / cellWidth)) + 1
+                    let rows = Int(ceil(size.height / cellHeight)) + 1
+
+                    var dotPath = Path()
+                    let dotSpacing: CGFloat = 28
+                    let dotCols = Int(ceil(size.width / dotSpacing)) + 1
+                    let dotRows = Int(ceil(size.height / dotSpacing)) + 1
+                    for r in 0..<dotRows {
+                        for c in 0..<dotCols {
+                            if (c * 7 + r * 13) % 5 == 0 {
+                                let x = CGFloat(c) * dotSpacing
+                                let y = CGFloat(r) * dotSpacing
+                                dotPath.addRect(CGRect(x: x, y: y, width: 1.5, height: 1.5))
+                            }
+                        }
+                    }
+                    context.fill(dotPath, with: .color(Color.white.opacity(0.04)))
+
+                    let megaGlyphs: [(type: Int, x: CGFloat, y: CGFloat, pixelSize: CGFloat, opacity: Double)] = [
+                        (0, size.width * 0.15, size.height * 0.65, 8.0, 0.028),
+                        (1, size.width * 0.82, size.height * 0.35, 7.5, 0.024),
+                        (2, size.width * 0.45, size.height * 0.78, 6.5, 0.022),
+                        (3, size.width * 0.70, size.height * 0.85, 7.0, 0.026)
+                    ]
+                    for mega in megaGlyphs {
+                        let bitmap = Self.glyphBitmaps[mega.type]
+                        let color = Self.glyphColors[mega.type]
+                        var megaPath = Path()
+                        for (r, rowData) in bitmap.enumerated() {
+                            for (c, val) in rowData.enumerated() {
                                 if val == 1 {
                                     let rect = CGRect(
-                                        x: startX + CGFloat(c) * pixelSize,
-                                        y: startY + CGFloat(r) * pixelSize,
-                                        width: pixelSize,
-                                        height: pixelSize
+                                        x: mega.x + CGFloat(c) * mega.pixelSize,
+                                        y: mega.y + CGFloat(r) * mega.pixelSize,
+                                        width: mega.pixelSize - 0.5,
+                                        height: mega.pixelSize - 0.5
                                     )
-                                    path.addRect(rect)
+                                    megaPath.addRect(rect)
                                 }
+                            }
+                        }
+                        context.fill(megaPath, with: .color(color.opacity(mega.opacity)))
+                    }
+
+                    for row in 0..<rows {
+                        for col in 0..<cols {
+                            let seed = col * 37 + row * 19
+                            let glyphType = (col * 3 + row * 7 + (seed % 3)) % 4
+                            let bitmap = Self.glyphBitmaps[glyphType]
+                            let color = Self.glyphColors[glyphType]
+
+                            let pixelSize: CGFloat = (seed % 4 == 0) ? 4.5 : ((seed % 3 == 0) ? 3.5 : 2.5)
+                            let glyphPixelWidth = CGFloat(bitmap[0].count) * pixelSize
+                            let glyphPixelHeight = CGFloat(bitmap.count) * pixelSize
+
+                            let jitterX = CGFloat((seed * 17) % 36) - 18
+                            let jitterY = CGFloat((seed * 23) % 36) - 18
+
+                            let originX = CGFloat(col) * cellWidth + (cellWidth - glyphPixelWidth) / 2 + jitterX
+                            let originY = CGFloat(row) * cellHeight + (cellHeight - glyphPixelHeight) / 2 + jitterY
+
+                            let opacity: Double = 0.05 + Double(seed % 8) * 0.012
+
+                            var glyphPath = Path()
+                            for (r, rowData) in bitmap.enumerated() {
+                                for (c, val) in rowData.enumerated() {
+                                    if val == 1 {
+                                        let rect = CGRect(
+                                            x: originX + CGFloat(c) * pixelSize,
+                                            y: originY + CGFloat(r) * pixelSize,
+                                            width: pixelSize - 0.4,
+                                            height: pixelSize - 0.4
+                                        )
+                                        glyphPath.addRect(rect)
+                                    }
+                                }
+                            }
+                            context.fill(glyphPath, with: .color(color.opacity(opacity)))
+
+                            if seed % 3 == 0 {
+                                var sparklePath = Path()
+                                let sx = originX + glyphPixelWidth + 14
+                                let sy = originY + 6
+                                sparklePath.addRect(CGRect(x: sx - 1.5, y: sy, width: 4.5, height: 1.5))
+                                sparklePath.addRect(CGRect(x: sx, y: sy - 1.5, width: 1.5, height: 4.5))
+                                context.fill(sparklePath, with: .color(color.opacity(opacity * 0.75)))
                             }
                         }
                     }
                 }
-                context.fill(path, with: .color(Color.green.opacity(0.06)))
             }
-            .background(Color(red: 0.05, green: 0.06, blue: 0.05)) // Solid dark color
         }
         .ignoresSafeArea()
     }
@@ -194,43 +313,4 @@ struct StatRow: View {
     }
 }
 
-struct CloudMatchWidgetView: View {
-    let selectedRegionUrl: String
-    let regionOptions: [StreamRegionOption]
-    
-    var currentRegion: StreamRegionOption? {
-        if selectedRegionUrl.isEmpty {
-            return regionOptions.first(where: { $0.automatic })
-        }
-        return regionOptions.first(where: { $0.url == selectedRegionUrl })
-    }
-    
-    var bestRegion: StreamRegionOption? {
-        regionOptions.filter({ !$0.automatic && $0.latencyMs >= 0 }).min(by: { $0.latencyMs < $1.latencyMs })
-    }
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            Text("CloudMatch Info")
-                .font(.headline).bold()
-                .foregroundStyle(.white)
-
-            HStack(spacing: 16) {
-                StatRow(label: "Current Region:", value: currentRegion?.name ?? "Automatic")
-                StatRow(label: "Latency:", value: currentRegion?.latencyMs ?? -1 >= 0 ? "\(currentRegion!.latencyMs) ms" : "Unknown")
-                if let best = bestRegion, currentRegion?.automatic == true {
-                    StatRow(label: "Best Available:", value: best.name)
-                    StatRow(label: "Best Latency:", value: "\(best.latencyMs) ms")
-                }
-            }
-            .padding(10)
-            .background(Color.black.opacity(0.4))
-            .cornerRadius(8)
-            
-            Spacer()
-        }
-        .padding(12)
-        .background(.ultraThinMaterial)
-        .cornerRadius(12)
-    }
-}
